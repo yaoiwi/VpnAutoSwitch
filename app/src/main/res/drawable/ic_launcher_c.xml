@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 备选 C：实心钥匙（圆环镂空） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M45.2,45.2m-14.85,0a14.85,14.85 0,1 1,29.7 0a14.85,14.85 0,1 1,-29.7 0" />
+    <path android:fillColor="#2F6BFF"
+        android:pathData="M45.2,45.2m-6.88,0a6.88,6.88 0,1 1,13.76 0a6.88,6.88 0,1 1,-13.76 0" />
+    <path android:fillColor="#00000000" android:pathData="M55.1,55.1L74.9,74.9"
+        android:strokeColor="#FFFFFF" android:strokeWidth="8.8" android:strokeLineCap="round" />
+    <path android:fillColor="#00000000" android:pathData="M65.6,65.6L71.1,60.1"
+        android:strokeColor="#FFFFFF" android:strokeWidth="7.7" android:strokeLineCap="round" />
+    <path android:fillColor="#00000000" android:pathData="M70.5,70.5L76,65"
+        android:strokeColor="#FFFFFF" android:strokeWidth="7.7" android:strokeLineCap="round" />
+</vector>

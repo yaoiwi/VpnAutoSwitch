@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 推荐作用域：system_server（系统框架） -->
+    <string-array name="xposed_scope">
+        <item>android</item>
+    </string-array>
+</resources>

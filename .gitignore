@@ -1,0 +1,19 @@
+# Gradle
+.gradle/
+build/
+app/build/
+captures/
+
+# 本机配置（含 SDK 路径，不要提交）
+local.properties
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# 构建产物 / 签名
+*.apk
+*.aab
+*.jks
+*.keystore

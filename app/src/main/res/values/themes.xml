@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose 界面：Activity 只需要一个无 ActionBar 的窗口，配色全部交给 Miuix -->
+    <style name="Theme.VpnAutoSwitch" parent="@android:style/Theme.DeviceDefault.NoActionBar" />
+</resources>

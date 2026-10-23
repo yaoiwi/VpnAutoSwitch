@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+        miuix-blur 声明 minSdk 33（内部用 android.graphics.RuntimeShader，API 33 才有）。
+        我们只在 isRuntimeShaderSupported() 为 true 时才走模糊/折射，低版本自动回落到
+        普通 FloatingNavigationBar，因此这里放开合并检查。
+    -->
+    <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur,top.yukonga.miuix.kmp.shader" />
+
+    <!-- 只允许本 App 触发模块执行重启 -->
+    <permission
+        android:name="com.vpnautoswitch.module.permission.REBOOT"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="com.vpnautoswitch.module.permission.REBOOT" />
+
+    <!-- 读取当前网络类型（Wi-Fi / 移动数据） -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- 仅用于在应用选择器里列出全部已安装应用 -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.VpnAutoSwitch">
+
+        <!-- ===== LSPosed 模块声明 ===== -->
+        <meta-data
+            android:name="xposedmodule"
+            android:value="true" />
+        <meta-data
+            android:name="xposeddescription"
+            android:value="@string/xposed_description" />
+        <meta-data
+            android:name="xposedminversion"
+            android:value="93" />
+        <!-- 推荐作用域：只需要系统框架 -->
+        <meta-data
+            android:name="xposedscope"
+            android:resource="@array/xposed_scope" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 供 system_server 里的模块进程读取配置（只读，无敏感数据） -->
+        <provider
+            android:name=".ConfigProvider"
+            android:authorities="com.vpnautoswitch.module.config"
+            android:exported="true"
+            android:grantUriPermissions="false" />
+    </application>
+</manifest>

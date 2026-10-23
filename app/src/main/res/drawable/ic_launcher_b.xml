@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 备选 B：横向钥匙（齿朝下） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#00000000" android:pathData="M40,54m-9.9,0a9.9,9.9 0,1 1,19.8 0a9.9,9.9 0,1 1,-19.8 0"
+        android:strokeColor="#FFFFFF" android:strokeWidth="6.6" />
+    <path android:fillColor="#00000000" android:pathData="M49.9,54L76.6,54"
+        android:strokeColor="#FFFFFF" android:strokeWidth="6.6" android:strokeLineCap="round" />
+    <path android:fillColor="#00000000" android:pathData="M66.1,54L66.1,64.5"
+        android:strokeColor="#FFFFFF" android:strokeWidth="6.05" android:strokeLineCap="round" />
+    <path android:fillColor="#00000000" android:pathData="M73.8,54L73.8,62.3"
+        android:strokeColor="#FFFFFF" android:strokeWidth="6.05" android:strokeLineCap="round" />
+</vector>

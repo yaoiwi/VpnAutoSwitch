@@ -1,0 +1,23 @@
+VpnAutoSwitch
+Copyright 2026 VpnAutoSwitch contributors
+
+This product is licensed under the Apache License, Version 2.0.
+Project home: https://github.com/yaoiwi/VpnAutoSwitch
+
+This product includes software developed as part of the VpnAutoSwitch project
+(LSPosed module that toggles the system always-on VPN based on app lifecycle).
+
+This product includes or is derived from the following third-party software:
+
+  * HyperIsland (https://github.com/1812z/HyperIsland)
+    Copyright (c) 2026 1812z
+    Licensed under the MIT License.
+    Used for: liquid-glass navigation bar, Lens refraction shader, blurred bars,
+    collapsing page layout and overall UI structure.
+
+  * Miuix (https://github.com/compose-miuix-ui/miuix)
+    Copyright compose-miuix-ui contributors
+    Licensed under the Apache License, Version 2.0.
+
+Full license texts and the complete dependency list are available in
+THIRD-PARTY-NOTICES.md.
