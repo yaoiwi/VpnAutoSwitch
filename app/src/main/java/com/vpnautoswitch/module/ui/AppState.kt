@@ -40,7 +40,9 @@ data class Diagnostics(
     val network: String = "未知",
     val log: String = "",
     /** system_server 里实际加载的模块版本号；0 表示没读到（旧代码或未注入） */
-    val moduleVersion: Int = 0
+    val moduleVersion: Int = 0,
+    /** 当前 Wi-Fi 名称（模块写在 Settings 里，App 自己读不到 SSID） */
+    val currentSsid: String = ""
 ) {
     companion object {
         fun load(context: Context): Diagnostics {
@@ -67,6 +69,11 @@ data class Diagnostics(
                     Settings.Secure.getInt(cr, "vpn_autoswitch_module_version", 0)
                 } catch (t: Throwable) {
                     0
+                },
+                currentSsid = try {
+                    Settings.Secure.getString(cr, "vpn_autoswitch_ssid").orEmpty()
+                } catch (t: Throwable) {
+                    ""
                 }
             )
         }

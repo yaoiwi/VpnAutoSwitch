@@ -14,8 +14,8 @@ android {
         applicationId = "com.vpnautoswitch.module"
         minSdk = 26
         targetSdk = 37
-        versionCode = 64
-        versionName = "1.32.19"
+        versionCode = 65
+        versionName = "1.32.20"
     }
 
     buildFeatures {

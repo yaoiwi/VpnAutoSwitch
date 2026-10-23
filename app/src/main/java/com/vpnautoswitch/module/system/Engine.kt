@@ -8,6 +8,7 @@ import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
@@ -33,6 +34,9 @@ internal object Engine {
 
     /** 当前加载进 system_server 的模块版本号，App 用它判断「是不是旧代码」 */
     const val MODULE_VERSION_KEY = "vpn_autoswitch_module_version"
+
+    /** 当前 Wi-Fi 名称，写给 App 显示（App 自己没有定位权限，读不到 SSID） */
+    const val SSID_KEY = "vpn_autoswitch_ssid"
 
     /** App 通过这个 action 请求重启（受 signature 权限保护） */
     /** App 请求清空运行日志（App 没有 WRITE_SECURE_SETTINGS，只能让 system_server 代删） */
@@ -117,6 +121,12 @@ internal object Engine {
 
     private var failureStreak = 0
     private var failureLogged = false
+
+    /** 当前连着的 Wi-Fi 名称（不带引号）；非 Wi-Fi 时为 null */
+    private var currentSsid: String? = null
+
+    /** 当前 Wi-Fi 命中「指定 Wi-Fi 关 VPN」规则：期间不再自动开启 */
+    private var wifiSuppressed = false
 
     /** 当前默认网络的传输类型：0 未知 / 1 Wi-Fi / 2 移动数据 / 3 其他 */
     private var lastTransport = 0
@@ -225,6 +235,7 @@ internal object Engine {
                     caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> 2
                     else -> 3
                 }
+                refreshSsid(ctx, lastTransport == 1)
                 handler.post { handleNetworkChanged() }
             }
 
@@ -288,10 +299,56 @@ internal object Engine {
         else -> true
     }
 
+    /**
+     * 读取当前 Wi-Fi 名称并写进 Settings（App 侧没有定位权限，读不到 SSID）。
+     * 模块跑在 system_server，可以直接拿 WifiManager 的连接信息。
+     */
+    private fun refreshSsid(ctx: Context, isWifi: Boolean): String? {
+        val ssid = if (!isWifi) {
+            null
+        } else {
+            try {
+                val wm = ctx.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                wm?.connectionInfo?.ssid?.trim('"')
+            } catch (t: Throwable) {
+                null
+            }
+        }
+        val clean = ssid?.takeIf { it.isNotEmpty() && it != "<unknown ssid>" }
+        currentSsid = clean
+        try {
+            Settings.Secure.putString(ctx.contentResolver, SSID_KEY, clean ?: "")
+        } catch (t: Throwable) {
+            // 忽略
+        }
+        return clean
+    }
+
     private fun handleNetworkChanged() {
         val ctx = context() ?: return
         val cfg = ConfigRepo.get(ctx)
         if (!cfg.enabled) return
+
+        // 指定 Wi-Fi 规则优先于「网络类型总开关」
+        val ssid = refreshSsid(ctx, lastTransport == 1)
+        if (!ssid.isNullOrEmpty() && cfg.wifiOff.contains(ssid)) {
+            wifiSuppressed = true
+            if (VpnSwitcher.isActive(ctx.contentResolver)) {
+                log(ctx, "wifi \"$ssid\" -> turn off")
+                turnOff("wifi off: $ssid")
+            } else {
+                log(ctx, "wifi \"$ssid\" -> keep off")
+            }
+            stopWatchdog()
+            return
+        }
+        wifiSuppressed = false
+        if (!ssid.isNullOrEmpty() && cfg.wifiOn.contains(ssid)) {
+            log(ctx, "wifi \"$ssid\" -> turn on")
+            ensureVpn(ctx, cfg)
+            startWatchdog()
+            return
+        }
 
         if (!isNetworkAllowed(cfg)) {
             if (VpnSwitcher.isActive(ctx.contentResolver)) {
@@ -343,6 +400,12 @@ internal object Engine {
         }
 
         if (!cfg.targets.contains(pkg)) return
+
+        // 当前 Wi-Fi 在「关闭 VPN」列表里：不自动开启
+        if (wifiSuppressed) {
+            log(ctx, "$pkg -> foreground, but wifi rule keeps vpn off")
+            return
+        }
 
         if (offAppForeground != null) {
             offAppForeground = null
@@ -832,6 +895,12 @@ internal object Engine {
             if (!cfg.enabled || cfg.vpnPackage.isEmpty()) {
                 if (VpnSwitcher.isActive(ctx.contentResolver)) turnOff("module disabled")
                 aliveTargets.clear()
+                watchdogRunning = false
+                return
+            }
+
+            if (wifiSuppressed) {
+                if (VpnSwitcher.isActive(ctx.contentResolver)) turnOff("wifi off")
                 watchdogRunning = false
                 return
             }

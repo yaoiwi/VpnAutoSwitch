@@ -125,6 +125,7 @@ import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.GridView
 import top.yukonga.miuix.kmp.icon.extended.Favorites
@@ -156,6 +157,8 @@ fun MainScreen(state: AppState) {
     }
     var showLog by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
+    /** null=未打开；"on"=编辑「开 VPN」列表；"off"=编辑「关 VPN」列表 */
+    var ssidMode by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) { state.loadApps() }
     LaunchedEffect(refreshing) {
@@ -281,6 +284,7 @@ fun MainScreen(state: AppState) {
                                         arrayOf("application/json", "text/plain", "*/*")
                                     )
                                 },
+                                onEditSsid = { ssidMode = it },
                                 context = context,
                             )
                         }
@@ -296,6 +300,9 @@ fun MainScreen(state: AppState) {
         }
     }
 
+    ssidMode?.let { mode ->
+        SsidRuleDialog(mode = mode, state = state, onDismiss = { ssidMode = null })
+    }
 }
 
 // ---------------------------------------------------------------- 设置
@@ -549,6 +556,7 @@ private fun LazyListScope.settingsItems(
     onRefresh: () -> Unit,
     onExport: () -> Unit,
     onImport: () -> Unit,
+    onEditSsid: (String) -> Unit,
     context: Context,
 ) {
     item {
@@ -567,6 +575,18 @@ private fun LazyListScope.settingsItems(
                 icon = MiuixIcons.Carrier,
                 checked = state.config.allowMobile,
                 onCheckedChange = { state.save(state.config.copy(allowMobile = it)) },
+            )
+            SettingsActionWithArrow(
+                title = "指定 Wi-Fi 开 VPN",
+                icon = MiuixIcons.Share,
+                summary = ssidSummary(state.config.wifiOn, "连上这些 Wi-Fi 时始终开启 VPN"),
+                onClick = { onEditSsid("on") },
+            )
+            SettingsActionWithArrow(
+                title = "指定 Wi-Fi 关 VPN",
+                icon = MiuixIcons.Blocklist,
+                summary = ssidSummary(state.config.wifiOff, "连上这些 Wi-Fi 时关闭 VPN 且不再自动开启"),
+                onClick = { onEditSsid("off") },
             )
             if (!state.config.allowWifi && !state.config.allowMobile) {
                 Text(
@@ -785,6 +805,115 @@ private fun LogBody(
 
 // ---------------------------------------------------------------- 状态卡片
 
+private fun ssidSummary(list: Set<String>, empty: String): String =
+    if (list.isEmpty()) "未设置 · $empty" else list.joinToString("、")
+
+@Composable
+private fun SsidRuleDialog(mode: String, state: AppState, onDismiss: () -> Unit) {
+    val isOn = mode == "on"
+    val colors = MiuixTheme.colorScheme
+    var input by remember { mutableStateOf("") }
+    val list = if (isOn) state.config.wifiOn else state.config.wifiOff
+    val current = state.diagnostics.currentSsid
+
+    fun update(next: Set<String>) {
+        state.save(
+            if (isOn) state.config.copy(wifiOn = next) else state.config.copy(wifiOff = next)
+        )
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .heightIn(max = 580.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(colors.surface)
+                .padding(horizontal = 20.dp, vertical = 18.dp),
+        ) {
+            Text(
+                text = if (isOn) "指定 Wi-Fi 开 VPN" else "指定 Wi-Fi 关 VPN",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = if (isOn) {
+                    "连上列表里的 Wi-Fi 时立即开启 VPN，不看当前打开了哪个应用。"
+                } else {
+                    "连上列表里的 Wi-Fi 时立即关闭 VPN，并且在断开前不再自动开启。"
+                },
+                fontSize = 12.sp,
+                color = colors.onSurfaceVariantSummary,
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = "当前 Wi-Fi：${current.ifEmpty { "未连接" }}",
+                fontSize = 13.sp,
+            )
+            if (current.isNotEmpty() && !list.contains(current)) {
+                TextButton(
+                    text = "加入「$current」",
+                    onClick = { update(list + current) },
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            TextField(
+                value = input,
+                onValueChange = { input = it },
+                label = "手动输入 Wi-Fi 名称（区分大小写）",
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(
+                    text = "添加",
+                    onClick = {
+                        val v = input.trim()
+                        if (v.isNotEmpty()) {
+                            update(list + v)
+                            input = ""
+                        }
+                    },
+                )
+            }
+            if (list.isEmpty()) {
+                Text(
+                    text = "还没有添加 Wi-Fi",
+                    fontSize = 13.sp,
+                    color = colors.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(vertical = 10.dp),
+                )
+            } else {
+                LazyColumn(modifier = Modifier.heightIn(max = 220.dp)) {
+                    items(count = list.size) { index ->
+                        val ssid = list.elementAt(index)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Text(text = ssid, fontSize = 14.sp)
+                            TextButton(text = "删除", onClick = { update(list - ssid) })
+                        }
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(text = "关闭", onClick = onDismiss)
+            }
+        }
+    }
+}
+
 private fun vpnSummary(state: AppState): String {
     val pkg = state.config.vpnPackage
     if (pkg.isEmpty()) return "未选择"
@@ -818,35 +947,8 @@ private fun formatAge(ms: Long): String {
 private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 
 private const val CHANGELOG_TIPS =
-    "1.32.19：关于页去掉「开发者」分组。\n" +
-        "1.32.18：关于页新增「项目主页」与「问题反馈」，去掉「检查更新」。\n" +
-        "1.32.17：关于页上滑增加过渡动画：头像区随滚动淡出、缩小 8%、以 0.28 倍速上移，背景同步渐隐。\n" +
-        "1.32.16：移除「重启使模块生效」功能（连同配置轮询、广播重启、root 重启与相关开关），更新模块后请手动重启手机。\n" +
-        "1.32.15：修复「一直重启」：已处理序号改为持久化（Settings），首次运行只记基线不重启；并加 10 分钟 4 次的重启频率保险丝。\n" +
-        "1.32.14：设置页「重启使模块生效」改为一键执行（模块 ≥ v58 时不再弹窗），Toast 会显示请求序号，便于确认点击是否生效。\n" +
-        "1.32.13：重启增加配置轮询通道（不依赖广播）；软重启失败时改用 PowerManager 直接重启。\n" +
-        "1.32.12：修复开机时 ActivityManager 尚未就绪导致的初始化失败（心跳、广播、网络回调全部报 NPE）——改为每 2 秒重试直到 AMS 上线。\n" +
-        "1.32.11：检测到 system_server 里是旧模块时，对话框直接提供「重启手机（root）」，会弹出 root 授权框；授权后立即重启。\n" +
-        "1.32.10：设置页「模块维护」直接显示 system_server 里运行的模块版本；重启广播改为显式 + 隐式各发一次，并在 3 秒 / 7 秒后依次走整机重启与 root 兜底。\n" +
-        "1.32.9：首页去掉环境光，回归纯色背景。\n" +
-        "1.32.8：首页改用与关于页相同的四团环境光；关于页渐变只覆盖头像区并向下擦除，开发者 / 致谢 / 项目不再被染色。\n" +
-        "1.32.7：关于页渐变按 HyperIsland 重做（四团环境光四角漂移，颜色由主题色派生）；模块启动时写入自身版本号，重启对话框会显示 system_server 里实际运行的版本，旧版本时直接提示手动重启。\n" +
-        "1.32.6：修复重启、清空日志等广播收不到（Android 14+ 注册非系统广播缺 RECEIVER_EXPORTED 标志）；关于页上滑时头像区 48dp 内淡出并锁定；更新日志改用可滚动弹窗，能看完整历史。\n" +
-        "1.32.5：关于页的头像区域改为列表第一项，往上滑时随内容一起滚出屏幕，彻底去掉「划走了还显示」。\n" +
-        "1.32.4：关于页图标与背景改用滞回控制，上划后不会再冒出来，只有回到顶部才出现。\n" +
-        "1.32.3：关于页去掉「模块」；重启链路改为模块广播优先（软重启 → 整机重启 → root）。\n" +
-        "1.32.2：关于页去掉「讨论」；修复「重启系统框架」仍然无效的问题（root 兜底改为逐条验证）。\n" +
-        "1.32.1：外观移入设置；合并「使用说明与工作原理」；新增「致谢」开源许可清单。\n" +
-        "1.32.0：修复「重启系统框架」无反应，改由 system_server 内部执行软重启，不需要 root。\n" +
-        "1.31.2：首页渐变改为上半屏全宽覆盖，状态卡回归普通卡片。\n" +
-        "1.31.1：首页去掉最近日志，新增深色模式与跟随系统。\n" +
-        "1.31.0：首页下拉刷新、应用页逐应用卡片、关于页补检查更新 / 更新日志 / 隐私政策。\n" +
-        "1.30.x：关于页与首页按 HyperIsland 重做（动态渐变、全行图标）。\n" +
-        "1.29.0：信息架构改为 首页 / 应用 / 设置 / 关于。\n" +
-        "1.28.0：UI 按 HyperIsland 3.2.1 重做（液态玻璃底栏 / 大标题模糊顶栏）。\n" +
-        "1.25.0：手动关闭 VPN 后不再自动重连。\n" +
-        "1.24.0：新增「打开时关闭 VPN」反向联动。\n" +
-        "1.23.0：移除自动授予通知权限，新增液态玻璃切页动画。"
+    "1.32.20：新增「指定 Wi-Fi 开 VPN / 关 VPN」：可按 Wi-Fi 名称强制开启或关闭 VPN，" +
+        "优先级高于目标应用与网络类型开关；设置页「网络条件」里可添加、删除，支持一键加入当前 Wi-Fi。"
 
 private const val PRIVACY_TIPS =
     "本模块完全离线运行：不联网、不收集、不上传任何数据。\n" +

@@ -38,7 +38,11 @@ data class Config(
     /** 点击底栏 / 列表项时震动 */
     val hapticFeedback: Boolean = true,
     /** 深浅色：system（跟随系统） / light / dark */
-    val darkMode: String = "system"
+    val darkMode: String = "system",
+    /** 连上这些 Wi-Fi 时始终开启 VPN（优先于目标应用判断） */
+    val wifiOn: Set<String> = emptySet(),
+    /** 连上这些 Wi-Fi 时始终关闭 VPN，且不再自动开启 */
+    val wifiOff: Set<String> = emptySet()
 ) {
 
     fun toJson(): String {
@@ -63,6 +67,8 @@ data class Config(
         o.put("floatingBar", floatingBottomBar)
         o.put("haptic", hapticFeedback)
         o.put("darkMode", darkMode)
+        o.put("wifiOn", JSONArray(wifiOn.toList()))
+        o.put("wifiOff", JSONArray(wifiOff.toList()))
         return o.toString()
     }
 
@@ -94,6 +100,8 @@ data class Config(
                     pageAnimation = o.optBoolean("pageAnim", true),
                     floatingBottomBar = o.optBoolean("floatingBar", true),
                     hapticFeedback = o.optBoolean("haptic", true),
+                    wifiOn = readSet(o.optJSONArray("wifiOn")),
+                    wifiOff = readSet(o.optJSONArray("wifiOff")),
                     darkMode = when (o.optString("darkMode", "system")) {
                         "dark" -> "dark"
                         "light" -> "light"
