@@ -13,6 +13,14 @@
 
 ---
 
+## 界面预览
+
+| 首页 | 设置 | 关于 |
+| --- | --- | --- |
+| <img src="docs/screenshots/home.jpg" width="240" alt="首页" /> | <img src="docs/screenshots/settings.jpg" width="240" alt="设置" /> | <img src="docs/screenshots/about.jpg" width="240" alt="关于" /> |
+
+---
+
 ## 一、安装步骤
 
 1. 安装 `app-release.apk`（v1.33.0，覆盖旧版本即可，配置会保留）。
@@ -103,45 +111,3 @@ App 里的「运行状态」卡片会实时显示三项信息：
 | 网络类型切换会立即生效 | 由系统的默认网络回调驱动，切到禁用类型时 VPN 会被关掉；切回允许类型且目标应用还在前台时自动重连 |
 | 划掉后最多 5 秒内断开 | 进程死亡回调失效时，靠 5 秒一次的看门狗兜底，所以可能不是「瞬间」断开 |
 | 系统改动 | 依赖 `ActivityTaskManagerService`、`ActivityRecord`、`ActivityManagerService` 的内部方法名，深度定制 ROM 若改名需要按日志调整 |
-
----
-
-## 版本记录
-
-以下为近期版本记录。
-
-| 版本 | 变更 |
-| --- | --- |
-| 1.33.0 | **稳定性版本**：修复延迟启动/关闭任务失效不彻底、看门狗停止后重复排队、关闭验证链误伤新会话、开机初始化顺序等问题；新增每 15 秒独立心跳与「一键自检」，可检查模块、客户端、当前规则与最近失败并复制报告 |
-| 1.32.20 | 新增「指定 Wi-Fi 开 VPN / 关 VPN」：按 SSID 强制开启或关闭，优先级高于目标应用与网络类型开关 |
-| 1.32.19 | 关于页去掉「开发者」分组，页面更紧凑 |
-| 1.32.18 | 关于页新增「项目主页」与「问题反馈」（打开 GitHub 仓库 / Issues），去掉「检查更新」 |
-| 1.32.17 | 关于页上滑加入过渡动画：头像区不再是 48dp 处硬切，而是随滚动连续**淡出 + 缩放至 92% + 0.28 倍速上移视差**，背景渐变同步渐隐；列表底部多留 140dp 滚动余量，保证淡出过程完整 |
-| 1.32.16 | **移除「重启使模块生效」**：删掉设置页的「模块维护」分组、重启对话框、`softReboot` / `rebootDevice` / root 重启、`ACTION_SOFT_REBOOT` / `ACTION_REBOOT` 广播、配置轮询 `restartSeq` 与 `ack` / 保险丝等全部代码。更新模块后请直接手动重启手机（长按电源键），不再提供应用内重启 |
-| 1.32.15 | **修复重启循环**：轮询用的「已处理序号」从内存变量改成持久化的 `Settings.Secure.vpn_autoswitch_restart_ack`（重启后仍有效）；首次运行只记录基线、绝不重启；`ConfigRepo.getOrNull()` 在 provider 不可用时返回 null 而不是默认 `Config()`（避免把「查不到」误当成 seq=0）；再加保险丝：10 分钟内启动超过 4 次就停用重启通道 |
-| 1.32.14 | 「重启使模块生效」在模块 ≥ v58（具备配置轮询通道）时改为**一键执行**，不再弹二次确认；Toast 显示 `已请求重启（#N）`，N 为写入配置的序号，用来判断点击是否真的触发。只有模块低于 v58（还没有轮询通道）时才弹「需要手动重启」说明 |
-
----
-
-## 许可证
-
-本项目使用 **Apache License 2.0**，见 [LICENSE](LICENSE)。
-
-```
-Copyright 2026 VpnAutoSwitch contributors
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-```
-
-本项目包含或参考了第三方开源组件，各自的版权与许可见 [NOTICE](NOTICE) 与
-[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
