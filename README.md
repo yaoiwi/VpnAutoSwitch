@@ -367,4 +367,4 @@ GitHub 用 JDK 17 + Android SDK 运行 `:app:test` 和 `assembleRelease`，APK �
 
 - tag 必须严格等于 `v` + `versionName`，例如 `v1.33.0`；
 - 发布构建的签名配置必须完整，缺少或只配置一部分时直接失败，不会静默换成 debug 签名；
-- 所有构建都用 `apksigner verify` 验签，tag 构建还会比对证书指纹，不一致不会上传或发布。
+- 所有构建都用 `apksigner verify` 验签，不通过不会上传或发布。

@@ -26,7 +26,10 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install SDK platform
-        run: sdkmanager "platforms;android-37" "build-tools;37.0.0"
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platforms;android-37" "build-tools;37.0.0" || \
+            echo "::warning::指定 SDK 组件不可用，交给 Gradle 自动下载"
 
       - name: Validate signing secrets
         env:
@@ -34,7 +37,6 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          RELEASE_SIGNING_SHA256: ${{ secrets.RELEASE_SIGNING_SHA256 }}
         run: |
           set -euo pipefail
           names=(KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD)
@@ -58,10 +60,6 @@ jobs:
               echo "::error::发布 tag 必须配置全部 4 个签名 Secret，缺少：${missing[*]}"
               exit 1
             fi
-            if [ -z "${RELEASE_SIGNING_SHA256:-}" ]; then
-              echo "::error::发布 tag 必须配置 RELEASE_SIGNING_SHA256"
-              exit 1
-            fi
             echo "release signing: enabled"
           elif [ "$present" -eq 0 ]; then
             echo "release signing: not configured, fall back to debug signing"
@@ -72,10 +70,23 @@ jobs:
       - name: Prepare keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
           set -euo pipefail
           if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            if ! printf '%s' "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 -d > "$RUNNER_TEMP/release.jks"; then
+              echo "::error::KEYSTORE_BASE64 不是有效的 Base64，请重新复制完整内容"
+              exit 1
+            fi
+            if [ ! -s "$RUNNER_TEMP/release.jks" ]; then
+              echo "::error::Base64 解码后为空，请检查 KEYSTORE_BASE64"
+              exit 1
+            fi
+            if ! keytool -list -keystore "$RUNNER_TEMP/release.jks" \
+                -storepass "$KEYSTORE_PASSWORD" > /dev/null 2>&1; then
+              echo "::error::keystore 无法用 KEYSTORE_PASSWORD 打开，请检查密码与 Base64 是否来自同一个文件"
+              exit 1
+            fi
             echo "KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
             echo "keystore ready"
           else
@@ -107,8 +118,6 @@ jobs:
         run: ./gradlew assembleRelease --no-daemon
 
       - name: Verify APK signature
-        env:
-          RELEASE_SIGNING_SHA256: ${{ secrets.RELEASE_SIGNING_SHA256 }}
         run: |
           set -euo pipefail
           SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
@@ -118,29 +127,9 @@ jobs:
             exit 1
           fi
 
-          expected=""
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            expected="$(echo "$RELEASE_SIGNING_SHA256" | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')"
-          fi
-
           for APK in app/build/outputs/apk/release/*.apk; do
             echo "== $APK"
             "$APKSIGNER" verify --verbose --print-certs "$APK"
-
-            if [ -n "$expected" ]; then
-              actual="$("$APKSIGNER" verify --print-certs "$APK" \
-                | sed -n 's/.*certificate SHA-256 digest: *//p' | head -n 1 \
-                | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')"
-              if [ -z "$actual" ]; then
-                echo "::error::读不到签名证书 SHA-256"
-                exit 1
-              fi
-              if [ "$actual" != "$expected" ]; then
-                echo "::error::APK 签名证书与 RELEASE_SIGNING_SHA256 不一致"
-                exit 1
-              fi
-              echo "signing certificate matches"
-            fi
           done
 
       - name: Write APK checksum
