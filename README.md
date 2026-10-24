@@ -342,3 +342,43 @@ limitations under the License.
 
 本项目包含或参考了第三方开源组件，各自的版权与许可见 [NOTICE](NOTICE) 与
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+
+---
+
+## 九、自动构建与签名
+
+推送到 `main`、推送 `v*` tag，或手动触发，都会运行 `.github/workflows/build.yml`：
+GitHub 用 JDK 17 + Android SDK 编译 `assembleRelease`，APK 在 **Actions → 最近一次 run → Artifacts** 下载；
+打 tag 时会自动创建 Release 并附上 APK。
+
+### 固定签名（本地与 CI 一致）
+
+1. 生成一次 keystore（保存在安全的地方，丢失后无法给已安装用户升级）：
+
+   ```bash
+   keytool -genkeypair -v -keystore vpnautoswitch.jks -alias vpnautoswitch \
+     -keyalg RSA -keysize 2048 -validity 10000 \
+     -storepass 你的密码 -keypass 你的密码 \
+     -dname "CN=VpnAutoSwitch, OU=Dev, O=yaoiwi, C=CN"
+   ```
+
+2. GitHub 仓库 → Settings → Secrets and variables → Actions，添加四个 Secret：
+
+   | Secret | 值 |
+   | --- | --- |
+   | `KEYSTORE_BASE64` | `base64 -w0 vpnautoswitch.jks` 的输出 |
+   | `KEYSTORE_PASSWORD` | storePassword |
+   | `KEY_ALIAS` | `vpnautoswitch` |
+   | `KEY_PASSWORD` | keyPassword |
+
+3. 本地构建时，在项目根目录放 `keystore.properties`（已在 `.gitignore`）：
+
+   ```properties
+   storeFile=../vpnautoswitch.jks
+   storePassword=你的密码
+   keyAlias=vpnautoswitch
+   keyPassword=你的密码
+   ```
+
+构建脚本优先读环境变量（CI），其次读 `keystore.properties`，都没有时退回 debug 签名——
+所以没有 keystore 也能正常编译，只是打出来的 APK 不能用于正式分发。

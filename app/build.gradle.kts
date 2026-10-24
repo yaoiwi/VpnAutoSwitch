@@ -1,4 +1,24 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
+
+// ---------------------------------------------------------------- 签名
+// 优先级：环境变量（CI） > keystore.properties（本地） > debug 签名（兜底）
+val signingProps = Properties().apply {
+    val f = rootProject.file("keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+
+fun signingValue(env: String, prop: String): String? =
+    System.getenv(env)?.takeIf { it.isNotBlank() }
+        ?: signingProps.getProperty(prop)?.takeIf { it.isNotBlank() }
+
+val storePath = signingValue("KEYSTORE_FILE", "storeFile")
+val storePwd = signingValue("KEYSTORE_PASSWORD", "storePassword")
+val signingAlias = signingValue("KEY_ALIAS", "keyAlias")
+val signingKeyPwd = signingValue("KEY_PASSWORD", "keyPassword")
+val releaseStore = storePath?.let { rootProject.file(it) }?.takeIf { it.exists() }
+val hasReleaseSigning =
+    releaseStore != null && storePwd != null && signingAlias != null && signingKeyPwd != null
 
 plugins {
     id("com.android.application")
@@ -23,12 +43,27 @@ android {
         buildConfig = true
     }
 
+    signingConfigs {
+        create("release") {
+            if (hasReleaseSigning) {
+                storeFile = releaseStore
+                storePassword = storePwd
+                keyAlias = signingAlias
+                keyPassword = signingKeyPwd
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            // 用 debug 签名，方便直接安装体验；正式发布请换成自己的签名
-            signingConfig = signingConfigs.getByName("debug")
+            // 有 keystore 就用它（本地 / CI 一致），没有则退回 debug，方便直接编译体验
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         debug {
