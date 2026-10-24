@@ -1,108 +1,104 @@
-# VPN 自动开关 · LSPosed 模块
+<p align="center">
+  <img src="docs/icon.png" width="120" alt="VpnAutoSwitch" />
+</p>
 
-> 仓库：<https://github.com/yaoiwi/VpnAutoSwitch> · 问题反馈：<https://github.com/yaoiwi/VpnAutoSwitch/issues>
+<h1 align="center">VpnAutoSwitch</h1>
 
-> 打开指定应用 → 自动连上系统默认 VPN；从最近任务里划掉它 → 自动断开。
-> 也可以反过来：打开「关闭 VPN」列表里的应用（银行、支付等）→ 若 VPN 正在连接就自动断开。
-> 可按 Wi-Fi / 移动数据分别开关，配置支持导入导出，开关 VPN 时会有 Toast 提示。
+<p align="center">打开应用自动连接 VPN，划掉应用自动断开</p>
+<p align="center">一个只注入 system_server 的 LSPosed 模块</p>
 
-- 包名：`com.vpnautoswitch.module`
-- 界面：**Miuix 0.9.4**（HyperOS 设计语言的 Compose Multiplatform 组件库）
-- 最低版本：Android 8.0（API 26），Hook 点按 Android 10 ~ 14 的系统内部实现编写
-- 作用域：**只需要勾选「系统框架」（system_server）**，不需要勾选目标应用
+<p align="center">
+  <img src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Android 8.0+" />
+  <img src="https://img.shields.io/badge/LSPosed-system__server-7B68EE?style=flat-square" alt="LSPosed" />
+  <img src="https://img.shields.io/badge/Kotlin-2.4-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin" />
+  <img src="https://img.shields.io/badge/Compose-1.12-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white" alt="Compose" />
+  <img src="https://img.shields.io/badge/Miuix-0.9.4-FF6B00?style=flat-square" alt="Miuix" />
+  <img src="https://img.shields.io/badge/Release-1.33.0-brightgreen?style=flat-square" alt="Release" />
+  <img src="https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square" alt="License" />
+</p>
+
+<p align="center">
+  <a href="README.md"><img src="https://img.shields.io/badge/简体中文-当前-2F6BFF?style=flat-square" alt="简体中文" /></a>
+  <a href="README_EN.md"><img src="https://img.shields.io/badge/English-Switch-6E7781?style=flat-square" alt="English" /></a>
+</p>
 
 ---
 
-## 界面预览
+## ✨ 功能简介
+
+| **🎯 按应用联动** | **🛡️ 打开即关闭** |
+| --- | --- |
+| 打开目标应用自动连接 VPN<br>划掉应用、主进程结束自动断开 | 打开银行、支付、内网应用时<br>若 VPN 已连接立即断开，退出前不再自动连 |
+| **📶 按 Wi-Fi 规则** | **🔍 一键自检** |
+| 指定 Wi-Fi 强制开启或关闭 VPN<br>优先级高于目标应用与网络类型开关 | 检查模块心跳、LSPosed 作用域、客户端状态<br>当前命中规则、always-on 与最近失败 |
+| **🧩 客户端适配** | **🪶 轻量 · 离线** |
+| 优先走系统 always-on；兼容 Clash 系外部控制<br>重启 VpnService 或快捷磁贴，默认不弹界面 | R8 后约 1.6 MB、单 dex<br>不联网、不上传，配置只保存在本机 |
+
+---
+
+## 📱 界面预览
 
 | 首页 | 设置 | 关于 |
 | --- | --- | --- |
-| <img src="docs/screenshots/home.jpg" width="240" alt="首页" /> | <img src="docs/screenshots/settings.jpg" width="240" alt="设置" /> | <img src="docs/screenshots/about.jpg" width="240" alt="关于" /> |
+| <img src="docs/screenshots/home.jpg" width="220" alt="首页" /> | <img src="docs/screenshots/settings.jpg" width="220" alt="设置" /> | <img src="docs/screenshots/about.jpg" width="220" alt="关于" /> |
 
 ---
 
-## 一、安装步骤
+## 📖 使用文档
 
-1. 安装 `app-release.apk`（v1.33.0，覆盖旧版本即可，配置会保留）。
-2. 打开 **LSPosed 管理器 → 模块 → VPN 自动开关**：
-   - 启用模块；
-   - **作用域只勾「系统框架」**（不要勾目标应用，勾了也没用）；
-   - 重启手机（system_server 必须重启才能加载）。
-3. 打开本 App：
-   - 「目标应用」里勾选需要联动 VPN 的应用（可多选）；
-   - 「打开时关闭 VPN」里勾选需要「一打开就断开 VPN」的应用（可多选，可留空）；
-   - 「VPN 应用」里选择你的 VPN 客户端；
-   - 打开「启用模块」。
-4. 验证：
-   - 打开目标应用 → 状态栏出现 VPN 钥匙图标；
-   - 从最近任务划掉目标应用 → VPN 图标消失。
+1. 安装 `app-release.apk`（v1.33.0，覆盖安装即可，配置会保留）。
+2. 打开 **LSPosed 管理器 → 模块**，启用本模块，**作用域只勾选「系统框架」**，然后重启手机。
+3. 打开 App：
+   - 「目标应用」选择需要自动连接 VPN 的应用；
+   - 「打开时关闭 VPN」选择银行、支付等需要断网的应用（可留空）；
+   - 「VPN 应用」选择你的客户端，打开「启用模块」。
+4. 验证：打开目标应用出现 VPN 图标；从最近任务划掉应用，图标消失。
 
-App 里的「运行状态」卡片会实时显示三项信息：
+> 手动在磁贴或客户端里断开后，模块不会立刻重连，只有真正重新打开目标应用才会恢复。
+> 设置页「状态诊断 → 一键自检」可以定位大部分不生效问题。
 
-| 显示项 | 来源 | 含义 |
-| --- | --- | --- |
-| 模块已/尚未注入系统框架 | `vpn_autoswitch_heartbeat` | 模块每 15 秒独立续写一次心跳，不依赖是否有目标应用事件；60 秒内更新即视为仍在运行 |
-| 系统当前常驻 VPN | `always_on_vpn_app` | 等于你选的 VPN 应用，说明系统已经接受了这个设置 |
-| 本模块正在接管… | `vpn_autoswitch_active` | 模块正处于「已改写常驻 VPN」的接管周期中 |
-
-下面还有「打开 LSPosed」按钮（直接跳到管理器）和「刷新」按钮，界面每 5 秒自动刷新一次。
-如果 App 已更新但 system_server 仍加载旧模块，状态卡会明确提示需要重启手机。
-
-设置页新增 **「状态诊断 → 一键自检」**：逐项检查模块心跳、LSPosed 作用域、VPN 客户端安装/启用/VpnService、
-当前网络与命中规则、always-on 指向、最近失败和触发条件，并支持复制完整诊断报告。
-
-「网络条件」里可以按网络类型分别开关本模块功能：
-
-| 开关 | 行为 |
-| --- | --- |
-| Wi-Fi 网络下生效 | 关闭后，连接 Wi-Fi 时不自动开 VPN；如果 VPN 正开着且网络切到被禁用的类型，会立即断开 |
-| 移动数据网络下生效 | 同上，针对移动数据 |
-
-两个都关掉时，任何网络下都不会自动动作（界面会给出红色提示）。
-
-「联动应用 → 打开时关闭 VPN」是反向联动：打开列表里的应用时，只要检测到 VPN 还连着
-（模块接管的常驻 VPN 或你在客户端里手动连上的都算），就立刻断开，并且在它退出前不再自动连接。
-
-| 情况 | 行为 |
-| --- | --- |
-| 打开列表里的应用，VPN 未连接 | 不做任何事，只记一条日志 |
-| 打开列表里的应用，VPN 已连接 | 清常驻 VPN 设置 → 校验隧道 → 必要时给客户端发停止命令 / 点它的磁贴 / 强制停止客户端进程 |
-| 在列表应用里停留 | 看门狗与网络切换都不会把 VPN 拉回来，避免「关了 5 秒又开」 |
-| 划掉列表应用 / 回到目标应用 | 解除压制；回到目标应用时立即重新连接 |
-| 同一个应用同时在「目标应用」和「打开时关闭 VPN」里 | 以**关闭**为准 |
-
-适合加进来的典型是银行、支付、内网办公类 App——它们经常检测到 VPN 就拒绝登录或风控。
-
-### 手动关闭 VPN 之后
-
-在快捷设置磁贴里点断开，或者直接进 VPN 客户端点停止，模块**不会**再把 VPN 自动连回来：
-
-| 操作 | 结果 |
-| --- | --- |
-| 磁贴断开 / 客户端里停止 | 看门狗停止轮询，日志出现 `vpn dropped -> stay off until a target app is reopened` |
-| 继续待在这个应用里 | 保持关闭（应用内部换页、弹窗、关闭下拉面板都不算重新打开） |
-| 离开后重新打开目标应用 | 立即恢复自动连接 |
-| 从 VPN 客户端界面退回到目标应用 | 不触发重连，避免刚点完断开就被连回去 |
-| 划掉应用 / 打开「关闭 VPN」的应用 | 不受影响，仍按原来的逻辑关闭 |
-
-判定方式：记住上一次真正在前台的应用，只有「换了个应用再回到目标应用」才算重新打开。
-判断依据是**底层链路**（VPN 自己的网络会被跳过），所以开着 VPN 切换 Wi-Fi / 移动数据也能正确识别。
-
-「高级」里还有一个「显示开关提示（Toast）」开关（默认开启）：VPN 开启 / 关闭时会在屏幕上弹一条提示，
-不需要的话关掉即可。
-
-「备份与恢复」里可以**导出 / 导入配置**：导出会调起系统的保存面板，存成一份 JSON
-（`vpnautoswitch-config.json`）；导入则从任意位置的 JSON 恢复，换机、重装都不用重新勾应用。
+遇到问题请提交 [Issue](https://github.com/yaoiwi/VpnAutoSwitch/issues)。
 
 ---
 
-## 二、限制与注意事项
+## 🔨 构建
+
+需要 JDK 17 与 Android SDK 37：
+
+```bash
+./gradlew :app:test
+./gradlew :app:assembleRelease
+```
+
+产物：`app/build/outputs/apk/release/app-release.apk`
+
+---
+
+## ⚠️ 注意事项
 
 | 限制 | 说明 |
 | --- | --- |
-| 客户端要能被自动拉起 | 优先用系统「始终开启的 VPN」；Clash 系改走 `START_CLASH`、重启 `VpnService` 或快捷磁贴。都不支持时需在客户端里打开「自动连接」，模块默认不会弹出客户端界面 |
-| 手动连上的 VPN 需要强制停止 | 清除常驻设置不会断开你在客户端里手动连上的隧道，1.2 秒后仍连着会结束客户端进程（可在「高级」关闭） |
-| 「划掉」必须是进程真的结束 | 带前台服务/常驻通知的应用划掉后进程仍在，VPN 会保持连接；进程死亡回调失效时由 5 秒看门狗兜底，可能慢几秒 |
-| 与系统「始终开启的 VPN」共用设置 | 模块开启期间该设置指向你的客户端，关闭时恢复原值；原来就指向同一个客户端时，无法靠它断开 |
-| 只在主用户生效 | 多用户 / 工作资料里的应用不会触发 |
-| 深度定制 ROM 可能需要适配 | Hook 依赖 `ActivityTaskManagerService`、`ActivityRecord`、`ActivityManagerService` 的内部方法名，改名后需按日志调整 |
+| 客户端要能被自动拉起 | 优先使用系统「始终开启的 VPN」；Clash 系走外部控制、重启 `VpnService` 或快捷磁贴。都不支持时需在客户端里打开「自动连接」 |
+| 手动连上的 VPN 需要强制停止 | 清除常驻设置不会断开手动连接，1.2 秒后仍连着会结束客户端进程（可在「高级」关闭） |
+| 「划掉」必须是进程结束 | 带前台服务的应用划掉后进程仍在，VPN 会保持连接；回调失效时由 5 秒看门狗兜底 |
+| 与系统常驻 VPN 共用设置 | 模块开启期间该设置指向你的客户端，关闭时恢复原值；只对主用户生效，深度定制 ROM 可能需要按日志适配 |
+
+---
+
+## ⭐ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=yaoiwi/VpnAutoSwitch&type=Date)](https://star-history.com/#yaoiwi/VpnAutoSwitch&Date)
+
+---
+
+## 📄 许可证
+
+本项目基于 [Apache License 2.0](LICENSE) 开源，欢迎提交 Issue 与 Pull Request。
+
+<p align="center">Made with ❤️ for Android users</p>
+
+<p align="center">
+  <a href="https://github.com/yaoiwi/VpnAutoSwitch/stargazers">
+    <img src="https://img.shields.io/github/stars/yaoiwi/VpnAutoSwitch?style=social" alt="Stars" />
+  </a>
+</p>
