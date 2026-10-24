@@ -20,6 +20,10 @@ internal object EnginePolicy {
 
     fun shouldResumeAfterUserOff(freshOpen: Boolean): Boolean = freshOpen
 
+    /** 模块版本变化（含首次安装）时清空旧日志，保证只看得到当前版本的记录。 */
+    fun shouldClearLogsOnBoot(previousVersion: Int, currentVersion: Int): Boolean =
+        previousVersion != currentVersion
+
     fun isNetworkAllowed(transport: Int, allowWifi: Boolean, allowMobile: Boolean): Boolean =
         when (transport) {
             1 -> allowWifi

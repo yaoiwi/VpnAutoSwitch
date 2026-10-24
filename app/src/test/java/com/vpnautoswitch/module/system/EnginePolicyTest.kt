@@ -38,6 +38,13 @@ class EnginePolicyTest {
     }
 
     @Test
+    fun `logs are cleared only when module version changes`() {
+        assertTrue(EnginePolicy.shouldClearLogsOnBoot(0, 66))
+        assertTrue(EnginePolicy.shouldClearLogsOnBoot(65, 66))
+        assertFalse(EnginePolicy.shouldClearLogsOnBoot(66, 66))
+    }
+
+    @Test
     fun `network gates preserve unknown and other transports`() {
         assertTrue(EnginePolicy.isNetworkAllowed(1, allowWifi = true, allowMobile = false))
         assertFalse(EnginePolicy.isNetworkAllowed(1, allowWifi = false, allowMobile = true))

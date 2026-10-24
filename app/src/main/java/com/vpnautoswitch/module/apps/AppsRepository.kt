@@ -1,10 +1,14 @@
 package com.vpnautoswitch.module.apps
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Typeface
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import androidx.compose.ui.graphics.ImageBitmap
@@ -16,12 +20,23 @@ data class AppInfo(
     val packageName: String,
     val label: String,
     val hasVpnService: Boolean,
+    val activityName: String? = null,
     val icon: ImageBitmap? = null
 )
 
 object AppsRepository {
 
-    private const val ICON_SIZE = 48
+    /** 按 40dp @3x 渲染，避免 48px 图标在列表里发虚 */
+    private const val ICON_SIZE = 128
+
+    private val fallbackColors = intArrayOf(
+        0xFF2F6BFF.toInt(),
+        0xFF7C5CFF.toInt(),
+        0xFF00A88F.toInt(),
+        0xFFE06C00.toInt(),
+        0xFFD9366E.toInt(),
+        0xFF0089C7.toInt(),
+    )
 
     /** 读取有启动图标的已安装应用，按名称排序 */
     fun loadLaunchable(context: Context): List<AppInfo> {
@@ -45,7 +60,8 @@ object AppsRepository {
                     result[pkg] = AppInfo(
                         packageName = pkg,
                         label = info.loadLabel(pm).toString(),
-                        hasVpnService = vpnPackages.contains(pkg)
+                        hasVpnService = vpnPackages.contains(pkg),
+                        activityName = info.activityInfo.name,
                     )
                 }
             }
@@ -57,28 +73,80 @@ object AppsRepository {
         return result.values.sortedWith { a, b -> collator.compare(a.label, b.label) }
     }
 
-    /** 把应用图标转成 Compose 可用的 ImageBitmap（在子线程调用） */
+    /**
+     * 把应用图标转成 Compose 可用的 ImageBitmap（在子线程调用）。
+     *
+     * 依次尝试：启动 Activity 的图标 → 应用图标 → 文字占位图。
+     * 部分 ROM / 图标包会让前两种抛异常，此时仍然给出一个可辨识的方块，列表不会出现空洞。
+     */
     fun loadIcons(context: Context, apps: List<AppInfo>): List<AppInfo> {
         val pm = context.packageManager
         return apps.map { app ->
             val drawable = try {
+                app.activityName?.let {
+                    pm.getActivityIcon(ComponentName(app.packageName, it))
+                }
+            } catch (t: Throwable) {
+                null
+            } ?: try {
                 pm.getApplicationIcon(app.packageName)
             } catch (t: Throwable) {
                 null
             }
-            val bitmap = drawable?.let { toBitmap(it, ICON_SIZE) }
-            app.copy(icon = bitmap?.asImageBitmap())
+
+            val bitmap = drawable?.let {
+                try {
+                    toBitmap(it, ICON_SIZE)
+                } catch (t: Throwable) {
+                    null
+                }
+            } ?: fallbackIcon(app.label)
+
+            app.copy(icon = bitmap.asImageBitmap())
         }
     }
 
-    private fun toBitmap(drawable: Drawable, size: Int = ICON_SIZE): Bitmap {
-        if (drawable is BitmapDrawable && drawable.bitmap != null) {
-            return drawable.bitmap
+    private fun toBitmap(drawable: Drawable, size: Int): Bitmap {
+        if (drawable is BitmapDrawable) {
+            val source = drawable.bitmap
+            if (source != null && !source.isRecycled) {
+                if (source.width == size && source.height == size) return source
+                return Bitmap.createScaledBitmap(source, size, size, true)
+            }
         }
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         drawable.setBounds(0, 0, size, size)
         drawable.draw(canvas)
+        return bitmap
+    }
+
+    /** 图标资源损坏或缺失时，用首字符生成一个稳定的占位图。 */
+    private fun fallbackIcon(label: String): Bitmap {
+        val size = ICON_SIZE
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val background = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = fallbackColors[(label.hashCode() and 0x7FFFFFFF) % fallbackColors.size]
+        }
+        val radius = size * 0.24f
+        canvas.drawRoundRect(0f, 0f, size.toFloat(), size.toFloat(), radius, radius, background)
+
+        val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = size * 0.46f
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.DEFAULT_BOLD
+        }
+        val trimmed = label.trim()
+        val letter = if (trimmed.isEmpty()) {
+            "?"
+        } else {
+            trimmed.substring(0, trimmed.offsetByCodePoints(0, 1)).uppercase(Locale.getDefault())
+        }
+        val metrics = text.fontMetrics
+        val baseline = size / 2f - (metrics.ascent + metrics.descent) / 2f
+        canvas.drawText(letter, size / 2f, baseline, text)
         return bitmap
     }
 

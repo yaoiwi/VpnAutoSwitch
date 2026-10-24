@@ -532,7 +532,14 @@ private fun AppToggleCard(state: AppState, pkg: String, onRemove: () -> Unit) {
                         .size(40.dp)
                         .clip(RoundedCornerShape(11.dp))
                         .background(MiuixTheme.colorScheme.surfaceContainerHighest),
-                )
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = state.labelOf(pkg).firstOrNull()?.toString() ?: "?",
+                        fontSize = 17.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                }
             }
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -957,7 +964,8 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val CHANGELOG_TIPS =
     "1.33.0：稳定性版本。修复延迟启动/关闭任务失效不彻底、看门狗重复排队、关闭验证链误伤新会话、" +
         "开机初始化顺序等问题；新增每 15 秒独立心跳与「设置 → 状态诊断 → 一键自检」，" +
-        "可直接检查模块运行、VPN 客户端、当前命中规则与最近失败，并复制诊断报告。\n" +
+        "可直接检查模块运行、VPN 客户端、当前命中规则与最近失败，并复制诊断报告；" +
+        "升级后自动清空旧版本日志，修复部分应用图标缺失或模糊。\n" +
         "1.32.20：新增「指定 Wi-Fi 开 VPN / 关 VPN」：可按 Wi-Fi 名称强制开启或关闭 VPN，" +
         "优先级高于目标应用与网络类型开关；设置页「网络条件」里可添加、删除，支持一键加入当前 Wi-Fi。"
 

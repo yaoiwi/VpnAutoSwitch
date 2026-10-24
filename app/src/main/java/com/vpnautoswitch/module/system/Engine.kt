@@ -225,11 +225,36 @@ internal object Engine {
      */
     private fun onBoot(attempt: Int) {
         val ctx = context()
+        val previousVersion = if (ctx == null) {
+            0
+        } else {
+            try {
+                Settings.Secure.getInt(ctx.contentResolver, MODULE_VERSION_KEY, 0)
+            } catch (t: Throwable) {
+                0
+            }
+        }
         if (ctx == null || !beat(ctx)) {
             retryBoot(attempt)
             return
         }
         if (booted) return
+
+        // 升级后的第一轮启动清空旧日志，保证应用内只看到当前版本的记录
+        if (EnginePolicy.shouldClearLogsOnBoot(
+                previousVersion,
+                com.vpnautoswitch.module.BuildConfig.VERSION_CODE,
+            )
+        ) {
+            ModuleLog.clear(ctx)
+            if (previousVersion > 0) {
+                log(
+                    ctx,
+                    "upgraded from v$previousVersion to v${com.vpnautoswitch.module.BuildConfig.VERSION_CODE}, " +
+                        "old logs cleared"
+                )
+            }
+        }
 
         offAppForeground = null
         cleanupStaleState(ctx)

@@ -1,6 +1,7 @@
 package com.vpnautoswitch.module.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -8,12 +9,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
@@ -174,15 +178,24 @@ private fun AppRow(
                     contentDescription = null,
                     tint = Color.Unspecified,
                     modifier = Modifier
-                        .size(38.dp)
-                        .padding(end = 10.dp),
+                        .padding(end = 10.dp)
+                        .size(38.dp),
                 )
             } else {
                 Box(
                     modifier = Modifier
+                        .padding(end = 10.dp)
                         .size(38.dp)
-                        .padding(end = 10.dp),
-                )
+                        .clip(RoundedCornerShape(11.dp))
+                        .background(MiuixTheme.colorScheme.surfaceContainerHighest),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = app.label.firstOrNull()?.toString() ?: "?",
+                        fontSize = 16.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                }
             }
         },
         endActions = {
