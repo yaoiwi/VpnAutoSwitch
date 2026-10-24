@@ -2,6 +2,7 @@ package com.vpnautoswitch.module.apps
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
@@ -87,4 +88,34 @@ object AppsRepository {
     } catch (t: Throwable) {
         packageName
     }
+
+    /** 直接检查配置的 VPN 客户端，不依赖「有启动图标」的应用列表。 */
+    fun inspectVpn(context: Context, packageName: String): VpnClientInspection? {
+        if (packageName.isBlank()) return null
+        val pm = context.packageManager
+        val info = try {
+            pm.getApplicationInfo(packageName, PackageManager.MATCH_DISABLED_COMPONENTS)
+        } catch (t: Throwable) {
+            null
+        } ?: return null
+        val hasService = try {
+            pm.queryIntentServices(
+                Intent("android.net.VpnService").setPackage(packageName),
+                PackageManager.MATCH_DISABLED_COMPONENTS,
+            ).isNotEmpty()
+        } catch (t: Throwable) {
+            false
+        }
+        return VpnClientInspection(
+            installed = true,
+            enabled = info.enabled,
+            hasVpnService = hasService,
+        )
+    }
 }
+
+data class VpnClientInspection(
+    val installed: Boolean,
+    val enabled: Boolean,
+    val hasVpnService: Boolean,
+)

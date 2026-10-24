@@ -91,14 +91,20 @@ VpnAutoSwitch/
 │   │   ├── ui/
 │   │   │   ├── App.kt                         # MiuixTheme 根 + 页面切换
 │   │   │   ├── AppState.kt                    # 配置与诊断状态的持有者
+│   │   │   ├── DiagnosticsPolicy.kt           # 心跳新鲜度 / 模块版本判断
+│   │   │   ├── DiagnosticsReport.kt           # 自检条目与可复制报告
+│   │   │   ├── SelfCheckDialog.kt             # 一键自检弹窗
 │   │   │   ├── MainScreen.kt                  # 设置主界面（Miuix Preference 卡片）
 │   │   │   └── AppPickerScreen.kt             # 应用选择界面（搜索 + 多选）
 │   │   └── system/
-│   │       ├── Engine.kt                      # 状态机 + 心跳（独立线程）
+│   │       ├── Engine.kt                      # 状态机 + 事件回放（独立线程）
+│   │       ├── EnginePolicy.kt                # 不依赖 Android 的决策与门禁
+│   │       ├── RuntimeDiagnostics.kt          # 心跳 / 当前规则 / 最近失败快照
 │   │       ├── ConfigRepo.kt                  # 配置缓存（3s TTL）
 │   │       ├── VpnSwitcher.kt                 # 真正改 Settings.Secure 的地方
 │   │       ├── ActivityRecords.kt             # ActivityRecord 反射工具
 │   │       └── ProcessRecords.kt              # ProcessRecord 反射工具
+│   └── test/java/...                          # JVM 单元测试（决策 / 时序 / 诊断边界）
 │   └── res/values/                            # 仅保留应用名、模块描述与推荐作用域
 ├── build.gradle.kts / settings.gradle.kts
 └── gradle/wrapper/
@@ -135,13 +141,13 @@ VpnAutoSwitch/
 Release 经 R8 压缩后是 **单 dex、约 1.3 MB**（Compose + Miuix 一起压缩进去）。
 单 dex 对 Xposed 模块很有意义：模块 APK 会被整体加载进 system_server，dex 越少越不容易出问题。
 
-已经编译好的安装包：`app-release.apk`（v1.32.20，可直接安装）。
+已经编译好的安装包：`app-release.apk`（v1.33.0，可直接安装）。
 
 ---
 
 ## 四、安装步骤
 
-1. 安装 `app-release.apk`（v1.32.20，覆盖旧版本即可，配置会保留）。
+1. 安装 `app-release.apk`（v1.33.0，覆盖旧版本即可，配置会保留）。
 2. 打开 **LSPosed 管理器 → 模块 → VPN 自动开关**：
    - 启用模块；
    - **作用域只勾「系统框架」**（不要勾目标应用，勾了也没用）；
@@ -159,11 +165,15 @@ App 里的「运行状态」卡片会实时显示三项信息：
 
 | 显示项 | 来源 | 含义 |
 | --- | --- | --- |
-| 模块已/尚未注入系统框架 | `vpn_autoswitch_heartbeat` | system_server 里的 hook 每次处理事件都会刷新心跳，能读到且时间很新 = 模块真的在工作 |
+| 模块已/尚未注入系统框架 | `vpn_autoswitch_heartbeat` | 模块每 15 秒独立续写一次心跳，不依赖是否有目标应用事件；60 秒内更新即视为仍在运行 |
 | 系统当前常驻 VPN | `always_on_vpn_app` | 等于你选的 VPN 应用，说明系统已经接受了这个设置 |
 | 本模块正在接管… | `vpn_autoswitch_active` | 模块正处于「已改写常驻 VPN」的接管周期中 |
 
 下面还有「打开 LSPosed」按钮（直接跳到管理器）和「刷新」按钮，界面每 5 秒自动刷新一次。
+如果 App 已更新但 system_server 仍加载旧模块，状态卡会明确提示需要重启手机。
+
+设置页新增 **「状态诊断 → 一键自检」**：逐项检查模块心跳、LSPosed 作用域、VPN 客户端安装/启用/VpnService、
+当前网络与命中规则、always-on 指向、最近失败和触发条件，并支持复制完整诊断报告。
 
 「网络条件」里可以按网络类型分别开关本模块功能：
 
@@ -255,8 +265,9 @@ App 里的「运行状态」卡片会实时显示三项信息：
    `watchdog: target process gone`：
    - 有 → 说明进程死亡 hook 没命中，但看门狗补上了（功能正常，只是慢 3 秒）；
    - 没有 → 目标应用划掉后进程仍然活着（带前台服务/常驻通知），VPN 保持连接属于预期行为。
-6. 心跳是**每次处理事件才刷新**的，刚开机时是开机那一刻的时间戳。如果界面显示
-   「最后心跳：X 小时前」，说明开机后就没处理过任何目标应用事件 —— 打开一次目标应用再看。
+6. 心跳每 15 秒独立刷新一次，和有没有打开目标应用无关。如果「状态诊断」里显示
+   「超过 60 秒没有新心跳」，说明 system_server 里的模块没有运行或已被卸载，
+   先检查 LSPosed 启用状态与作用域，再重启手机。不要再用「打开一次目标应用」来试探心跳。
 
 ---
 
@@ -299,17 +310,18 @@ adb logcat -s LSPosed-Bridge | grep VpnAutoSwitch
 ## 八、已知可扩展方向
 
 - 增加「离开应用界面即断开」（现在只在进程结束时断开）；
-- 按具体 Wi-Fi SSID 决定是否生效；
+- 同名 Wi-Fi 的 BSSID 区分（现在只按 SSID 匹配）；
 - 支持多用户（`UserHandle` 维度写设置）。
 
 ---
 
 ## 版本记录
 
-最近 5 个版本，完整历史见 [CHANGELOG.md](CHANGELOG.md)。
+以下为近期版本记录。
 
 | 版本 | 变更 |
 | --- | --- |
+| 1.33.0 | **稳定性版本**：修复延迟启动/关闭任务失效不彻底、看门狗停止后重复排队、关闭验证链误伤新会话、开机初始化顺序等问题；新增每 15 秒独立心跳与「一键自检」，可检查模块、客户端、当前规则与最近失败并复制报告 |
 | 1.32.20 | 新增「指定 Wi-Fi 开 VPN / 关 VPN」：按 SSID 强制开启或关闭，优先级高于目标应用与网络类型开关 |
 | 1.32.19 | 关于页去掉「开发者」分组，页面更紧凑 |
 | 1.32.18 | 关于页新增「项目主页」与「问题反馈」（打开 GitHub 仓库 / Issues），去掉「检查更新」 |
@@ -348,5 +360,11 @@ limitations under the License.
 ## 九、自动构建
 
 推送到 `main`、推送 `v*` tag，或手动触发，都会运行 `.github/workflows/build.yml`：
-GitHub 用 JDK 17 + Android SDK 编译 `assembleRelease`，APK 在 **Actions → 最近一次 run → Artifacts** 下载；
-打 tag 时会自动创建 Release 并附上 APK。
+GitHub 用 JDK 17 + Android SDK 运行 `:app:test` 和 `assembleRelease`，APK 在
+**Actions → 最近一次 run → Artifacts** 下载；打 tag 时会自动创建 Release 并附上 APK 与 SHA-256 校验文件。
+
+发布校验：
+
+- tag 必须严格等于 `v` + `versionName`，例如 `v1.33.0`；
+- 发布构建的签名配置必须完整，缺少或只配置一部分时直接失败，不会静默换成 debug 签名；
+- 所有构建都用 `apksigner verify` 验签，tag 构建还会比对证书指纹，不一致不会上传或发布。

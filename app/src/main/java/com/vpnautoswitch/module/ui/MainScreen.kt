@@ -378,8 +378,10 @@ private fun LazyListScope.overviewItems(
 @Composable
 private fun HeroStatusCard(state: AppState) {
     val colors = MiuixTheme.colorScheme
-    val age = System.currentTimeMillis() - state.diagnostics.heartbeat
-    val loaded = state.diagnostics.heartbeat > 0L && age in 0..TimeUnit.MINUTES.toMillis(30)
+    val now = System.currentTimeMillis()
+    val age = DiagnosticsPolicy.heartbeatAge(state.diagnostics.heartbeat, now)
+    val loaded = DiagnosticsPolicy.isHeartbeatFresh(state.diagnostics.heartbeat, now)
+    val oldModule = loaded && state.diagnostics.moduleVersion != BuildConfig.VERSION_CODE
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp)) {
@@ -390,10 +392,11 @@ private fun HeroStatusCard(state: AppState) {
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = if (loaded) {
-                    "系统框架心跳 ${formatAge(age)}前 · 当前网络 ${state.diagnostics.network}"
-                } else {
-                    "还没有收到系统框架的心跳，去 LSPosed 里检查作用域并重启"
+                text = when {
+                    oldModule -> "App 已更新到 v${BuildConfig.VERSION_CODE}，" +
+                        "系统框架仍是 v${state.diagnostics.moduleVersion}，重启手机后生效"
+                    loaded -> "系统框架心跳 ${formatAge(age)}前 · 当前网络 ${state.diagnostics.network}"
+                    else -> "超过 60 秒没有收到系统框架心跳，去 LSPosed 里检查作用域并重启"
                 },
                 fontSize = 12.sp,
                 color = colors.onSurfaceVariantSummary,
@@ -732,6 +735,11 @@ private fun LazyListScope.settingsItems(
     }
 
     item {
+        SectionTitle("状态诊断")
+        SelfCheckSection(state)
+    }
+
+    item {
         SectionTitle("运行日志")
         Card(modifier = Modifier.fillMaxWidth()) {
             val lines = state.diagnostics.log.lines().filter { it.isNotBlank() }
@@ -947,13 +955,16 @@ private fun formatAge(ms: Long): String {
 private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 
 private const val CHANGELOG_TIPS =
-    "1.32.20：新增「指定 Wi-Fi 开 VPN / 关 VPN」：可按 Wi-Fi 名称强制开启或关闭 VPN，" +
+    "1.33.0：稳定性版本。修复延迟启动/关闭任务失效不彻底、看门狗重复排队、关闭验证链误伤新会话、" +
+        "开机初始化顺序等问题；新增每 15 秒独立心跳与「设置 → 状态诊断 → 一键自检」，" +
+        "可直接检查模块运行、VPN 客户端、当前命中规则与最近失败，并复制诊断报告。\n" +
+        "1.32.20：新增「指定 Wi-Fi 开 VPN / 关 VPN」：可按 Wi-Fi 名称强制开启或关闭 VPN，" +
         "优先级高于目标应用与网络类型开关；设置页「网络条件」里可添加、删除，支持一键加入当前 Wi-Fi。"
 
 private const val PRIVACY_TIPS =
     "本模块完全离线运行：不联网、不收集、不上传任何数据。\n" +
-        "配置只保存在本机（SharedPreferences），运行日志只写入系统 Settings.Secure，" +
-        "用于你在应用内排查问题，可随时一键清空。"
+        "配置只保存在本机（SharedPreferences）；运行日志、心跳和状态快照只写入系统 Settings.Secure，" +
+        "用于你在应用内排查问题，可随时一键清空日志。"
 
 private const val USAGE_TIPS =
     "1. 在 LSPosed 中启用本模块，作用域只勾选「系统框架」，然后重启手机。\n" +

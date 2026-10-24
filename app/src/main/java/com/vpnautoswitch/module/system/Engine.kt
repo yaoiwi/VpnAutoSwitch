@@ -45,6 +45,9 @@ internal object Engine {
 
     private const val RECONCILE_INTERVAL_MS = 5_000L
 
+    /** 独立心跳：不依赖目标应用或看门狗，App 用它判断模块是否仍在运行 */
+    private const val HEARTBEAT_INTERVAL_MS = 15_000L
+
     /**
      * 重写 always-on 设置会先清空再写回，等于让系统 unbind + rebind 一次 VpnService。
      * 客户端（尤其 Clash 系）建立隧道要好几秒，写得太频繁会一直打断它，
@@ -72,11 +75,26 @@ internal object Engine {
     private const val MAX_FORCE_STOP_ATTEMPTS = 3
     private const val FAILURE_HINT_AT = 5
 
+    /** 初始化重试期间最多缓存的事件数，防止异常 ROM 下无限增长 */
+    private const val MAX_PENDING_EVENTS = 64
+
     private val thread = HandlerThread("VpnAutoSwitch").apply {
         priority = Thread.NORM_PRIORITY
         start()
     }
     private val handler = Handler(thread.looper)
+    private var heartbeatStarted = false
+
+    private val heartbeat = object : Runnable {
+        override fun run() {
+            val ctx = context()
+            if (ctx != null) {
+                beat(ctx)
+                publishRuntime(ctx)
+            }
+            handler.postDelayed(this, HEARTBEAT_INTERVAL_MS)
+        }
+    }
 
     @Volatile
     private var appContext: Context? = null
@@ -116,6 +134,17 @@ internal object Engine {
     private var offToken = 0
     private var startToken = 0
 
+    /** 每次关闭验证链的代次；新的开启意图或新的关闭链都会推进它 */
+    private var offGeneration = 0
+
+    /** 初始化还没完成时按顺序缓存事件，避免先操作 VPN、随后又被 boot 清理掉 */
+    private sealed interface PendingEvent {
+        data class Foreground(val packageName: String) : PendingEvent
+        data class Died(val packageName: String) : PendingEvent
+    }
+
+    private val pendingEvents = ArrayDeque<PendingEvent>()
+
     /** 本轮是通过哪种外部方式发起启动的，连上后据此记住该客户端 */
     private var pendingExternalMode: String? = null
 
@@ -140,11 +169,43 @@ internal object Engine {
     }
 
     fun onForeground(packageName: String) {
-        handler.post { handleForeground(packageName) }
+        handler.post { dispatchForeground(packageName) }
     }
 
     fun onProcessDied(packageName: String) {
-        handler.post { handleProcessDied(packageName) }
+        handler.post { dispatchProcessDied(packageName) }
+    }
+
+    private fun dispatchForeground(packageName: String) {
+        if (!booted) {
+            enqueue(PendingEvent.Foreground(packageName))
+            return
+        }
+        handleForeground(packageName)
+        publishRuntime(context())
+    }
+
+    private fun dispatchProcessDied(packageName: String) {
+        if (!booted) {
+            enqueue(PendingEvent.Died(packageName))
+            return
+        }
+        handleProcessDied(packageName)
+        publishRuntime(context())
+    }
+
+    private fun enqueue(event: PendingEvent) {
+        if (pendingEvents.size >= MAX_PENDING_EVENTS) pendingEvents.removeFirst()
+        pendingEvents.addLast(event)
+    }
+
+    private fun replayPendingEvents() {
+        while (pendingEvents.isNotEmpty()) {
+            when (val event = pendingEvents.removeFirst()) {
+                is PendingEvent.Foreground -> handleForeground(event.packageName)
+                is PendingEvent.Died -> handleProcessDied(event.packageName)
+            }
+        }
     }
 
     // ---------------------------------------------------------------- 启动
@@ -179,6 +240,16 @@ internal object Engine {
         }
         booted = true
         log(ctx, "module ready (death hooks + watchdog)")
+        startHeartbeat()
+        replayPendingEvents()
+        publishRuntime(ctx)
+    }
+
+    private fun startHeartbeat() {
+        if (heartbeatStarted) return
+        heartbeatStarted = true
+        handler.removeCallbacks(heartbeat)
+        handler.post(heartbeat)
     }
 
     private fun retryBoot(attempt: Int) {
@@ -236,11 +307,17 @@ internal object Engine {
                     else -> 3
                 }
                 refreshSsid(ctx, lastTransport == 1)
-                handler.post { handleNetworkChanged() }
+                handler.post {
+                    handleNetworkChanged()
+                    publishRuntime(ctx)
+                }
             }
 
             override fun onLost(network: Network) {
-                handler.post { handleNetworkChanged() }
+                handler.post {
+                    handleNetworkChanged()
+                    publishRuntime(ctx)
+                }
             }
         }
         try {
@@ -293,10 +370,51 @@ internal object Engine {
         }
     }
 
-    private fun isNetworkAllowed(cfg: Config): Boolean = when (lastTransport) {
-        1 -> cfg.allowWifi
-        2 -> cfg.allowMobile
-        else -> true
+    private fun isNetworkAllowed(cfg: Config): Boolean =
+        EnginePolicy.isNetworkAllowed(lastTransport, cfg.allowWifi, cfg.allowMobile)
+
+    private fun isWifiOnActive(cfg: Config): Boolean {
+        val ssid = currentSsid ?: return false
+        return lastTransport == 1 && cfg.wifiOn.contains(ssid)
+    }
+
+    /** 只描述当前命中的规则，不参与任何控制决策。 */
+    private fun currentRule(cfg: Config): Pair<String, String> {
+        if (!cfg.enabled || cfg.vpnPackage.isEmpty()) {
+            return "disabled" to "模块已关闭或未选择 VPN 客户端"
+        }
+        if (wifiSuppressed) {
+            return "wifiOff" to (currentSsid?.let { "Wi-Fi \"$it\" 命中关闭规则" } ?: "命中关闭 Wi-Fi 规则")
+        }
+        offAppForeground?.let { pkg ->
+            return "offTarget" to "打开 $pkg 时保持断开"
+        }
+        if (isWifiOnActive(cfg)) {
+            return "wifiOn" to "Wi-Fi \"${currentSsid.orEmpty()}\" 命中开启规则"
+        }
+        if (!isNetworkAllowed(cfg)) {
+            return "networkDisabled" to "当前网络类型已关闭自动开关"
+        }
+        if (userOff) {
+            return "userOff" to "已手动关闭，等待重新打开目标应用"
+        }
+        if (aliveTargets.isNotEmpty()) {
+            val sample = aliveTargets.take(3).joinToString("、")
+            val more = if (aliveTargets.size > 3) " 等 ${aliveTargets.size} 个" else ""
+            return "target" to "目标应用在前台：$sample$more"
+        }
+        return "idle" to "当前没有目标应用或触发条件"
+    }
+
+    private fun publishRuntime(ctx: Context?) {
+        val context = ctx ?: return
+        try {
+            val cfg = ConfigRepo.get(context)
+            val (rule, detail) = currentRule(cfg)
+            RuntimeDiagnostics.publishRuntime(context, rule, detail, lastTransport)
+        } catch (t: Throwable) {
+            // 诊断失败不能影响控制逻辑
+        }
     }
 
     /**
@@ -345,6 +463,8 @@ internal object Engine {
         wifiSuppressed = false
         if (!ssid.isNullOrEmpty() && cfg.wifiOn.contains(ssid)) {
             log(ctx, "wifi \"$ssid\" -> turn on")
+            // 这是一个新的开启意图，取消此前排队的关闭任务
+            offToken++
             ensureVpn(ctx, cfg)
             startWatchdog()
             return
@@ -371,11 +491,13 @@ internal object Engine {
         val cfg = ConfigRepo.get(ctx)
         // 上一次前台不是它 => 这次是「重新打开」，而不是应用内部换页 / 弹窗后 resume。
         // 从 VPN 客户端本身退回来也不算：用户多半是刚在里面点了断开，别立刻给他连回去。
-        val freshOpen = lastForeground != pkg && lastForeground != cfg.vpnPackage
+        val freshOpen = EnginePolicy.isFreshOpen(lastForeground, pkg, cfg.vpnPackage)
         lastForeground = pkg
+        val foregroundKind = EnginePolicy.foregroundKind(pkg, cfg.targets, cfg.offTargets)
 
         if (!cfg.enabled || cfg.vpnPackage.isEmpty()) {
             offAppForeground = null
+            startToken++
             if (VpnSwitcher.isActive(ctx.contentResolver)) {
                 aliveTargets.clear()
                 turnOff("module disabled")
@@ -385,10 +507,12 @@ internal object Engine {
 
         // 打开「关闭 VPN」列表里的应用：VPN 只要还连着就断开，
         // 并且在它退出之前一直压制自动开启（避免看门狗 5 秒后又把 VPN 拉起来）。
-        if (cfg.offTargets.contains(pkg)) {
+        if (foregroundKind == EnginePolicy.ForegroundKind.OFF_TARGET) {
             val first = offAppForeground != pkg
             offAppForeground = pkg
             offToken++
+            // 即使 VPN 当前没连上，也要让 600ms 后准备启动的服务失效
+            startToken++
             if (first) log(ctx, "$pkg -> foreground (off trigger)")
             if (VpnSwitcher.isActive(ctx.contentResolver) || hasVpnTransport(ctx)) {
                 turnOff("opened $pkg")
@@ -399,7 +523,7 @@ internal object Engine {
             return
         }
 
-        if (!cfg.targets.contains(pkg)) return
+        if (foregroundKind != EnginePolicy.ForegroundKind.TARGET) return
 
         // 当前 Wi-Fi 在「关闭 VPN」列表里：不自动开启
         if (wifiSuppressed) {
@@ -417,7 +541,7 @@ internal object Engine {
         aliveTargets.add(pkg)
 
         if (userOff) {
-            if (!freshOpen) {
+            if (!EnginePolicy.shouldResumeAfterUserOff(freshOpen)) {
                 // 应用内部的页面切换 / 从系统面板返回，不算「重新打开」，继续让 VPN 保持关闭
                 return
             }
@@ -441,27 +565,75 @@ internal object Engine {
             offAppForeground = null
             log(context(), "$pkg (off trigger) exited")
         }
-        if (!aliveTargets.remove(pkg)) return
+        val removed = aliveTargets.remove(pkg)
+        if (!removed) return
         val ctx = context()
         log(ctx, "$pkg -> process died")
-        if (aliveTargets.isNotEmpty()) return
+        if (!EnginePolicy.shouldScheduleOffAfterDeath(removed, aliveTargets.size)) return
         // 应用有时只是进程重启（被系统回收后立刻恢复），等一下再决定要不要关，
         // 否则会出现「刚连上就被关、关了又重连」的抖动。
         scheduleOff(ctx, "$pkg died")
     }
 
     private fun scheduleOff(ctx: Context?, reason: String) {
+        val context = ctx ?: return
         val token = ++offToken
         handler.postDelayed({
             if (token != offToken) return@postDelayed
-            if (aliveTargets.isNotEmpty()) return@postDelayed
+            val cfg = ConfigRepo.get(context)
+            val wifiOnActive = cfg.enabled && isWifiOnActive(cfg)
+            if (!EnginePolicy.shouldRunDelayedOff(
+                    token,
+                    offToken,
+                    aliveTargets.isNotEmpty(),
+                    wifiOnActive,
+                )
+            ) return@postDelayed
             turnOff(reason)
         }, OFF_DEBOUNCE_MS)
+    }
+
+    /**
+     * 停止并稍后重启客户端的 VpnService。
+     *
+     * 600ms 窗口里可能又打开了「关闭 VPN」应用、切了网络、改了 VPN 包或进入手动关闭状态，
+     * 所以执行前必须重新读取配置并逐项确认，不能只看启动序号。
+     */
+    private fun scheduleDelayedServiceStart(ctx: Context, cfg: Config) {
+        if (cfg.vpnPackage.isEmpty()) return
+        val scheduledPackage = cfg.vpnPackage
+        pendingExternalMode = "service"
+        ExternalControl.stopVpnService(ctx, scheduledPackage)
+        val token = ++startToken
+        handler.postDelayed({
+            val current = ConfigRepo.get(ctx)
+            val wifiOnActive = current.enabled && isWifiOnActive(current)
+            val allowed = EnginePolicy.shouldRunDelayedStart(
+                token = token,
+                currentToken = startToken,
+                scheduledVpnPackage = scheduledPackage,
+                enabled = current.enabled,
+                currentVpnPackage = current.vpnPackage,
+                offAppForeground = offAppForeground != null,
+                userOff = userOff,
+                wifiSuppressed = wifiSuppressed,
+                networkAllowed = isNetworkAllowed(current),
+                hasAliveTarget = aliveTargets.isNotEmpty(),
+                wifiOnActive = wifiOnActive,
+            )
+            if (!allowed) {
+                log(ctx, "delayed service start cancelled (state changed)")
+                return@postDelayed
+            }
+            ExternalControl.startVpnService(ctx, scheduledPackage)
+        }, 600L)
     }
 
     // ---------------------------------------------------------------- VPN 控制
 
     private fun ensureVpn(ctx: Context, cfg: Config) {
+        // 任何新的授权开启意图都让此前排队的关闭验证链失效
+        offGeneration++
         val settingPointsToUs = VpnSwitcher.currentAlwaysOn(ctx) == cfg.vpnPackage
         val active = VpnSwitcher.isActive(ctx.contentResolver)
         val connected = hasVpnTransport(ctx)
@@ -500,6 +672,7 @@ internal object Engine {
             connectedNotified = false
             autoSession = false
             userOff = true
+            startToken++
             stopWatchdog()
             log(ctx, "vpn dropped -> stay off until a target app is reopened")
             return
@@ -519,8 +692,10 @@ internal object Engine {
         if (externalMode != null) {
             if (cfg.forceStopVpn) Packages.unstop(cfg.vpnPackage)
 
-            if (now - lastApplyAt < EXTERNAL_ONLY_GUARD_MS) return
-            if (externalAttempts >= MAX_EXTERNAL_ATTEMPTS && now - lastApplyAt < REAPPLY_SLOW_MS) return
+            if (!EnginePolicy.cooldownReady(now, lastApplyAt, EXTERNAL_ONLY_GUARD_MS)) return
+            if (externalAttempts >= MAX_EXTERNAL_ATTEMPTS &&
+                !EnginePolicy.cooldownReady(now, lastApplyAt, REAPPLY_SLOW_MS)
+            ) return
 
             lastApplyAt = now
             externalAttempts++
@@ -532,14 +707,7 @@ internal object Engine {
                 log(ctx, "external-only: start via external control (remembered)")
             } else if (externalMode == "service" || externalAttempts <= 2) {
                 log(ctx, "external-only: restart VPN service without UI (attempt $externalAttempts)")
-                pendingExternalMode = "service"
-                ExternalControl.stopVpnService(ctx, cfg.vpnPackage)
-                val token = ++startToken
-                handler.postDelayed({
-                    if (token != startToken) return@postDelayed
-                    if (aliveTargets.isEmpty()) return@postDelayed
-                    ExternalControl.startVpnService(ctx, cfg.vpnPackage)
-                }, 600L)
+                scheduleDelayedServiceStart(ctx, cfg)
             } else if (cfg.allowVpnUi && ExternalControl.start(ctx, cfg.vpnPackage)) {
                 pendingExternalMode = "activity"
                 log(ctx, "external-only: start via client UI (allowed in settings)")
@@ -553,8 +721,8 @@ internal object Engine {
             return
         }
 
-        val interval = if (reapplyCount >= MAX_FAST_REAPPLY) REAPPLY_SLOW_MS else REAPPLY_GUARD_MS
-        if (now - lastApplyAt < interval) return
+        val interval = EnginePolicy.reapplyInterval(reapplyCount, MAX_FAST_REAPPLY, REAPPLY_GUARD_MS, REAPPLY_SLOW_MS)
+        if (!EnginePolicy.cooldownReady(now, lastApplyAt, interval)) return
 
         if (active && settingPointsToUs) {
             // 上一次关闭时如果强制停止过客户端，它会被系统标记成 stopped，
@@ -605,13 +773,7 @@ internal object Engine {
                     externalAttempts++
                     lastExternalAt = now
                     log(ctx, "known client: start VPN service (no ui)")
-                    ExternalControl.stopVpnService(ctx, cfg.vpnPackage)
-                    val token = ++startToken
-                    handler.postDelayed({
-                        if (token != startToken) return@postDelayed
-                        if (aliveTargets.isEmpty()) return@postDelayed
-                        ExternalControl.startVpnService(ctx, cfg.vpnPackage)
-                    }, 600L)
+                    scheduleDelayedServiceStart(ctx, cfg)
                 }
             }
         }
@@ -625,7 +787,7 @@ internal object Engine {
     private fun tryExternalStart(ctx: Context, cfg: Config, now: Long): Boolean {
         if (cfg.vpnPackage.isEmpty()) return false
         if (externalAttempts >= MAX_EXTERNAL_ATTEMPTS) return false
-        if (now - lastExternalAt < EXTERNAL_COOLDOWN_MS) return false
+        if (!EnginePolicy.cooldownReady(now, lastExternalAt, EXTERNAL_COOLDOWN_MS)) return false
         // 先给 always-on 一次机会，别一上来就拉 Activity
         if (reapplyCount < 1) return false
 
@@ -646,7 +808,7 @@ internal object Engine {
      */
     private fun tryQuickTile(ctx: Context, cfg: Config, now: Long): Boolean {
         if (tileAttempts >= MAX_TILE_ATTEMPTS) return false
-        if (now - lastTileClickAt < TILE_COOLDOWN_MS) return false
+        if (!EnginePolicy.cooldownReady(now, lastTileClickAt, TILE_COOLDOWN_MS)) return false
 
         val tile = QuickTiles.find(ctx, cfg.vpnPackage)
         if (tile == null) {
@@ -665,6 +827,7 @@ internal object Engine {
 
     private fun noteFailure(ctx: Context, cfg: Config) {
         failureStreak++
+        RuntimeDiagnostics.publishFailure(ctx, "enable", cfg.vpnPackage, failureStreak)
         if (!failureLogged && failureStreak >= FAILURE_HINT_AT) {
             failureLogged = true
             log(
@@ -679,6 +842,9 @@ internal object Engine {
         val ctx = context() ?: return
         beat(ctx)
         val cfg = ConfigRepo.get(ctx)
+        val generation = ++offGeneration
+        // 取消尚未执行的关闭任务，避免同一次关闭派生多条验证链
+        offToken++
         // 手动连上的 VPN 没有接管标记，也要提示「已关闭」
         val wasActive = VpnSwitcher.isActive(ctx.contentResolver) || hasVpnTransport(ctx)
         VpnSwitcher.disable(ctx, cfg.restoreOriginal, cfg.vpnPackage)
@@ -698,7 +864,8 @@ internal object Engine {
         if (wasActive) toast(ctx, "VPN 已关闭", cfg.toastEnabled)
 
         // 清掉 always-on 未必能断开「用户手动连上的」VPN，稍等一下确认
-        handler.postDelayed({ verifyOff(ctx, cfg) }, 1_200L)
+        handler.postDelayed({ verifyOff(ctx, cfg.vpnPackage, generation) }, 1_200L)
+        publishRuntime(ctx)
     }
 
     /** 目标应用回到前台（压制解除）时不要动它；只是因为「打开即关闭」而断开时，继续关干净 */
@@ -706,12 +873,24 @@ internal object Engine {
         !VpnSwitcher.isActive(ctx.contentResolver) &&
             !(aliveTargets.isNotEmpty() && offAppForeground == null)
 
+    /** 关闭链仍然有效：代次没变、VPN 包没换、当前仍允许操作 VPN。 */
+    private fun closeChainValid(ctx: Context, expectedPackage: String, generation: Int): Boolean {
+        val current = ConfigRepo.get(ctx)
+        return EnginePolicy.isCloseChainValid(
+            generation = generation,
+            currentGeneration = offGeneration,
+            expectedVpnPackage = expectedPackage,
+            currentVpnPackage = current.vpnPackage,
+            canTouchVpn = canTouchVpn(ctx),
+        )
+    }
+
     /**
      * 关闭后校验：如果隧道还在（典型场景：用户在 VPN 客户端里手动连上的，
      * 清 always-on 设置并不会断开它），就依次尝试「停止请求 → 快捷磁贴 → 强制停止」。
      */
-    private fun verifyOff(ctx: Context, cfg: Config) {
-        if (!canTouchVpn(ctx)) return
+    private fun verifyOff(ctx: Context, expectedPackage: String, generation: Int) {
+        if (!closeChainValid(ctx, expectedPackage, generation)) return
         if (!hasVpnTransport(ctx)) {
             log(ctx, "verify: vpn is down")
             return
@@ -720,28 +899,34 @@ internal object Engine {
         // 1) 无 UI：给客户端发它自己的停止广播（Clash 系支持）。
         //    已经确认是 service 模式的客户端（v2rayNG 等）根本没有这个接收器，
         //    发了也是白发，直接跳过，别白等一轮。
-        val clashLike = cfg.vpnPackage.isNotEmpty() &&
-            ExternalControl.modeOf(ctx, cfg.vpnPackage) != "service"
-        if (clashLike && ExternalControl.requestStop(ctx, cfg.vpnPackage)) {
+        val clashLike = expectedPackage.isNotEmpty() &&
+            ExternalControl.modeOf(ctx, expectedPackage) != "service"
+        if (clashLike && ExternalControl.requestStop(ctx, expectedPackage)) {
             // 广播只是「请求」，多数客户端会忽略它：轮询 2 秒，隧道一断就立刻收工
-            awaitDown(ctx, 2_000L) { down ->
+            awaitDown(ctx, expectedPackage, generation, 2_000L) { down ->
                 if (down) {
                     log(ctx, "verify: vpn is down (client stopped)")
                 } else {
-                    verifyOffStep(ctx, cfg, true)
+                    verifyOffStep(ctx, expectedPackage, generation, true)
                 }
             }
             return
         }
-        verifyOffStep(ctx, cfg, true)
+        verifyOffStep(ctx, expectedPackage, generation, true)
     }
 
     /** 每 400ms 看一次隧道是否断开，最多等 [deadlineMs]，避免固定 sleep 白等 */
-    private fun awaitDown(ctx: Context, deadlineMs: Long, onDone: (Boolean) -> Unit) {
+    private fun awaitDown(
+        ctx: Context,
+        expectedPackage: String,
+        generation: Int,
+        deadlineMs: Long,
+        onDone: (Boolean) -> Unit,
+    ) {
         val startedAt = SystemClock.elapsedRealtime()
         val poll = object : Runnable {
             override fun run() {
-                if (!canTouchVpn(ctx)) return
+                if (!closeChainValid(ctx, expectedPackage, generation)) return
                 if (!hasVpnTransport(ctx)) {
                     onDone(true)
                     return
@@ -756,40 +941,46 @@ internal object Engine {
         handler.postDelayed(poll, 400L)
     }
 
-    private fun verifyOffStep(ctx: Context, cfg: Config, allowActivity: Boolean) {
-        if (!canTouchVpn(ctx)) return
+    private fun verifyOffStep(
+        ctx: Context,
+        expectedPackage: String,
+        generation: Int,
+        allowActivity: Boolean,
+    ) {
+        if (!closeChainValid(ctx, expectedPackage, generation)) return
+        val cfg = ConfigRepo.get(ctx)
         if (!hasVpnTransport(ctx)) {
             log(ctx, "verify: vpn is down")
             return
         }
 
         // 2) 客户端导出的 STOP_CLASH 入口
-        if (allowActivity && cfg.allowVpnUi && cfg.vpnPackage.isNotEmpty() &&
-            ExternalControl.stop(ctx, cfg.vpnPackage)
+        if (allowActivity && cfg.allowVpnUi && expectedPackage.isNotEmpty() &&
+            ExternalControl.stop(ctx, expectedPackage)
         ) {
-            awaitDown(ctx, 2_500L) { down ->
+            awaitDown(ctx, expectedPackage, generation, 2_500L) { down ->
                 if (down) {
                     log(ctx, "verify: vpn is down (client stop activity)")
                 } else {
-                    verifyOffStep(ctx, cfg, false)
+                    verifyOffStep(ctx, expectedPackage, generation, false)
                 }
             }
             return
         }
 
         // 3) 快捷磁贴
-        val tile = if (cfg.vpnPackage.isNotEmpty()) QuickTiles.find(ctx, cfg.vpnPackage) else null
+        val tile = if (expectedPackage.isNotEmpty()) QuickTiles.find(ctx, expectedPackage) else null
         if (tile != null && QuickTiles.click(ctx, tile)) {
-            awaitDown(ctx, 2_000L) { down ->
+            awaitDown(ctx, expectedPackage, generation, 2_000L) { down ->
                 if (down) {
                     log(ctx, "verify: vpn is down (qs tile)")
                 } else {
-                    finishVerifyOff(ctx, cfg, 0)
+                    finishVerifyOff(ctx, expectedPackage, generation, 0)
                 }
             }
             return
         }
-        finishVerifyOff(ctx, cfg, 0)
+        finishVerifyOff(ctx, expectedPackage, generation, 0)
     }
 
     /**
@@ -799,8 +990,14 @@ internal object Engine {
      * 日志里会出现「still up after force stop」但其实马上就断了。现在分批复查，
      * 仍然连着就再停一次，最多三次，最后如实报告。
      */
-    private fun finishVerifyOff(ctx: Context, cfg: Config, attempt: Int) {
-        if (!canTouchVpn(ctx)) return
+    private fun finishVerifyOff(
+        ctx: Context,
+        expectedPackage: String,
+        generation: Int,
+        attempt: Int,
+    ) {
+        if (!closeChainValid(ctx, expectedPackage, generation)) return
+        val cfg = ConfigRepo.get(ctx)
         if (!hasVpnTransport(ctx)) {
             log(
                 ctx,
@@ -808,31 +1005,32 @@ internal object Engine {
             )
             return
         }
-        if (!cfg.forceStopVpn || cfg.vpnPackage.isEmpty()) {
+        if (!cfg.forceStopVpn || expectedPackage.isEmpty()) {
             log(ctx, "verify: vpn still up, force stop disabled")
             return
         }
         if (attempt >= MAX_FORCE_STOP_ATTEMPTS) {
             log(ctx, "verify: still up after $attempt force stops, giving up")
+            RuntimeDiagnostics.publishFailure(ctx, "stop", expectedPackage, attempt)
             return
         }
 
         // 少数 ROM / 客户端会把 always-on 又写回来，动手前再清一次
-        VpnSwitcher.clearIfPointsTo(ctx, cfg.vpnPackage)
+        VpnSwitcher.clearIfPointsTo(ctx, expectedPackage)
         log(
             ctx,
-            "verify: vpn still up -> force stop ${cfg.vpnPackage} " +
+            "verify: vpn still up -> force stop $expectedPackage " +
                 "(${attempt + 1}/$MAX_FORCE_STOP_ATTEMPTS)"
         )
-        val ok = forceStop(ctx, cfg.vpnPackage)
+        val ok = forceStop(ctx, expectedPackage)
         if (!ok) return
         // 这里**不要**立刻 unstop：stopped 标记会阻止系统再次 bind 它的 VpnService，
         // 正是我们想要的「关掉就真的关掉」。下次需要启动时 ensureVpn 会再清除。
-        Packages.forget(cfg.vpnPackage)
+        Packages.forget(expectedPackage)
         log(ctx, "force stopped, stopped-state kept (will clear before next start)")
 
         handler.postDelayed({
-            if (!canTouchVpn(ctx)) return@postDelayed
+            if (!closeChainValid(ctx, expectedPackage, generation)) return@postDelayed
             if (!hasVpnTransport(ctx)) {
                 log(ctx, "verify: disconnected after force stop")
             } else {
@@ -840,9 +1038,9 @@ internal object Engine {
                 log(
                     ctx,
                     "verify: still up after force stop, app alive=" +
-                        "${isProcessAlive(ctx, cfg.vpnPackage)}"
+                        "${isProcessAlive(ctx, expectedPackage)}"
                 )
-                finishVerifyOff(ctx, cfg, attempt + 1)
+                finishVerifyOff(ctx, expectedPackage, generation, attempt + 1)
             }
         }, FORCE_STOP_RECHECK_MS * (attempt + 1))
     }
@@ -853,6 +1051,7 @@ internal object Engine {
         true
     } catch (t: Throwable) {
         log(ctx, "force stop failed: $t")
+        RuntimeDiagnostics.publishFailure(ctx, "forceStop", pkg, 0)
         false
     }
 
@@ -939,27 +1138,26 @@ internal object Engine {
                 if (VpnSwitcher.isActive(ctx.contentResolver)) {
                     log(ctx, "reconcile: network type disabled -> off")
                     turnOff("network type disabled")
+                    // turnOff 已经停掉并移除了本看门狗，不能再把自己排回去
+                    return
                 }
                 handler.postDelayed(this, RECONCILE_INTERVAL_MS)
                 return
             }
 
-            when (anyTargetAlive(ctx)) {
-                false -> {
-                    log(ctx, "reconcile: target process gone -> off")
-                    aliveTargets.clear()
-                    scheduleOff(ctx, "watchdog")
-                    watchdogRunning = false
+            if (!EnginePolicy.shouldEnsureForProcessState(anyTargetAlive(ctx))) {
+                log(ctx, "reconcile: target process gone -> off")
+                aliveTargets.clear()
+                scheduleOff(ctx, "watchdog")
+                watchdogRunning = false
+            } else {
+                if (!VpnSwitcher.isActive(ctx.contentResolver) &&
+                    !ExternalControl.isKnown(ctx, cfg.vpnPackage)
+                ) {
+                    log(ctx, "reconcile: vpn is off but target alive -> enable")
                 }
-                else -> {
-                    if (!VpnSwitcher.isActive(ctx.contentResolver) &&
-                        !ExternalControl.isKnown(ctx, cfg.vpnPackage)
-                    ) {
-                        log(ctx, "reconcile: vpn is off but target alive -> enable")
-                    }
-                    ensureVpn(ctx, cfg)
-                    handler.postDelayed(this, RECONCILE_INTERVAL_MS)
-                }
+                ensureVpn(ctx, cfg)
+                handler.postDelayed(this, RECONCILE_INTERVAL_MS)
             }
         }
     }

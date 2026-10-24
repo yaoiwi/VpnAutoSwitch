@@ -13,11 +13,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.vpnautoswitch.module.BuildConfig
 import com.vpnautoswitch.module.Config
 import com.vpnautoswitch.module.apps.AppInfo
 import com.vpnautoswitch.module.apps.AppsRepository
 import com.vpnautoswitch.module.system.Engine
 import com.vpnautoswitch.module.system.ModuleLog
+import com.vpnautoswitch.module.system.RuntimeDiagnostics
 import org.json.JSONObject
 import java.util.concurrent.Executors
 
@@ -42,17 +44,44 @@ data class Diagnostics(
     /** system_server 里实际加载的模块版本号；0 表示没读到（旧代码或未注入） */
     val moduleVersion: Int = 0,
     /** 当前 Wi-Fi 名称（模块写在 Settings 里，App 自己读不到 SSID） */
-    val currentSsid: String = ""
+    val currentSsid: String = "",
+    /** 配置的 VPN 客户端 */
+    val vpnPackage: String = "",
+    /** null 表示未配置或无法查询 */
+    val vpnInstalled: Boolean? = null,
+    val vpnEnabled: Boolean? = null,
+    val vpnHasService: Boolean? = null,
+    val vpnConnected: Boolean = false,
+    /** 模块上报的当前命中规则与说明 */
+    val activeRule: String = "",
+    val ruleDetail: String = "",
+    val ruleUpdatedAt: Long = 0L,
+    val lastFailureAt: Long = 0L,
+    val lastFailureStage: String = "",
+    val lastFailurePackage: String = "",
+    val lastFailureStreak: Int = 0,
+    val heartbeatFresh: Boolean = false,
+    val moduleState: DiagnosticsPolicy.ModuleState = DiagnosticsPolicy.ModuleState.NEVER,
 ) {
     companion object {
-        fun load(context: Context): Diagnostics {
+        fun load(context: Context, config: Config): Diagnostics {
             val cr = context.contentResolver
+            val now = System.currentTimeMillis()
+            val heartbeat = try {
+                Settings.Secure.getLong(cr, "vpn_autoswitch_heartbeat", 0L)
+            } catch (t: Throwable) {
+                0L
+            }
+            val moduleVersion = try {
+                Settings.Secure.getInt(cr, "vpn_autoswitch_module_version", 0)
+            } catch (t: Throwable) {
+                0
+            }
+            val runtime = readJson(cr, RuntimeDiagnostics.RUNTIME_KEY)
+            val failure = readJson(cr, RuntimeDiagnostics.FAILURE_KEY)
+            val inspection = AppsRepository.inspectVpn(context, config.vpnPackage)
             return Diagnostics(
-                heartbeat = try {
-                    Settings.Secure.getLong(cr, "vpn_autoswitch_heartbeat", 0L)
-                } catch (t: Throwable) {
-                    0L
-                },
+                heartbeat = heartbeat,
                 alwaysOnApp = try {
                     Settings.Secure.getString(cr, "always_on_vpn_app")
                 } catch (t: Throwable) {
@@ -65,17 +94,51 @@ data class Diagnostics(
                 },
                 network = networkLabel(context),
                 log = ModuleLog.read(context),
-                moduleVersion = try {
-                    Settings.Secure.getInt(cr, "vpn_autoswitch_module_version", 0)
-                } catch (t: Throwable) {
-                    0
-                },
+                moduleVersion = moduleVersion,
                 currentSsid = try {
                     Settings.Secure.getString(cr, "vpn_autoswitch_ssid").orEmpty()
                 } catch (t: Throwable) {
                     ""
-                }
+                },
+                vpnPackage = config.vpnPackage,
+                vpnInstalled = inspection?.installed,
+                vpnEnabled = inspection?.enabled,
+                vpnHasService = inspection?.hasVpnService,
+                vpnConnected = hasVpnTransport(context),
+                activeRule = runtime?.optString("activeRule").orEmpty(),
+                ruleDetail = runtime?.optString("detail").orEmpty(),
+                ruleUpdatedAt = runtime?.optLong("updatedAt", 0L) ?: 0L,
+                lastFailureAt = failure?.optLong("at", 0L) ?: 0L,
+                lastFailureStage = failure?.optString("stage").orEmpty(),
+                lastFailurePackage = failure?.optString("vpnPackage").orEmpty(),
+                lastFailureStreak = failure?.optInt("failureStreak", 0) ?: 0,
+                heartbeatFresh = DiagnosticsPolicy.isHeartbeatFresh(heartbeat, now),
+                moduleState = DiagnosticsPolicy.moduleState(
+                    heartbeat,
+                    moduleVersion,
+                    BuildConfig.VERSION_CODE,
+                    now,
+                ),
             )
+        }
+
+        private fun readJson(
+            cr: android.content.ContentResolver,
+            key: String,
+        ): JSONObject? = try {
+            Settings.Secure.getString(cr, key)?.let { JSONObject(it) }
+        } catch (t: Throwable) {
+            null
+        }
+
+        private fun hasVpnTransport(context: Context): Boolean = try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            cm.allNetworks.any { network ->
+                cm.getNetworkCapabilities(network)
+                    ?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+            }
+        } catch (t: Throwable) {
+            false
         }
 
         private fun networkLabel(context: Context): String = try {
@@ -120,7 +183,7 @@ class AppState(private val context: Context) {
     var appsLoading by mutableStateOf(false)
     var pickerMode by mutableIntStateOf(MODE_MULTI)
     var pickerSelection by mutableStateOf(setOf<String>())
-    var diagnostics by mutableStateOf(Diagnostics.load(context))
+    var diagnostics by mutableStateOf(Diagnostics.load(context, config))
 
     private val executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -146,7 +209,7 @@ class AppState(private val context: Context) {
     }
 
     fun refreshDiagnostics() {
-        diagnostics = Diagnostics.load(context)
+        diagnostics = Diagnostics.load(context, config)
     }
 
     fun loadApps(force: Boolean = false) {

@@ -12,6 +12,10 @@ fun signingValue(env: String, prop: String): String? =
     System.getenv(env)?.takeIf { it.isNotBlank() }
         ?: signingProps.getProperty(prop)?.takeIf { it.isNotBlank() }
 
+// 版本只在这里维护；CI 通过 :app:printVersionName 读取，避免解析脚本
+val appVersionCode = 66
+val appVersionName = "1.33.0"
+
 val storePath = signingValue("KEYSTORE_FILE", "storeFile")
 val storePwd = signingValue("KEYSTORE_PASSWORD", "storePassword")
 val signingAlias = signingValue("KEY_ALIAS", "keyAlias")
@@ -34,8 +38,8 @@ android {
         applicationId = "com.vpnautoswitch.module"
         minSdk = 26
         targetSdk = 37
-        versionCode = 65
-        versionName = "1.32.20"
+        versionCode = appVersionCode
+        versionName = appVersionName
     }
 
     buildFeatures {
@@ -89,6 +93,10 @@ android {
 tasks.matching { it.name.startsWith("check") && it.name.endsWith("AarMetadata") }
     .configureEach { enabled = false }
 
+tasks.register("printVersionName") {
+    doLast { println(appVersionName) }
+}
+
 dependencies {
     // 只编译期可见，运行时由 LSPosed 提供
     compileOnly("de.robv.android.xposed:api:82")
@@ -102,4 +110,6 @@ dependencies {
     implementation("org.jetbrains.compose.foundation:foundation-android:1.12.0")
     implementation("org.jetbrains.compose.ui:ui-android:1.12.0")
     implementation("androidx.activity:activity-compose:1.13.0")
+
+    testImplementation("junit:junit:4.13.2")
 }

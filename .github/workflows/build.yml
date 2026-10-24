@@ -26,39 +26,143 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install SDK platform
-        run: sdkmanager "platforms;android-37" "build-tools;37.0.0" || true
+        run: sdkmanager "platforms;android-37" "build-tools;37.0.0"
+
+      - name: Validate signing secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          RELEASE_SIGNING_SHA256: ${{ secrets.RELEASE_SIGNING_SHA256 }}
+        run: |
+          set -euo pipefail
+          names=(KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD)
+          present=0
+          missing=()
+          for name in "${names[@]}"; do
+            if [ -n "${!name:-}" ]; then
+              present=$((present + 1))
+            else
+              missing+=("$name")
+            fi
+          done
+
+          if [ "$present" -ne 0 ] && [ "$present" -ne 4 ]; then
+            echo "::error::签名 Secret 不完整，缺少：${missing[*]}"
+            exit 1
+          fi
+
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            if [ "$present" -ne 4 ]; then
+              echo "::error::发布 tag 必须配置全部 4 个签名 Secret，缺少：${missing[*]}"
+              exit 1
+            fi
+            if [ -z "${RELEASE_SIGNING_SHA256:-}" ]; then
+              echo "::error::发布 tag 必须配置 RELEASE_SIGNING_SHA256"
+              exit 1
+            fi
+            echo "release signing: enabled"
+          elif [ "$present" -eq 0 ]; then
+            echo "release signing: not configured, fall back to debug signing"
+          else
+            echo "release signing: enabled"
+          fi
 
       - name: Prepare keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
+          set -euo pipefail
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
             echo "KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
             echo "keystore ready"
           else
-            echo "no keystore secret, will fall back to debug signing"
+            echo "no keystore secret, using debug signing"
           fi
+
+      - name: Check tag matches versionName
+        if: ${{ github.ref_type == 'tag' }}
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          VERSION="$(./gradlew -q :app:printVersionName | tail -n 1 | tr -d '[:space:]')"
+          if [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "::error::Tag '$GITHUB_REF_NAME' 与 versionName '$VERSION' 不一致，应为 v$VERSION"
+            exit 1
+          fi
+          echo "tag ok: $GITHUB_REF_NAME"
+
+      - name: Run unit tests
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:test --no-daemon
 
       - name: Build release
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Verify APK signature
+        env:
+          RELEASE_SIGNING_SHA256: ${{ secrets.RELEASE_SIGNING_SHA256 }}
         run: |
-          chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          set -euo pipefail
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          APKSIGNER="$(find "$SDK/build-tools" -maxdepth 2 -name apksigner -type f | sort -V | tail -n 1)"
+          if [ -z "$APKSIGNER" ] || [ ! -x "$APKSIGNER" ]; then
+            echo "::error::找不到 apksigner"
+            exit 1
+          fi
+
+          expected=""
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            expected="$(echo "$RELEASE_SIGNING_SHA256" | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')"
+          fi
+
+          for APK in app/build/outputs/apk/release/*.apk; do
+            echo "== $APK"
+            "$APKSIGNER" verify --verbose --print-certs "$APK"
+
+            if [ -n "$expected" ]; then
+              actual="$("$APKSIGNER" verify --print-certs "$APK" \
+                | sed -n 's/.*certificate SHA-256 digest: *//p' | head -n 1 \
+                | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')"
+              if [ -z "$actual" ]; then
+                echo "::error::读不到签名证书 SHA-256"
+                exit 1
+              fi
+              if [ "$actual" != "$expected" ]; then
+                echo "::error::APK 签名证书与 RELEASE_SIGNING_SHA256 不一致"
+                exit 1
+              fi
+              echo "signing certificate matches"
+            fi
+          done
+
+      - name: Write APK checksum
+        run: |
+          cd app/build/outputs/apk/release
+          sha256sum *.apk > apk-sha256.txt
+          cat apk-sha256.txt
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: VpnAutoSwitch-apk
-          path: app/build/outputs/apk/release/*.apk
+          path: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/release/apk-sha256.txt
           if-no-files-found: error
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/release/*.apk
+          files: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/release/apk-sha256.txt
           generate_release_notes: true
