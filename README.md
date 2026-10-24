@@ -135,13 +135,13 @@ VpnAutoSwitch/
 Release 经 R8 压缩后是 **单 dex、约 1.3 MB**（Compose + Miuix 一起压缩进去）。
 单 dex 对 Xposed 模块很有意义：模块 APK 会被整体加载进 system_server，dex 越少越不容易出问题。
 
-已经编译好的安装包：`VpnAutoSwitch-1.1.0.apk`（可直接安装）。
+已经编译好的安装包：`app-release.apk`（v1.32.20，可直接安装）。
 
 ---
 
 ## 四、安装步骤
 
-1. 安装 `VpnAutoSwitch-1.24.0.apk`（覆盖旧版本即可，配置会保留）。
+1. 安装 `app-release.apk`（v1.32.20，覆盖旧版本即可，配置会保留）。
 2. 打开 **LSPosed 管理器 → 模块 → VPN 自动开关**：
    - 启用模块；
    - **作用域只勾「系统框架」**（不要勾目标应用，勾了也没用）；
