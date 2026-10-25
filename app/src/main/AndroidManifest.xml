@@ -53,6 +53,21 @@
             </intent-filter>
         </activity>
 
+        <!-- 快捷设置磁贴：暂停 / 恢复自动联动 -->
+        <service
+            android:name=".VpnTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_vpn"
+            android:label="@string/tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+        </service>
+
         <!-- 供 system_server 里的模块进程读取配置（只读，无敏感数据） -->
         <provider
             android:name=".ConfigProvider"

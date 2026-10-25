@@ -386,17 +386,22 @@ private fun HeroStatusCard(state: AppState) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp)) {
             Text(
-                text = if (loaded) "运行中" else "等待注入",
+                text = when {
+                    !loaded -> "等待注入"
+                    state.diagnostics.paused -> "已暂停"
+                    else -> "运行中"
+                },
                 fontSize = 26.sp,
                 fontWeight = FontWeight.Bold,
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = when {
+                    !loaded -> "超过 60 秒没有收到系统框架心跳，去 LSPosed 里检查作用域并重启"
                     oldModule -> "App 已更新到 v${BuildConfig.VERSION_CODE}，" +
                         "系统框架仍是 v${state.diagnostics.moduleVersion}，重启手机后生效"
-                    loaded -> "系统框架心跳 ${formatAge(age)}前 · 当前网络 ${state.diagnostics.network}"
-                    else -> "超过 60 秒没有收到系统框架心跳，去 LSPosed 里检查作用域并重启"
+                    state.diagnostics.paused -> "快捷磁贴暂停了自动联动，点「恢复联动」或磁贴恢复"
+                    else -> "系统框架心跳 ${formatAge(age)}前 · 当前网络 ${state.diagnostics.network}"
                 },
                 fontSize = 12.sp,
                 color = colors.onSurfaceVariantSummary,
@@ -414,6 +419,9 @@ private fun HeroStatusCard(state: AppState) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(text = "打开 LSPosed", onClick = { state.openLsposed() })
                 TextButton(text = "刷新", onClick = { state.refreshDiagnostics() })
+                if (state.diagnostics.paused) {
+                    TextButton(text = "恢复联动", onClick = { state.togglePause() })
+                }
             }
         }
     }
@@ -965,7 +973,8 @@ private const val CHANGELOG_TIPS =
     "1.33.0：稳定性版本。修复延迟启动/关闭任务失效不彻底、看门狗重复排队、关闭验证链误伤新会话、" +
         "开机初始化顺序等问题；新增每 15 秒独立心跳与「设置 → 状态诊断 → 一键自检」，" +
         "可直接检查模块运行、VPN 客户端、当前命中规则与最近失败，并复制诊断报告；" +
-        "升级后自动清空旧版本日志，修复部分应用图标缺失或模糊。\n" +
+        "升级后自动清空旧版本日志，修复部分应用图标缺失或模糊；" +
+        "新增快捷设置磁贴，点按暂停 / 恢复自动联动，模块未运行时点按打开 App。\n" +
         "1.32.20：新增「指定 Wi-Fi 开 VPN / 关 VPN」：可按 Wi-Fi 名称强制开启或关闭 VPN，" +
         "优先级高于目标应用与网络类型开关；设置页「网络条件」里可添加、删除，支持一键加入当前 Wi-Fi。"
 

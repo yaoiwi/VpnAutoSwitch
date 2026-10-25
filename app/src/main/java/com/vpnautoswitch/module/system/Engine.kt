@@ -18,6 +18,7 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.widget.Toast
 import com.vpnautoswitch.module.Config
+import com.vpnautoswitch.module.ModuleContract
 import de.robv.android.xposed.XposedBridge
 
 /**
@@ -136,6 +137,9 @@ internal object Engine {
 
     /** 每次关闭验证链的代次；新的开启意图或新的关闭链都会推进它 */
     private var offGeneration = 0
+
+    /** 快捷磁贴暂停自动联动；只影响自动化，不改用户配置 */
+    private var automationPaused = false
 
     /** 初始化还没完成时按顺序缓存事件，避免先操作 VPN、随后又被 boot 清理掉 */
     private sealed interface PendingEvent {
@@ -264,9 +268,70 @@ internal object Engine {
             return
         }
         booted = true
+        automationPaused = readPaused(ctx)
         log(ctx, "module ready (death hooks + watchdog)")
         startHeartbeat()
         replayPendingEvents()
+        publishRuntime(ctx)
+    }
+
+    private fun readPaused(ctx: Context): Boolean = try {
+        Settings.Secure.getInt(ctx.contentResolver, ModuleContract.PAUSED_KEY, 0) == 1
+    } catch (t: Throwable) {
+        false
+    }
+
+    /**
+     * 快捷磁贴 / App 触发的暂停开关。
+     *
+     * 暂停只停止自动化，不主动断开当前 VPN；恢复时按当前前台与网络规则重新对账。
+     */
+    private fun togglePause(ctx: Context) {
+        val next = !automationPaused
+        val ok = try {
+            Settings.Secure.putInt(
+                ctx.contentResolver,
+                ModuleContract.PAUSED_KEY,
+                if (next) 1 else 0,
+            )
+            true
+        } catch (t: Throwable) {
+            false
+        }
+        if (!ok) {
+            log(ctx, "toggle pause failed: settings write rejected")
+            return
+        }
+
+        automationPaused = next
+        if (next) {
+            // 丢掉排队中的自动化动作，保持当前 VPN 状态不动
+            offToken++
+            startToken++
+            aliveTargets.clear()
+            offAppForeground = null
+            stopWatchdog()
+            log(ctx, "automation paused by tile")
+        } else {
+            log(ctx, "automation resumed by tile")
+            val cfg = ConfigRepo.get(ctx)
+            val foreground = lastForeground
+            if (foreground != null &&
+                foreground != cfg.vpnPackage &&
+                isProcessAlive(ctx, foreground)
+            ) {
+                handleForeground(foreground)
+            } else {
+                handleNetworkChanged()
+            }
+            if (!cfg.enabled || cfg.vpnPackage.isEmpty()) {
+                // 配置本身已停用，不做额外动作
+            } else if (aliveTargets.isEmpty() && autoSession &&
+                !(isWifiOnActive(cfg) && isNetworkAllowed(cfg))
+            ) {
+                turnOff("automation resumed without target")
+            }
+        }
         publishRuntime(ctx)
     }
 
@@ -362,15 +427,19 @@ internal object Engine {
         if (rebootReceiverRegistered) return true
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                if (intent?.action == ACTION_CLEAR_LOG) {
-                    // 不写日志，否则刚清完又冒出一行
-                    ModuleLog.clear(ctx)
+                when (intent?.action) {
+                    ACTION_CLEAR_LOG -> {
+                        // 不写日志，否则刚清完又冒出一行
+                        ModuleLog.clear(ctx)
+                    }
+                    ModuleContract.ACTION_TOGGLE_PAUSE -> togglePause(ctx)
                 }
             }
         }
         try {
             val filter = IntentFilter().apply {
                 addAction(ACTION_CLEAR_LOG)
+                addAction(ModuleContract.ACTION_TOGGLE_PAUSE)
             }
             // Android 14+（targetSdk 34 起）注册非系统广播的接收器必须显式声明导出标志，
             // 否则 registerReceiver 会直接抛 SecurityException —— 表现就是 App 发什么广播都没人收，
@@ -407,6 +476,9 @@ internal object Engine {
     private fun currentRule(cfg: Config): Pair<String, String> {
         if (!cfg.enabled || cfg.vpnPackage.isEmpty()) {
             return "disabled" to "模块已关闭或未选择 VPN 客户端"
+        }
+        if (automationPaused) {
+            return "paused" to "快捷磁贴已暂停自动联动"
         }
         if (wifiSuppressed) {
             return "wifiOff" to (currentSsid?.let { "Wi-Fi \"$it\" 命中关闭规则" } ?: "命中关闭 Wi-Fi 规则")
@@ -471,6 +543,7 @@ internal object Engine {
         val ctx = context() ?: return
         val cfg = ConfigRepo.get(ctx)
         if (!cfg.enabled) return
+        if (automationPaused) return
 
         // 指定 Wi-Fi 规则优先于「网络类型总开关」
         val ssid = refreshSsid(ctx, lastTransport == 1)
@@ -530,6 +603,8 @@ internal object Engine {
             return
         }
 
+        if (automationPaused) return
+
         // 打开「关闭 VPN」列表里的应用：VPN 只要还连着就断开，
         // 并且在它退出之前一直压制自动开启（避免看门狗 5 秒后又把 VPN 拉起来）。
         if (foregroundKind == EnginePolicy.ForegroundKind.OFF_TARGET) {
@@ -586,6 +661,7 @@ internal object Engine {
     }
 
     private fun handleProcessDied(pkg: String) {
+        if (automationPaused) return
         if (pkg == offAppForeground) {
             offAppForeground = null
             log(context(), "$pkg (off trigger) exited")
@@ -657,6 +733,7 @@ internal object Engine {
     // ---------------------------------------------------------------- VPN 控制
 
     private fun ensureVpn(ctx: Context, cfg: Config) {
+        if (automationPaused) return
         // 任何新的授权开启意图都让此前排队的关闭验证链失效
         offGeneration++
         val settingPointsToUs = VpnSwitcher.currentAlwaysOn(ctx) == cfg.vpnPackage
@@ -1119,6 +1196,11 @@ internal object Engine {
             if (!cfg.enabled || cfg.vpnPackage.isEmpty()) {
                 if (VpnSwitcher.isActive(ctx.contentResolver)) turnOff("module disabled")
                 aliveTargets.clear()
+                watchdogRunning = false
+                return
+            }
+
+            if (automationPaused) {
                 watchdogRunning = false
                 return
             }

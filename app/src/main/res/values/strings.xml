@@ -2,4 +2,8 @@
 <resources>
     <string name="app_name">VPN 自动开关</string>
     <string name="xposed_description">打开指定应用时自动连接默认 VPN，划掉应用（进程结束）后自动断开。</string>
+    <string name="tile_label">VPN 自动开关</string>
+    <string name="tile_running">运行中</string>
+    <string name="tile_paused">已暂停</string>
+    <string name="tile_unavailable">模块未运行</string>
 </resources>

@@ -53,6 +53,7 @@
    - Optionally add banking or payment apps to **Disconnect on open**;
    - Choose your VPN client, then enable the module.
 4. Verify: the VPN icon appears when a target app opens and disappears after swiping it away.
+5. Optional: open the quick settings edit page and add the **VPN Auto Switch** tile. Tap to pause or resume automation; if the module is not running, tapping opens the app.
 
 > If you disconnect manually from the tile or the VPN client, the module will not reconnect immediately.
 > Reopening a target app is required. Most setup issues can be diagnosed from **Settings → Diagnostics → Self-check**.

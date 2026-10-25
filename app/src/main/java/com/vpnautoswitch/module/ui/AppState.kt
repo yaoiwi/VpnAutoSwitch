@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.vpnautoswitch.module.BuildConfig
 import com.vpnautoswitch.module.Config
+import com.vpnautoswitch.module.ModuleContract
 import com.vpnautoswitch.module.apps.AppInfo
 import com.vpnautoswitch.module.apps.AppsRepository
 import com.vpnautoswitch.module.system.Engine
@@ -62,6 +63,8 @@ data class Diagnostics(
     val lastFailureStreak: Int = 0,
     val heartbeatFresh: Boolean = false,
     val moduleState: DiagnosticsPolicy.ModuleState = DiagnosticsPolicy.ModuleState.NEVER,
+    /** 快捷磁贴暂停了自动联动 */
+    val paused: Boolean = false,
 ) {
     companion object {
         fun load(context: Context, config: Config): Diagnostics {
@@ -119,6 +122,11 @@ data class Diagnostics(
                     BuildConfig.VERSION_CODE,
                     now,
                 ),
+                paused = try {
+                    Settings.Secure.getInt(cr, ModuleContract.PAUSED_KEY, 0) == 1
+                } catch (t: Throwable) {
+                    false
+                },
             )
         }
 
@@ -210,6 +218,18 @@ class AppState(private val context: Context) {
 
     fun refreshDiagnostics() {
         diagnostics = Diagnostics.load(context, config)
+    }
+
+    /** 与快捷磁贴相同的暂停开关；App 自己不能写 Settings.Secure，只能请模块代改。 */
+    fun togglePause() {
+        try {
+            context.sendBroadcast(
+                Intent(ModuleContract.ACTION_TOGGLE_PAUSE).setPackage("android")
+            )
+        } catch (t: Throwable) {
+            // 忽略，模块没注入时不会有任何效果
+        }
+        mainHandler.postDelayed({ refreshDiagnostics() }, 500L)
     }
 
     fun loadApps(force: Boolean = false) {

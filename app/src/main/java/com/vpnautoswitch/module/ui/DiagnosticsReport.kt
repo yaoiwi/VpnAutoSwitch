@@ -213,6 +213,7 @@ internal object DiagnosticsReport {
 
     private fun ruleLabel(rule: String): String = when (rule) {
         "disabled" -> "模块未生效"
+        "paused" -> "磁贴已暂停"
         "wifiOff" -> "Wi-Fi 关闭规则"
         "wifiOn" -> "Wi-Fi 开启规则"
         "offTarget" -> "打开即关闭"
