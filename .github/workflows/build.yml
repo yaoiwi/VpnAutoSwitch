@@ -8,7 +8,8 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # ubuntu-latest 已开始迁移到 Ubuntu 26，setup-android v3 在新镜像上会失败
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
 
@@ -23,7 +24,30 @@ jobs:
           cache: gradle
 
       - name: Set up Android SDK
+        continue-on-error: true
         uses: android-actions/setup-android@v3
+
+      - name: Locate Android SDK
+        run: |
+          set -euo pipefail
+          if command -v sdkmanager >/dev/null 2>&1; then
+            echo "sdkmanager already on PATH"
+            exit 0
+          fi
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          for candidate in \
+            "$SDK/cmdline-tools/latest/bin" \
+            "$SDK/cmdline-tools/bin" \
+            "$SDK/tools/bin"; do
+            if [ -x "$candidate/sdkmanager" ]; then
+              echo "$candidate" >> "$GITHUB_PATH"
+              echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+              echo "using $candidate"
+              exit 0
+            fi
+          done
+          echo "::error::找不到 Android SDK / sdkmanager"
+          exit 1
 
       - name: Install SDK platform
         run: |
