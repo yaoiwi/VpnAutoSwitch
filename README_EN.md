@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/Kotlin-2.4-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin" />
   <img src="https://img.shields.io/badge/Compose-1.12-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white" alt="Compose" />
   <img src="https://img.shields.io/badge/Miuix-0.9.4-FF6B00?style=flat-square" alt="Miuix" />
-  <img src="https://img.shields.io/badge/Release-1.33.0-brightgreen?style=flat-square" alt="Release" />
+  <img src="https://img.shields.io/badge/Release-1.34.0-brightgreen?style=flat-square" alt="Release" />
   <img src="https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square" alt="License" />
 </p>
 
@@ -46,7 +46,7 @@
 
 ## 📖 Usage
 
-1. Install `app-release.apk` (v1.33.0, upgrading in place keeps your settings).
+1. Install `app-release.apk` (v1.34.0, upgrading in place keeps your settings).
 2. Open **LSPosed Manager → Modules**, enable this module, **select only the "System Framework" scope**, then reboot.
 3. Open the app:
    - Pick the apps that should turn the VPN on under **Target apps**;
