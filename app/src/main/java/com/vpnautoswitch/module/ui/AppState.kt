@@ -337,7 +337,9 @@ class AppState(private val context: Context) {
         if (parsed == null) {
             false
         } else {
-            save(parsed)
+            // 导入的配置可能来自旧设备，里面会有这台手机没装的应用，先摘掉
+            val gone = ConfigCleaner.findMissing(context, parsed)
+            save(if (gone.isEmpty()) parsed else parsed.withoutPackages(gone))
             refreshDiagnostics()
             true
         }
