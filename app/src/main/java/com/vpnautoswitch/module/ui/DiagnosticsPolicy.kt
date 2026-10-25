@@ -36,4 +36,26 @@ object DiagnosticsPolicy {
         moduleVersion != appVersion -> ModuleState.OLD_CODE
         else -> ModuleState.CURRENT
     }
+
+    /** 当前规则对 VPN 的预期状态；UNKNOWN 表示规则不强制开或关。 */
+    enum class ExpectedVpn { ON, OFF, UNKNOWN }
+
+    fun expectedVpn(activeRule: String): ExpectedVpn = when (activeRule) {
+        "target", "wifiOn" -> ExpectedVpn.ON
+        "offTarget", "wifiOff", "networkDisabled", "userOff" -> ExpectedVpn.OFF
+        else -> ExpectedVpn.UNKNOWN
+    }
+
+    /**
+     * 规则与实际隧道状态是否不一致。
+     *
+     * 返回 null 表示规则不强制开/关，无法判断；true 表示不一致。
+     * 这里不能把「连接中」当成失败，UI 只按提醒处理。
+     */
+    fun vpnMismatch(activeRule: String, vpnConnected: Boolean): Boolean? =
+        when (expectedVpn(activeRule)) {
+            ExpectedVpn.ON -> !vpnConnected
+            ExpectedVpn.OFF -> vpnConnected
+            ExpectedVpn.UNKNOWN -> null
+        }
 }

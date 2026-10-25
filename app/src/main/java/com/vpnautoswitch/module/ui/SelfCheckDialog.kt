@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -71,6 +72,9 @@ internal fun SelfCheckDialog(state: AppState, onDismiss: () -> Unit) {
     val ok = checks.count { it.status == CheckStatus.OK }
     val warn = checks.count { it.status == CheckStatus.WARN }
     val fail = checks.count { it.status == CheckStatus.FAIL }
+    val events = remember(diagnostics.log) {
+        diagnostics.log.lines().filter { it.isNotBlank() }.takeLast(6)
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -118,6 +122,33 @@ internal fun SelfCheckDialog(state: AppState, onDismiss: () -> Unit) {
                                 lineHeight = 17.sp,
                                 color = colors.onSurfaceVariantSummary,
                                 modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                    }
+                }
+                item {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "最近事件",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    if (events.isEmpty()) {
+                        Text(
+                            text = "暂无事件记录",
+                            fontSize = 12.sp,
+                            color = colors.onSurfaceVariantSummary,
+                        )
+                    } else {
+                        events.forEach { line ->
+                            Text(
+                                text = line,
+                                fontSize = 11.sp,
+                                lineHeight = 16.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = colors.onSurfaceVariantSummary,
+                                modifier = Modifier.padding(vertical = 1.dp),
                             )
                         }
                     }

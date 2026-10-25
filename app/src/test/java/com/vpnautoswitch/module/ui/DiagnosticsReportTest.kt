@@ -63,4 +63,32 @@ class DiagnosticsReportTest {
         assertEquals(CheckStatus.WARN, module.status)
         assertTrue(module.detail.contains("重启"))
     }
+
+    @Test
+    fun `target rule without tunnel transport is a warning`() {
+        val checks = DiagnosticsReport.buildChecks(
+            diagnostics = Diagnostics(
+                activeRule = "target",
+                vpnConnected = false,
+            ),
+            config = Config(vpnPackage = "com.example.vpn"),
+        )
+        val tunnel = checks.first { it.title == "隧道状态" }
+        assertEquals(CheckStatus.WARN, tunnel.status)
+        assertTrue(tunnel.detail.contains("没有 VPN transport"))
+    }
+
+    @Test
+    fun `off target rule with tunnel transport is a warning`() {
+        val checks = DiagnosticsReport.buildChecks(
+            diagnostics = Diagnostics(
+                activeRule = "offTarget",
+                vpnConnected = true,
+            ),
+            config = Config(vpnPackage = "com.example.vpn"),
+        )
+        val tunnel = checks.first { it.title == "隧道状态" }
+        assertEquals(CheckStatus.WARN, tunnel.status)
+        assertTrue(tunnel.detail.contains("仍有 VPN transport"))
+    }
 }

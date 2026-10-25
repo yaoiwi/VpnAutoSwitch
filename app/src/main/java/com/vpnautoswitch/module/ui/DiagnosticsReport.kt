@@ -78,6 +78,8 @@ internal object DiagnosticsReport {
             },
         )
 
+        checks += vpnTunnelCheck(diagnostics)
+
         val needsAlwaysOn = diagnostics.activeRule == "target" || diagnostics.activeRule == "wifiOn"
         checks += CheckItem(
             "始终开启的 VPN",
@@ -158,6 +160,38 @@ internal object DiagnosticsReport {
                 "VPN 客户端",
                 CheckStatus.OK,
                 "$pkg 已安装、启用并声明了 VpnService",
+            )
+        }
+    }
+
+    private fun vpnTunnelCheck(diagnostics: Diagnostics): CheckItem {
+        val actual = if (diagnostics.vpnConnected) "已连接" else "未连接"
+        if (diagnostics.activeRule.isEmpty()) {
+            return CheckItem("隧道状态", CheckStatus.UNKNOWN, "模块还没有上报规则；系统当前 $actual")
+        }
+        return when (DiagnosticsPolicy.expectedVpn(diagnostics.activeRule)) {
+            DiagnosticsPolicy.ExpectedVpn.ON -> CheckItem(
+                "隧道状态",
+                if (diagnostics.vpnConnected) CheckStatus.OK else CheckStatus.WARN,
+                if (diagnostics.vpnConnected) {
+                    "规则要求开启，系统 VPN transport 已存在"
+                } else {
+                    "规则要求开启，但系统没有 VPN transport。可能仍在连接，或客户端没有建立隧道"
+                },
+            )
+            DiagnosticsPolicy.ExpectedVpn.OFF -> CheckItem(
+                "隧道状态",
+                if (diagnostics.vpnConnected) CheckStatus.WARN else CheckStatus.OK,
+                if (diagnostics.vpnConnected) {
+                    "规则要求断开，但系统仍有 VPN transport。可能是其他 VPN，或关闭尚未完成"
+                } else {
+                    "规则要求断开，系统当前没有 VPN transport"
+                },
+            )
+            DiagnosticsPolicy.ExpectedVpn.UNKNOWN -> CheckItem(
+                "隧道状态",
+                if (diagnostics.vpnConnected) CheckStatus.OK else CheckStatus.UNKNOWN,
+                "系统当前 $actual；当前规则不强制开启或关闭",
             )
         }
     }

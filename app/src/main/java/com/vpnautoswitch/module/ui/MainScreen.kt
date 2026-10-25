@@ -970,6 +970,8 @@ private fun formatAge(ms: Long): String {
 private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 
 private const val CHANGELOG_TIPS =
+    "1.35.0：一键自检新增「隧道状态」检查，对照当前规则与系统实际 VPN transport；" +
+        "自检面板直接显示最近 6 条运行事件，连接/断开异常更容易定位。\n" +
     "1.34.1：卸载已选应用后，自动从「目标应用 / 打开即关闭」列表移除，不再显示失效开关；" +
         "重新安装该应用时默认关闭，不会继承卸载前的状态。\n" +
     "1.34.0：新增快捷设置磁贴，点按暂停 / 恢复自动联动，模块未运行时点按打开 App；" +
