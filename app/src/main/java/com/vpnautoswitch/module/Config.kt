@@ -74,7 +74,7 @@ data class Config(
 
     companion object {
         const val PREFS_NAME = "vpn_autoswitch_config"
-        private const val KEY_JSON = "config_json"
+        internal const val KEY_JSON = "config_json"
 
         fun parse(raw: String?): Config? {
             if (raw.isNullOrEmpty()) return null

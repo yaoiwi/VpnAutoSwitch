@@ -150,6 +150,25 @@ object AppsRepository {
         return bitmap
     }
 
+    /**
+     * 包是否仍然安装。
+     *
+     * 带 MATCH_DISABLED_COMPONENTS：用户只是在系统设置里「停用」应用时不算卸载，
+     * 否则下次启用会被当成新装，开关被静默关掉。
+     */
+    fun isInstalled(context: Context, packageName: String): Boolean {
+        if (packageName.isBlank()) return false
+        return try {
+            context.packageManager.getApplicationInfo(
+                packageName,
+                PackageManager.MATCH_DISABLED_COMPONENTS,
+            )
+            true
+        } catch (t: Throwable) {
+            false
+        }
+    }
+
     fun labelOf(context: Context, packageName: String): String = try {
         val pm = context.packageManager
         pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0)).toString()

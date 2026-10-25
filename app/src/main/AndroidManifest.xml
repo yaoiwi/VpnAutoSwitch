@@ -53,6 +53,16 @@
             </intent-filter>
         </activity>
 
+        <!-- 卸载清理：目标应用被删除后自动从配置里移除，重装回来默认关闭 -->
+        <receiver
+            android:name=".PackageRemovedReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_FULLY_REMOVED" />
+                <data android:scheme="package" />
+            </intent-filter>
+        </receiver>
+
         <!-- 快捷设置磁贴：暂停 / 恢复自动联动 -->
         <service
             android:name=".VpnTileService"

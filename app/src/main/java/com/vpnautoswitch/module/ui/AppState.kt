@@ -15,12 +15,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.vpnautoswitch.module.BuildConfig
 import com.vpnautoswitch.module.Config
+import com.vpnautoswitch.module.ConfigCleaner
 import com.vpnautoswitch.module.ModuleContract
 import com.vpnautoswitch.module.apps.AppInfo
 import com.vpnautoswitch.module.apps.AppsRepository
 import com.vpnautoswitch.module.system.Engine
 import com.vpnautoswitch.module.system.ModuleLog
 import com.vpnautoswitch.module.system.RuntimeDiagnostics
+import com.vpnautoswitch.module.withoutPackages
 import org.json.JSONObject
 import java.util.concurrent.Executors
 
@@ -195,6 +197,39 @@ class AppState(private val context: Context) {
 
     private val executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val prefs = context.getSharedPreferences(Config.PREFS_NAME, Context.MODE_PRIVATE)
+
+    /** 卸载广播在别的组件里改完配置后，界面要跟着变 */
+    private val prefsListener =
+        android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == Config.KEY_JSON) {
+                mainHandler.post { config = Config.load(context) }
+            }
+        }
+
+    init {
+        prefs.registerOnSharedPreferenceChangeListener(prefsListener)
+        // 旧版本没有卸载清理，打开 App 时补一次；删掉包名才能让重装默认关闭
+        executor.execute {
+            val gone = ConfigCleaner.findMissing(context, config)
+            if (gone.isNotEmpty()) {
+                mainHandler.post {
+                    val next = config.withoutPackages(gone)
+                    if (next != config) save(next)
+                }
+            }
+        }
+    }
+
+    /** Activity 销毁时解绑，避免监听器一直持有已销毁的界面 */
+    fun dispose() {
+        try {
+            prefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
+        } catch (t: Throwable) {
+            // 忽略
+        }
+        executor.shutdown()
+    }
 
     fun save(next: Config) {
         config = next

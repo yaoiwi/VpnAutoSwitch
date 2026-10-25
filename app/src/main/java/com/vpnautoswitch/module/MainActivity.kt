@@ -17,11 +17,15 @@ import kotlinx.coroutines.isActive
 
 class MainActivity : ComponentActivity() {
 
+    private var appState: AppState? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            val state = remember { AppState(this@MainActivity) }
+            val state = remember {
+                AppState(this@MainActivity).also { appState = it }
+            }
 
             // 停留在本界面时每 5 秒刷新一次运行状态（状态来自 Settings.Secure，随时读都有效）
             LaunchedEffect(Unit) {
@@ -52,5 +56,11 @@ class MainActivity : ComponentActivity() {
 
             App(state)
         }
+    }
+
+    override fun onDestroy() {
+        appState?.dispose()
+        appState = null
+        super.onDestroy()
     }
 }
