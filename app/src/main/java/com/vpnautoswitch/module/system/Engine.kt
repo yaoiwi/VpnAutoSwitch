@@ -128,6 +128,7 @@ internal object Engine {
     private var tileAttempts = 0
     private var reapplyCount = 0
     private var externalAttempts = 0
+    private var clientTestToken = 0
     private var lastExternalAt = 0L
     /** 本轮接管是否已经提示过「VPN 已开启」，避免设置写完但隧道没起来就误报 */
     private var connectedNotified = false
@@ -350,6 +351,100 @@ internal object Engine {
         publishRuntime(ctx)
     }
 
+    /**
+     * App 触发的客户端启动方式测试。
+     *
+     * 只测试“外部控制 Activity”和“直接启动 VpnService”，不测试 always-on：
+     * 测试 always-on 会改写系统常驻 VPN 设置，可能打断用户当前连接。
+     */
+    private fun testClient(ctx: Context, pkg: String, mode: String) {
+        val token = ++clientTestToken
+        val cfg = ConfigRepo.get(ctx)
+        when {
+            pkg.isEmpty() -> {
+                RuntimeDiagnostics.publishClientTest(ctx, pkg, mode, "failure", "没有选择 VPN 客户端")
+                return
+            }
+            cfg.vpnPackage != pkg -> {
+                RuntimeDiagnostics.publishClientTest(
+                    ctx, pkg, mode, "failure", "VPN 客户端已变化，请重新打开适配向导"
+                )
+                return
+            }
+            mode != "activity" && mode != "service" -> {
+                RuntimeDiagnostics.publishClientTest(ctx, pkg, mode, "failure", "未知的测试方式")
+                return
+            }
+            hasVpnTransport(ctx) -> {
+                RuntimeDiagnostics.publishClientTest(
+                    ctx, pkg, mode, "failure", "当前已有 VPN 连接，请先断开后再测试"
+                )
+                return
+            }
+        }
+
+        RuntimeDiagnostics.publishClientTest(
+            ctx, pkg, mode, "running",
+            if (mode == "activity") "正在请求客户端外部控制…" else "正在启动 VpnService…",
+        )
+        ExternalControl.resetProbe(pkg)
+        log(ctx, "client test start: $pkg / $mode")
+
+        val started = if (mode == "activity") {
+            ExternalControl.start(ctx, pkg)
+        } else {
+            ExternalControl.startVpnService(ctx, pkg)
+        }
+        if (!started) {
+            val detail = if (mode == "activity") {
+                "客户端没有可用的外部控制入口"
+            } else {
+                "无法启动客户端的 VpnService"
+            }
+            RuntimeDiagnostics.publishClientTest(ctx, pkg, mode, "failure", detail)
+            log(ctx, "client test failed to start: $detail")
+            return
+        }
+
+        pollClientTest(ctx, pkg, mode, token, 0)
+    }
+
+    private fun pollClientTest(
+        ctx: Context,
+        pkg: String,
+        mode: String,
+        token: Int,
+        attempt: Int,
+    ) {
+        if (token != clientTestToken) return
+        if (hasVpnTransport(ctx)) {
+            ExternalControl.remember(ctx, pkg, mode)
+            RuntimeDiagnostics.publishClientTest(
+                ctx, pkg, mode, "success",
+                if (mode == "activity") "外部控制成功，已记住该方式" else "VpnService 启动成功，已记住该方式",
+            )
+            log(ctx, "client test success: $pkg / $mode")
+            return
+        }
+        if (attempt >= 30) {
+            RuntimeDiagnostics.publishClientTest(
+                ctx, pkg, mode, "failure", "15 秒内没有检测到 VPN transport",
+            )
+            log(ctx, "client test timeout: $pkg / $mode")
+            return
+        }
+        handler.postDelayed({
+            pollClientTest(ctx, pkg, mode, token, attempt + 1)
+        }, 500L)
+    }
+
+    private fun forgetClientMode(ctx: Context, pkg: String) {
+        if (pkg.isEmpty()) return
+        ExternalControl.forget(ctx, pkg)
+        RuntimeDiagnostics.publishClientTest(ctx, pkg, "", "idle", "已清除记住的启动方式")
+        log(ctx, "client mode forgotten: $pkg")
+    }
+
     private fun startHeartbeat() {
         if (heartbeatStarted) return
         heartbeatStarted = true
@@ -448,6 +543,15 @@ internal object Engine {
                         ModuleLog.clear(ctx)
                     }
                     ModuleContract.ACTION_TOGGLE_PAUSE -> togglePause(ctx)
+                    ModuleContract.ACTION_TEST_CLIENT -> testClient(
+                        ctx,
+                        intent.getStringExtra(ModuleContract.EXTRA_CLIENT_PACKAGE).orEmpty(),
+                        intent.getStringExtra(ModuleContract.EXTRA_CLIENT_MODE).orEmpty(),
+                    )
+                    ModuleContract.ACTION_FORGET_CLIENT -> forgetClientMode(
+                        ctx,
+                        intent.getStringExtra(ModuleContract.EXTRA_CLIENT_PACKAGE).orEmpty(),
+                    )
                 }
             }
         }
@@ -455,6 +559,8 @@ internal object Engine {
             val filter = IntentFilter().apply {
                 addAction(ACTION_CLEAR_LOG)
                 addAction(ModuleContract.ACTION_TOGGLE_PAUSE)
+                addAction(ModuleContract.ACTION_TEST_CLIENT)
+                addAction(ModuleContract.ACTION_FORGET_CLIENT)
             }
             // Android 14+（targetSdk 34 起）注册非系统广播的接收器必须显式声明导出标志，
             // 否则 registerReceiver 会直接抛 SecurityException —— 表现就是 App 发什么广播都没人收，

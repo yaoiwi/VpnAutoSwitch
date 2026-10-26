@@ -157,6 +157,7 @@ fun MainScreen(state: AppState) {
         }
     }
     var showLog by remember { mutableStateOf(false) }
+    var showClientAdapter by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
     /** null=未打开；"on"=编辑「开 VPN」列表；"off"=编辑「关 VPN」列表 */
     var ssidMode by remember { mutableStateOf<String?>(null) }
@@ -267,6 +268,7 @@ fun MainScreen(state: AppState) {
                             overviewItems(
                                 state = state,
                                 onOpenApps = { goTo(1) },
+                                onOpenClientAdapter = { showClientAdapter = true },
                             )
                         }
 
@@ -316,6 +318,9 @@ fun MainScreen(state: AppState) {
     ssidMode?.let { mode ->
         SsidRuleDialog(mode = mode, state = state, onDismiss = { ssidMode = null })
     }
+    if (showClientAdapter) {
+        ClientAdapterDialog(state) { showClientAdapter = false }
+    }
 }
 
 // ---------------------------------------------------------------- 设置
@@ -323,6 +328,7 @@ fun MainScreen(state: AppState) {
 private fun LazyListScope.overviewItems(
     state: AppState,
     onOpenApps: () -> Unit,
+    onOpenClientAdapter: () -> Unit,
 ) {
     item { HeroStatusCard(state) }
 
@@ -383,6 +389,16 @@ private fun LazyListScope.overviewItems(
                 icon = MiuixIcons.Pin,
                 summary = vpnSummary(state),
                 onClick = onOpenApps,
+            )
+            SettingsActionWithArrow(
+                title = "客户端适配",
+                icon = MiuixIcons.Link,
+                summary = if (state.config.vpnPackage.isEmpty()) {
+                    "先选择默认 VPN 客户端，再检测启动方式"
+                } else {
+                    "检测 VpnService / 外部控制，测试并记住可用方式"
+                },
+                onClick = onOpenClientAdapter,
             )
         }
     }
@@ -1001,6 +1017,8 @@ private fun formatAge(ms: Long): String {
 private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 
 private const val CHANGELOG_TIPS =
+    "1.37.0：新增「客户端适配」向导，检测 VpnService、外部控制入口与快捷磁贴，" +
+        "可直接测试外部控制或 VpnService，并记住成功的启动方式。\n" +
     "1.36.0：目标应用从最近任务划掉时，即使前台服务让进程还活着也会断开 VPN；" +
         "可在「高级」关闭「划掉任务即断开」，关闭后恢复只有主进程结束才断开的行为。" +
         "「界面与动画」新增悬浮导航栏开关，可切换液态玻璃悬浮底栏和贴底普通导航栏。\n" +

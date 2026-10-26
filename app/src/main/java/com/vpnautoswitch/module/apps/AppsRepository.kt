@@ -11,6 +11,7 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import android.service.quicksettings.TileService
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import java.text.Collator
@@ -193,11 +194,47 @@ object AppsRepository {
         } catch (t: Throwable) {
             false
         }
+        val services = try {
+            pm.queryIntentServices(
+                Intent("android.net.VpnService").setPackage(packageName),
+                PackageManager.MATCH_DISABLED_COMPONENTS,
+            )
+        } catch (t: Throwable) {
+            emptyList()
+        }
+        val serviceName = (services.firstOrNull {
+            it.serviceInfo.permission == "android.permission.BIND_VPN_SERVICE"
+        } ?: services.firstOrNull {
+            it.serviceInfo.name.contains("Tun", ignoreCase = true)
+        })?.serviceInfo?.name
+        val externalStart = hasActivity(pm, packageName, "$packageName.action.START_CLASH")
+        val externalStop = hasActivity(pm, packageName, "$packageName.action.STOP_CLASH")
+        val quickTile = try {
+            pm.queryIntentServices(
+                Intent(TileService.ACTION_QS_TILE).setPackage(packageName),
+                0,
+            ).isNotEmpty()
+        } catch (t: Throwable) {
+            false
+        }
         return VpnClientInspection(
             installed = true,
             enabled = info.enabled,
             hasVpnService = hasService,
+            vpnServiceName = serviceName,
+            hasExternalStart = externalStart,
+            hasExternalStop = externalStop,
+            hasQuickTile = quickTile,
         )
+    }
+
+    private fun hasActivity(pm: PackageManager, pkg: String, action: String): Boolean = try {
+        pm.resolveActivity(
+            Intent(action).setPackage(pkg).addCategory(Intent.CATEGORY_DEFAULT),
+            PackageManager.MATCH_DEFAULT_ONLY,
+        ) != null
+    } catch (t: Throwable) {
+        false
     }
 }
 
@@ -205,4 +242,8 @@ data class VpnClientInspection(
     val installed: Boolean,
     val enabled: Boolean,
     val hasVpnService: Boolean,
+    val vpnServiceName: String? = null,
+    val hasExternalStart: Boolean = false,
+    val hasExternalStop: Boolean = false,
+    val hasQuickTile: Boolean = false,
 )

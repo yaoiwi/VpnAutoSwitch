@@ -13,6 +13,7 @@ internal object RuntimeDiagnostics {
 
     const val RUNTIME_KEY = "vpn_autoswitch_runtime"
     const val FAILURE_KEY = "vpn_autoswitch_last_failure"
+    const val CLIENT_TEST_KEY = "vpn_autoswitch_client_test"
 
     private const val SCHEMA = 1
     private const val TAG = "VpnAutoSwitch"
@@ -42,6 +43,27 @@ internal object RuntimeDiagnostics {
             Settings.Secure.putString(ctx.contentResolver, FAILURE_KEY, json.toString())
         } catch (t: Throwable) {
             XposedBridge.log("[$TAG] failure snapshot failed: $t")
+        }
+    }
+
+    fun publishClientTest(
+        ctx: Context,
+        vpnPackage: String,
+        mode: String,
+        status: String,
+        detail: String,
+    ) {
+        try {
+            val json = JSONObject()
+                .put("schema", SCHEMA)
+                .put("at", System.currentTimeMillis())
+                .put("vpnPackage", vpnPackage)
+                .put("mode", mode)
+                .put("status", status)
+                .put("detail", detail)
+            Settings.Secure.putString(ctx.contentResolver, CLIENT_TEST_KEY, json.toString())
+        } catch (t: Throwable) {
+            XposedBridge.log("[$TAG] client test snapshot failed: $t")
         }
     }
 }

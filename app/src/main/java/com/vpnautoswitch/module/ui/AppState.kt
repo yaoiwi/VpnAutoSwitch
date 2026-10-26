@@ -194,6 +194,8 @@ class AppState(private val context: Context) {
     var pickerMode by mutableIntStateOf(MODE_MULTI)
     var pickerSelection by mutableStateOf(setOf<String>())
     var diagnostics by mutableStateOf(Diagnostics.load(context, config))
+    internal var clientTest by mutableStateOf(ClientTest.load(context))
+        private set
 
     private val executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -253,6 +255,60 @@ class AppState(private val context: Context) {
 
     fun refreshDiagnostics() {
         diagnostics = Diagnostics.load(context, config)
+    }
+
+    fun refreshClientTest() {
+        val current = clientTest
+        val loaded = ClientTest.load(context)
+        // 新测试刚发出时，Settings 里可能还是上一次的结果；不要用它覆盖 running。
+        if (current?.status == "running" && (loaded == null || loaded.at < current.at)) return
+        clientTest = loaded
+    }
+
+    fun testClient(mode: String) {
+        val pkg = config.vpnPackage
+        if (pkg.isEmpty()) return
+        try {
+            context.sendBroadcast(
+                Intent(ModuleContract.ACTION_TEST_CLIENT)
+                    .setPackage("android")
+                    .putExtra(ModuleContract.EXTRA_CLIENT_PACKAGE, pkg)
+                    .putExtra(ModuleContract.EXTRA_CLIENT_MODE, mode)
+            )
+        } catch (t: Throwable) {
+            // 模块未注入时不会有响应，界面超时后会提示
+        }
+        clientTest = ClientTest(
+            at = System.currentTimeMillis(),
+            packageName = pkg,
+            mode = mode,
+            status = "running",
+            detail = "已发送测试请求…",
+        )
+    }
+
+    fun forgetClientMode() {
+        val pkg = config.vpnPackage
+        if (pkg.isEmpty()) return
+        try {
+            context.sendBroadcast(
+                Intent(ModuleContract.ACTION_FORGET_CLIENT)
+                    .setPackage("android")
+                    .putExtra(ModuleContract.EXTRA_CLIENT_PACKAGE, pkg)
+            )
+        } catch (t: Throwable) {
+            // 忽略
+        }
+        mainHandler.postDelayed({ refreshClientTest() }, 500L)
+    }
+
+    fun markClientTestTimeout() {
+        val current = clientTest ?: return
+        if (current.status != "running") return
+        clientTest = current.copy(
+            status = "failure",
+            detail = "没有收到模块响应，确认模块已启用并重启后再试",
+        )
     }
 
     /** 与快捷磁贴相同的暂停开关；App 自己不能写 Settings.Secure，只能请模块代改。 */

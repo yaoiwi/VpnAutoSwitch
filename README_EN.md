@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/Kotlin-2.4-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin" />
   <img src="https://img.shields.io/badge/Compose-1.12-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white" alt="Compose" />
   <img src="https://img.shields.io/badge/Miuix-0.9.4-FF6B00?style=flat-square" alt="Miuix" />
-  <img src="https://img.shields.io/badge/Release-1.36.0-brightgreen?style=flat-square" alt="Release" />
+  <img src="https://img.shields.io/badge/Release-1.37.0-brightgreen?style=flat-square" alt="Release" />
   <img src="https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square" alt="License" />
 </p>
 
@@ -32,7 +32,7 @@
 | **📶 Wi-Fi rules** | **🔍 Built-in self-check** |
 | Force the VPN on or off for specific SSIDs<br>Takes priority over app rules and network type | Inspect module heartbeat, LSPosed scope, client status<br>current rule, always-on target and last failure |
 | **🧩 Client compatibility** | **🪶 Lightweight · offline** |
-| System always-on first; Clash-style external control<br>VpnService restart or quick-settings tile as fallback | About 1.6 MB after R8, single dex<br>No network access, no telemetry, config stays on device |
+| System always-on first; Clash-style external control<br>Adapter wizard tests and remembers the working mode | About 1.6 MB after R8, single dex<br>No network access, no telemetry, config stays on device |
 
 ---
 
@@ -46,12 +46,13 @@
 
 ## 📖 Usage
 
-1. Tap to download [`app-release.apk`](https://github.com/yaoiwi/VpnAutoSwitch/releases/latest/download/app-release.apk) (v1.36.0, upgrading in place keeps your settings).
+1. Tap to download [`app-release.apk`](https://github.com/yaoiwi/VpnAutoSwitch/releases/latest/download/app-release.apk) (v1.37.0, upgrading in place keeps your settings).
 2. Open **LSPosed Manager → Modules**, enable this module, **select only the "System Framework" scope**, then reboot.
 3. Open the app:
    - Pick the apps that should turn the VPN on under **Target apps**;
    - Optionally add banking or payment apps to **Disconnect on open**;
-   - Choose your VPN client, then enable the module.
+   - Choose your VPN client, then enable the module;
+   - **Client adapter** detects available launch modes and can test external control / VpnService.
 4. Verify: the VPN icon appears when a target app opens and disappears after swiping it away.
 5. Optional: open the quick settings edit page and add the **VPN Auto Switch** tile. Tap to pause or resume automation; if the module is not running, tapping opens the app.
 
@@ -79,7 +80,7 @@ Output: `app/build/outputs/apk/release/app-release.apk`
 
 | Limitation | Details |
 | --- | --- |
-| The client must be startable in background | System always-on is preferred; Clash-style clients use external control, a VpnService restart or a quick-settings tile. Otherwise enable auto-connect inside the client |
+| The client must be startable in background | System always-on is preferred; Clash-style clients use external control, a VpnService restart or a quick-settings tile. Otherwise enable auto-connect inside the client; use **Client adapter** to test the available modes |
 | Manually connected tunnels need a force stop | Clearing always-on does not tear down a tunnel you started by hand. If it is still up after 1.2 s, the client process is stopped (can be disabled in Advanced) |
 | Swiping a task disconnects by default | Removing a target app from recents disconnects even if a foreground service keeps its process alive. Disable **Disconnect on task removal** in Advanced to require the main process to die. If the task callback is unavailable, process death still triggers disconnect |
 | Shares the system always-on VPN setting | While active, that setting points to your client and is restored on exit. Main user only; heavily customized ROMs may need log-based adjustments |

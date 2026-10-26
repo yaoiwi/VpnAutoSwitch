@@ -40,11 +40,36 @@ internal object ExternalControl {
 
     fun isKnown(ctx: Context, pkg: String): Boolean = modeOf(ctx, pkg) != null
 
+    /** App 进程里可能缓存了旧值；界面刷新时强制重新读 Settings。 */
+    fun modeOfFresh(ctx: Context, pkg: String): String? {
+        cachedKnown = null
+        return modeOf(ctx, pkg)
+    }
+
     fun remember(ctx: Context, pkg: String, mode: String) {
         if (pkg.isEmpty()) return
         val set = known(ctx)
         set.removeAll { it.startsWith("$pkg|") }
         set.add("$pkg|$mode")
+        saveKnown(ctx, set)
+    }
+
+    fun forget(ctx: Context, pkg: String) {
+        if (pkg.isEmpty()) return
+        val set = known(ctx)
+        if (!set.removeAll { it.startsWith("$pkg|") }) return
+        saveKnown(ctx, set)
+    }
+
+    /** 重新测试时清掉“这个客户端不行”的缓存，允许重新探测。 */
+    fun resetProbe(pkg: String) {
+        if (pkg.isEmpty()) return
+        unsupportedStart.remove(pkg)
+        unsupportedStop.remove(pkg)
+        noVpnService.remove(pkg)
+    }
+
+    private fun saveKnown(ctx: Context, set: MutableSet<String>) {
         try {
             Settings.Secure.putString(ctx.contentResolver, KEY, set.joinToString(","))
         } catch (t: Throwable) {
