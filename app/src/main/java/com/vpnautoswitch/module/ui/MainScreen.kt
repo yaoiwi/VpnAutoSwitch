@@ -694,6 +694,15 @@ private fun LazyListScope.settingsItems(
                 onCheckedChange = { state.save(state.config.copy(lockdown = it)) },
             )
             SettingsSwitch(
+                title = "划掉任务即断开",
+                summary = "从最近任务划掉目标应用时，即使前台服务让进程还活着，也断开 VPN",
+                icon = MiuixIcons.HorizontalSplit,
+                checked = state.config.disconnectOnTaskRemoved,
+                onCheckedChange = {
+                    state.save(state.config.copy(disconnectOnTaskRemoved = it))
+                },
+            )
+            SettingsSwitch(
                 title = "显示开关提示（Toast）",
                 summary = "VPN 开启 / 关闭时在屏幕上弹出提示",
                 icon = MiuixIcons.Messages,
@@ -970,6 +979,8 @@ private fun formatAge(ms: Long): String {
 private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 
 private const val CHANGELOG_TIPS =
+    "1.36.0：目标应用从最近任务划掉时，即使前台服务让进程还活着也会断开 VPN；" +
+        "可在「高级」关闭「划掉任务即断开」，关闭后恢复只有主进程结束才断开的行为。\n" +
     "1.35.0：一键自检新增「隧道状态」检查，对照当前规则与系统实际 VPN transport；" +
         "自检面板直接显示最近 6 条运行事件，连接/断开异常更容易定位。\n" +
     "1.34.1：卸载已选应用后，自动从「目标应用 / 打开即关闭」列表移除，不再显示失效开关；" +
@@ -989,8 +1000,9 @@ private const val PRIVACY_TIPS =
 private const val USAGE_TIPS =
     "1. 在 LSPosed 中启用本模块，作用域只勾选「系统框架」，然后重启手机。\n" +
         "2. 在「应用」页选择目标应用、默认 VPN 客户端；需要反向联动时再选「打开时关闭 VPN」的列表。\n" +
-        "3. 打开目标应用 → 自动连接 VPN；从最近任务里划掉它（进程结束）→ 自动断开。\n\n" +
-        "工作原理：模块只注入 system_server，监听目标应用的界面显示（activityResumed）与进程结束事件，" +
+        "3. 打开目标应用 → 自动连接 VPN；从最近任务里划掉它 → 自动断开（默认即使进程还在）。\n\n" +
+        "工作原理：模块只注入 system_server，监听目标应用的界面显示（activityResumed）、" +
+        "最近任务移除与进程结束事件，" +
         "通过改写系统的「始终开启的 VPN」（always_on_vpn_app）驱动连接 / 断开。\n" +
         "客户端不响应常驻 VPN 时，依次尝试它自己的外部控制广播、快捷设置磁贴、以及重启它的 VpnService，" +
         "全程在后台完成，不会把 VPN 客户端界面弹到前台。"

@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/Kotlin-2.4-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin" />
   <img src="https://img.shields.io/badge/Compose-1.12-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white" alt="Compose" />
   <img src="https://img.shields.io/badge/Miuix-0.9.4-FF6B00?style=flat-square" alt="Miuix" />
-  <img src="https://img.shields.io/badge/Release-1.35.0-brightgreen?style=flat-square" alt="Release" />
+  <img src="https://img.shields.io/badge/Release-1.36.0-brightgreen?style=flat-square" alt="Release" />
   <img src="https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square" alt="License" />
 </p>
 
@@ -28,7 +28,7 @@
 
 | **🎯 按应用联动** | **🛡️ 打开即关闭** |
 | --- | --- |
-| 打开目标应用自动连接 VPN<br>划掉应用、主进程结束自动断开 | 打开银行、支付、内网应用时<br>若 VPN 已连接立即断开，退出前不再自动连 |
+| 打开目标应用自动连接 VPN<br>划掉应用任务、主进程结束自动断开 | 打开银行、支付、内网应用时<br>若 VPN 已连接立即断开，退出前不再自动连 |
 | **📶 按 Wi-Fi 规则** | **🔍 一键自检** |
 | 指定 Wi-Fi 强制开启或关闭 VPN<br>优先级高于目标应用与网络类型开关 | 检查模块心跳、LSPosed 作用域、客户端状态<br>当前命中规则、always-on 与最近失败 |
 | **🧩 客户端适配** | **🪶 轻量 · 离线** |
@@ -46,7 +46,7 @@
 
 ## 📖 使用文档
 
-1. 点击下载 [`app-release.apk`](https://github.com/yaoiwi/VpnAutoSwitch/releases/latest/download/app-release.apk)（v1.35.0，覆盖安装即可，配置会保留）。
+1. 点击下载 [`app-release.apk`](https://github.com/yaoiwi/VpnAutoSwitch/releases/latest/download/app-release.apk)（v1.36.0，覆盖安装即可，配置会保留）。
 2. 打开 **LSPosed 管理器 → 模块**，启用本模块，**作用域只勾选「系统框架」**，然后重启手机。
 3. 打开 App：
    - 「目标应用」选择需要自动连接 VPN 的应用；
@@ -81,7 +81,7 @@
 | --- | --- |
 | 客户端要能被自动拉起 | 优先使用系统「始终开启的 VPN」；Clash 系走外部控制、重启 `VpnService` 或快捷磁贴。都不支持时需在客户端里打开「自动连接」 |
 | 手动连上的 VPN 需要强制停止 | 清除常驻设置不会断开手动连接，1.2 秒后仍连着会结束客户端进程（可在「高级」关闭） |
-| 「划掉」必须是进程结束 | 带前台服务的应用划掉后进程仍在，VPN 会保持连接；回调失效时由 5 秒看门狗兜底 |
+| 「划掉」默认即断开 | 从最近任务划掉目标应用后，即使前台服务让进程还活着也会断开；可在「高级」关闭「划掉任务即断开」，关闭后只有主进程结束才断开。任务回调不可用时仍按进程结束断开 |
 | 与系统常驻 VPN 共用设置 | 模块开启期间该设置指向你的客户端，关闭时恢复原值；只对主用户生效，深度定制 ROM 可能需要按日志适配 |
 
 ---

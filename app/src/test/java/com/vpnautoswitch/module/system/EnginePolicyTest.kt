@@ -62,6 +62,18 @@ class EnginePolicyTest {
     }
 
     @Test
+    fun `task removal requires enabled target alive and not suppressed`() {
+        assertTrue(EnginePolicy.shouldHandleTaskRemoval(true, true, false, false, false, true, true))
+        assertFalse(EnginePolicy.shouldHandleTaskRemoval(false, true, false, false, false, true, true))
+        assertFalse(EnginePolicy.shouldHandleTaskRemoval(true, false, false, false, false, true, true))
+        assertFalse(EnginePolicy.shouldHandleTaskRemoval(true, true, true, false, false, true, true))
+        assertFalse(EnginePolicy.shouldHandleTaskRemoval(true, true, false, true, false, true, true))
+        assertFalse(EnginePolicy.shouldHandleTaskRemoval(true, true, false, false, true, true, true))
+        assertFalse(EnginePolicy.shouldHandleTaskRemoval(true, true, false, false, false, false, true))
+        assertFalse(EnginePolicy.shouldHandleTaskRemoval(true, true, false, false, false, true, false))
+    }
+
+    @Test
     fun `unknown process state never means dead`() {
         assertTrue(EnginePolicy.shouldEnsureForProcessState(true))
         assertTrue(EnginePolicy.shouldEnsureForProcessState(null))

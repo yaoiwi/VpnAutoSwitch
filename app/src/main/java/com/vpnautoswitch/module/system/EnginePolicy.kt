@@ -34,6 +34,29 @@ internal object EnginePolicy {
     fun shouldScheduleOffAfterDeath(removedTarget: Boolean, remainingTargets: Int): Boolean =
         removedTarget && remainingTargets == 0
 
+    /**
+     * 是否处理“从最近任务划掉”。
+     *
+     * 只有目标应用、功能开启、没有暂停/关闭规则压制，并且这个包确实在存活集合里时才处理，
+     * 避免把任务恢复、分屏里另一个任务等场景误判成退出。
+     */
+    fun shouldHandleTaskRemoval(
+        enabled: Boolean,
+        featureEnabled: Boolean,
+        paused: Boolean,
+        offAppForeground: Boolean,
+        wifiSuppressed: Boolean,
+        target: Boolean,
+        aliveTarget: Boolean,
+    ): Boolean =
+        enabled &&
+            featureEnabled &&
+            !paused &&
+            !offAppForeground &&
+            !wifiSuppressed &&
+            target &&
+            aliveTarget
+
     /** null 表示进程列表不可信，不能当成全部死亡。 */
     fun shouldEnsureForProcessState(anyTargetAlive: Boolean?): Boolean = anyTargetAlive != false
 

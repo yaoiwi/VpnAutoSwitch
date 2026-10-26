@@ -26,7 +26,7 @@ import de.robv.android.xposed.XposedBridge
  *
  * 核心思路：不信任任何一个「缓存状态」，而是每 5 秒对账一次——
  *   目标应用还活着 + 网络允许  → VPN 必须是开着的（用户手动关掉也会被拉回来）
- *   目标应用进程没了          → VPN 立刻关掉
+ *   目标应用任务被移除 / 进程没了 → VPN 立刻关掉
  */
 internal object Engine {
 
@@ -145,6 +145,7 @@ internal object Engine {
     private sealed interface PendingEvent {
         data class Foreground(val packageName: String) : PendingEvent
         data class Died(val packageName: String) : PendingEvent
+        data class TaskRemoved(val packageName: String) : PendingEvent
     }
 
     private val pendingEvents = ArrayDeque<PendingEvent>()
@@ -180,6 +181,10 @@ internal object Engine {
         handler.post { dispatchProcessDied(packageName) }
     }
 
+    fun onTaskRemoved(packageName: String) {
+        handler.post { dispatchTaskRemoved(packageName) }
+    }
+
     private fun dispatchForeground(packageName: String) {
         if (!booted) {
             enqueue(PendingEvent.Foreground(packageName))
@@ -198,6 +203,15 @@ internal object Engine {
         publishRuntime(context())
     }
 
+    private fun dispatchTaskRemoved(packageName: String) {
+        if (!booted) {
+            enqueue(PendingEvent.TaskRemoved(packageName))
+            return
+        }
+        handleTaskRemoved(packageName)
+        publishRuntime(context())
+    }
+
     private fun enqueue(event: PendingEvent) {
         if (pendingEvents.size >= MAX_PENDING_EVENTS) pendingEvents.removeFirst()
         pendingEvents.addLast(event)
@@ -208,6 +222,7 @@ internal object Engine {
             when (val event = pendingEvents.removeFirst()) {
                 is PendingEvent.Foreground -> handleForeground(event.packageName)
                 is PendingEvent.Died -> handleProcessDied(event.packageName)
+                is PendingEvent.TaskRemoved -> handleTaskRemoved(event.packageName)
             }
         }
     }
@@ -674,6 +689,32 @@ internal object Engine {
         // 应用有时只是进程重启（被系统回收后立刻恢复），等一下再决定要不要关，
         // 否则会出现「刚连上就被关、关了又重连」的抖动。
         scheduleOff(ctx, "$pkg died")
+    }
+
+    /**
+     * 用户从最近任务划掉应用。和进程死亡不同，这时进程可能还活着（例如有前台服务）。
+     * 只有在开关开启、目标确实在存活集合里时才接管，避免任务恢复 / 分屏误判。
+     */
+    private fun handleTaskRemoved(pkg: String) {
+        val ctx = context() ?: return
+        val cfg = ConfigRepo.get(ctx)
+        if (!EnginePolicy.shouldHandleTaskRemoval(
+                enabled = cfg.enabled,
+                featureEnabled = cfg.disconnectOnTaskRemoved,
+                paused = automationPaused,
+                offAppForeground = offAppForeground != null,
+                wifiSuppressed = wifiSuppressed,
+                target = cfg.targets.contains(pkg),
+                aliveTarget = aliveTargets.contains(pkg),
+            )
+        ) return
+
+        aliveTargets.remove(pkg)
+        if (lastForeground == pkg) lastForeground = null
+        log(ctx, "$pkg -> task removed")
+        if (EnginePolicy.shouldScheduleOffAfterDeath(true, aliveTargets.size)) {
+            scheduleOff(ctx, "$pkg task removed")
+        }
     }
 
     private fun scheduleOff(ctx: Context?, reason: String) {

@@ -23,6 +23,8 @@ data class Config(
     val toastEnabled: Boolean = true,
     /** 清设置断不掉时，是否强制停止 VPN 应用进程 */
     val forceStopVpn: Boolean = true,
+    /** 从最近任务划掉应用时，即使进程仍在运行也断开 VPN */
+    val disconnectOnTaskRemoved: Boolean = true,
     /** 无法用后台方式拉起时，是否允许短暂打开 VPN 客户端界面（默认不允许） */
     val allowVpnUi: Boolean = false,
     /** 是否隐藏系统「始终开启的 VPN 已断开连接」通知 */
@@ -59,6 +61,7 @@ data class Config(
         o.put("allowMobile", allowMobile)
         o.put("toast", toastEnabled)
         o.put("forceStop", forceStopVpn)
+        o.put("taskRemoved", disconnectOnTaskRemoved)
         o.put("allowVpnUi", allowVpnUi)
         o.put("hideVpnNotif", hideVpnNotification)
         o.put("glassBar", glassBottomBar)
@@ -93,6 +96,7 @@ data class Config(
                     allowMobile = o.optBoolean("allowMobile", true),
                     toastEnabled = o.optBoolean("toast", true),
                     forceStopVpn = o.optBoolean("forceStop", true),
+                    disconnectOnTaskRemoved = o.optBoolean("taskRemoved", true),
                     allowVpnUi = o.optBoolean("allowVpnUi", false),
                     hideVpnNotification = o.optBoolean("hideVpnNotif", true),
                     glassBottomBar = o.optBoolean("glassBar", true),

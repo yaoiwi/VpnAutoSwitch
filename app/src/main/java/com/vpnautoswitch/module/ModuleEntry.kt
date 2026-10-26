@@ -8,6 +8,7 @@ import com.vpnautoswitch.module.system.ConfigRepo
 import com.vpnautoswitch.module.system.Engine
 import com.vpnautoswitch.module.system.ModuleLog
 import com.vpnautoswitch.module.system.ProcessRecords
+import com.vpnautoswitch.module.system.TaskRecords
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
@@ -51,10 +52,12 @@ class ModuleEntry : IXposedHookLoadPackage {
         val resumedHooks = hookActivityResumed(lpparam.classLoader)
         val stateHooks = hookActivityRecordState(lpparam.classLoader)
         val deathHooks = hookProcessDeath(lpparam.classLoader)
+        val taskHooks = hookTaskRemoved(lpparam.classLoader)
         val notifHooks = hookVpnNotification(lpparam.classLoader)
 
         val summary =
-            "hooks: activityResumed=$resumedHooks, setState=$stateHooks, death=$deathHooks, notif=$notifHooks"
+            "hooks: activityResumed=$resumedHooks, setState=$stateHooks, death=$deathHooks, " +
+                "taskRemoved=$taskHooks, notif=$notifHooks"
         XposedBridge.log("[VpnAutoSwitch] $summary")
         ModuleLog.append(ctx, "system_server loaded ($summary)")
     }
@@ -141,6 +144,57 @@ class ModuleEntry : IXposedHookLoadPackage {
         if (procName == pkg) {
             Engine.onProcessDied(pkg)
         }
+    }
+
+    // ------------------------------------------------------------ 最近任务移除
+
+    /**
+     * 从最近任务划掉应用。
+     *
+     * 进程有前台服务时不会立刻死亡，单靠 handleAppDiedLocked 会漏掉。
+     * 这里优先挂 ActivityTaskSupervisor.removeTask(..., "remove-task")，参数里有 Task；
+     * 再兜底挂 ActivityTaskManagerService.removeTask(int)，用 taskId 反查包名。
+     * 两者可能同时命中，Engine 里的 aliveTargets 会去重。
+     */
+    private fun hookTaskRemoved(cl: ClassLoader): Int {
+        val callback = object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                try {
+                    val reason = param.args.lastOrNull() as? String
+                    val task = param.args.firstOrNull { isTaskLike(it) }
+                    if (task != null) {
+                        // 只接管用户从最近任务移除，不碰 remove-stack / trim 等内部清理
+                        if (reason != null && reason != "remove-task") return
+                        val pkg = TaskRecords.packageOf(task) ?: return
+                        Engine.onTaskRemoved(pkg)
+                        return
+                    }
+
+                    if (param.args.size == 1) {
+                        val taskId = param.args[0] as? Int ?: return
+                        val pkg = TaskRecords.packageOfTaskId(param.thisObject, taskId) ?: return
+                        Engine.onTaskRemoved(pkg)
+                    }
+                } catch (t: Throwable) {
+                    XposedBridge.log(t)
+                }
+            }
+        }
+
+        var total = 0
+        for (className in arrayOf(
+            "com.android.server.wm.ActivityTaskSupervisor",
+            "com.android.server.wm.ActivityTaskManagerService",
+        )) {
+            val cls = findClass(className, cl) ?: continue
+            total += XposedBridge.hookAllMethods(cls, "removeTask", callback).size
+        }
+        return total
+    }
+
+    private fun isTaskLike(value: Any?): Boolean {
+        val name = value?.javaClass?.name ?: return false
+        return name.endsWith(".Task") || name.endsWith(".TaskRecord")
     }
 
     // ------------------------------------------------------------ 工具
