@@ -112,6 +112,7 @@ import com.vpnautoswitch.module.R
 import com.vpnautoswitch.module.ui.hyper.BarBackdropContent
 import com.vpnautoswitch.module.ui.hyper.BarBlurHost
 import com.vpnautoswitch.module.ui.hyper.LiquidGlassNavigationBar
+import com.vpnautoswitch.module.ui.hyper.StandardNavigationBar
 import com.vpnautoswitch.module.ui.hyper.LiquidGlassNavigationItem
 import com.vpnautoswitch.module.ui.hyper.IslandTopBar
 import com.vpnautoswitch.module.ui.hyper.PageList
@@ -206,6 +207,12 @@ fun MainScreen(state: AppState) {
     }
 
     val scrollBehavior = MiuixScrollBehavior()
+    val navItems = listOf(
+        LiquidGlassNavigationItem(MiuixIcons.Home, "首页"),
+        LiquidGlassNavigationItem(MiuixIcons.GridView, "应用"),
+        LiquidGlassNavigationItem(MiuixIcons.Settings, "设置"),
+        LiquidGlassNavigationItem(MiuixIcons.Info, "关于"),
+    )
 
     BarBlurHost(enabled = true, captureForEffects = true, liquidGlassEnabled = true) {
         Scaffold(
@@ -220,19 +227,25 @@ fun MainScreen(state: AppState) {
                 }
             },
             bottomBar = {
-                LiquidGlassNavigationBar(
-                    selectedTabIndex = { pagerState.currentPage },
-                    onTabSelected = {
-                        haptic()
-                        goTo(it)
-                    },
-                    items = listOf(
-                        LiquidGlassNavigationItem(MiuixIcons.Home, "首页"),
-                        LiquidGlassNavigationItem(MiuixIcons.GridView, "应用"),
-                        LiquidGlassNavigationItem(MiuixIcons.Settings, "设置"),
-                        LiquidGlassNavigationItem(MiuixIcons.Info, "关于"),
-                    ),
-                )
+                if (state.config.floatingBottomBar) {
+                    LiquidGlassNavigationBar(
+                        selectedTabIndex = { pagerState.currentPage },
+                        onTabSelected = {
+                            haptic()
+                            goTo(it)
+                        },
+                        items = navItems,
+                    )
+                } else {
+                    StandardNavigationBar(
+                        selectedTabIndex = { pagerState.currentPage },
+                        onTabSelected = {
+                            haptic()
+                            goTo(it)
+                        },
+                        items = navItems,
+                    )
+                }
             },
         ) { outer ->
             BarBackdropContent(modifier = Modifier.fillMaxSize()) {
@@ -660,6 +673,15 @@ private fun LazyListScope.settingsItems(
         SectionTitle("界面与动画")
         Card(modifier = Modifier.fillMaxWidth()) {
             SettingsSwitch(
+                title = "悬浮导航栏",
+                summary = "开启时使用液态玻璃悬浮底栏；关闭后改为贴底的普通导航栏",
+                icon = MiuixIcons.HorizontalSplit,
+                checked = state.config.floatingBottomBar,
+                onCheckedChange = {
+                    state.save(state.config.copy(floatingBottomBar = it))
+                },
+            )
+            SettingsSwitch(
                 title = "切页滑动动画",
                 summary = "左右划到别的页面时平滑过渡；关闭后瞬时切换",
                 icon = MiuixIcons.Layers,
@@ -980,7 +1002,8 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 
 private const val CHANGELOG_TIPS =
     "1.36.0：目标应用从最近任务划掉时，即使前台服务让进程还活着也会断开 VPN；" +
-        "可在「高级」关闭「划掉任务即断开」，关闭后恢复只有主进程结束才断开的行为。\n" +
+        "可在「高级」关闭「划掉任务即断开」，关闭后恢复只有主进程结束才断开的行为。" +
+        "「界面与动画」新增悬浮导航栏开关，可切换液态玻璃悬浮底栏和贴底普通导航栏。\n" +
     "1.35.0：一键自检新增「隧道状态」检查，对照当前规则与系统实际 VPN transport；" +
         "自检面板直接显示最近 6 条运行事件，连接/断开异常更容易定位。\n" +
     "1.34.1：卸载已选应用后，自动从「目标应用 / 打开即关闭」列表移除，不再显示失效开关；" +

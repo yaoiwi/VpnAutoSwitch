@@ -97,6 +97,8 @@ import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.FloatingNavigationBar
 import top.yukonga.miuix.kmp.basic.FloatingNavigationBarItem
 import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.NavigationBar
+import top.yukonga.miuix.kmp.basic.NavigationBarItem
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.blur.Backdrop
 import top.yukonga.miuix.kmp.blur.blur
@@ -179,6 +181,26 @@ internal fun LiquidGlassNavigationBar(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+internal fun StandardNavigationBar(
+    selectedTabIndex: () -> Int,
+    onTabSelected: (Int) -> Unit,
+    items: List<LiquidGlassNavigationItem>,
+    modifier: Modifier = Modifier,
+) {
+    if (items.isEmpty()) return
+    NavigationBar(modifier = modifier.fillMaxWidth()) {
+        items.forEachIndexed { index, item ->
+            NavigationBarItem(
+                selected = selectedTabIndex() == index,
+                onClick = { onTabSelected(index) },
+                icon = item.icon,
+                label = item.label,
+            )
         }
     }
 }
