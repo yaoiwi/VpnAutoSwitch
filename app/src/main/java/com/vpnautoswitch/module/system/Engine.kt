@@ -629,7 +629,7 @@ internal object Engine {
         try {
             val cfg = ConfigRepo.get(context)
             val (rule, detail) = currentRule(cfg)
-            RuntimeDiagnostics.publishRuntime(context, rule, detail, lastTransport)
+            RuntimeDiagnostics.publishRuntime(context, rule, detail, lastTransport, lastForeground)
         } catch (t: Throwable) {
             // 诊断失败不能影响控制逻辑
         }

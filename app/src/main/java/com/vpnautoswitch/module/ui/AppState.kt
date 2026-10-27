@@ -58,6 +58,8 @@ data class Diagnostics(
     /** 模块上报的当前命中规则与说明 */
     val activeRule: String = "",
     val ruleDetail: String = "",
+    /** 最近一次进入前台的目标应用（模块上报，可能为空） */
+    val foreground: String = "",
     val ruleUpdatedAt: Long = 0L,
     val lastFailureAt: Long = 0L,
     val lastFailureStage: String = "",
@@ -112,6 +114,7 @@ data class Diagnostics(
                 vpnConnected = hasVpnTransport(context),
                 activeRule = runtime?.optString("activeRule").orEmpty(),
                 ruleDetail = runtime?.optString("detail").orEmpty(),
+                foreground = runtime?.optString("foreground").orEmpty(),
                 ruleUpdatedAt = runtime?.optLong("updatedAt", 0L) ?: 0L,
                 lastFailureAt = failure?.optLong("at", 0L) ?: 0L,
                 lastFailureStage = failure?.optString("stage").orEmpty(),

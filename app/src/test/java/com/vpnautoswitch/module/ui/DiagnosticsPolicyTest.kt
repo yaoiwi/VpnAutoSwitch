@@ -86,4 +86,85 @@ class DiagnosticsPolicyTest {
         assertEquals(null, DiagnosticsPolicy.vpnMismatch("paused", true))
         assertEquals(null, DiagnosticsPolicy.vpnMismatch("idle", false))
     }
+
+    @Test
+    fun `rule labels cover every reported rule`() {
+        assertEquals("目标应用 → 应连接", DiagnosticsPolicy.ruleLabel("target"))
+        assertEquals("打开即关闭 → 应断开", DiagnosticsPolicy.ruleLabel("offTarget"))
+        assertEquals("已暂停 → 不干预", DiagnosticsPolicy.ruleLabel("paused"))
+        assertEquals("尚未收到规则", DiagnosticsPolicy.ruleLabel(""))
+        assertEquals("custom", DiagnosticsPolicy.ruleLabel("custom"))
+    }
+
+    @Test
+    fun `last event picks the newest non blank line`() {
+        val log = "12:01:00  a\n12:02:00  b\n\n"
+        assertEquals("12:02:00  b", DiagnosticsPolicy.lastEvent(log))
+        assertEquals("", DiagnosticsPolicy.lastEvent(""))
+    }
+
+    @Test
+    fun `summary explains a connected target app`() {
+        val s = DiagnosticsPolicy.summarize(
+            heartbeat = now,
+            moduleVersion = 72,
+            appVersion = 72,
+            paused = false,
+            activeRule = "target",
+            ruleDetail = "目标应用在前台：YouTube",
+            foreground = "com.google.android.youtube",
+            vpnConnected = true,
+            network = "Wi-Fi",
+            log = "12:04:00  com.google.android.youtube -> connect",
+            now = now,
+        )
+        assertEquals("运行中", s.headline)
+        assertEquals("com.google.android.youtube", s.foreground)
+        assertTrue(s.rule.startsWith("目标应用 → 应连接"))
+        assertEquals("已连接", s.actual)
+        assertEquals(DiagnosticsPolicy.Tone.NORMAL, s.actualTone)
+        assertTrue(s.lastAction.contains("connect"))
+    }
+
+    @Test
+    fun `summary warns when rule wants vpn but nothing is connected`() {
+        val s = DiagnosticsPolicy.summarize(
+            heartbeat = now,
+            moduleVersion = 72,
+            appVersion = 72,
+            paused = false,
+            activeRule = "target",
+            ruleDetail = "",
+            foreground = "com.example.bank",
+            vpnConnected = false,
+            network = "Wi-Fi",
+            log = "",
+            now = now,
+        )
+        assertEquals("未连接", s.actual)
+        assertEquals(DiagnosticsPolicy.Tone.WARN, s.actualTone)
+        assertEquals("暂无记录", s.lastAction)
+    }
+
+    @Test
+    fun `summary marks unknown when module never reported`() {
+        val s = DiagnosticsPolicy.summarize(
+            heartbeat = 0L,
+            moduleVersion = 0,
+            appVersion = 72,
+            paused = false,
+            activeRule = "target",
+            ruleDetail = "",
+            foreground = "com.example",
+            vpnConnected = true,
+            network = "Wi-Fi",
+            log = "",
+            now = now,
+        )
+        assertEquals("等待注入", s.headline)
+        assertEquals("未知", s.foreground)
+        assertEquals("未知", s.rule)
+        assertEquals("未知", s.actual)
+        assertEquals(DiagnosticsPolicy.Tone.MUTED, s.actualTone)
+    }
 }

@@ -102,6 +102,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -409,43 +410,48 @@ private fun LazyListScope.overviewItems(
 private fun HeroStatusCard(state: AppState) {
     val colors = MiuixTheme.colorScheme
     val now = System.currentTimeMillis()
-    val age = DiagnosticsPolicy.heartbeatAge(state.diagnostics.heartbeat, now)
-    val loaded = DiagnosticsPolicy.isHeartbeatFresh(state.diagnostics.heartbeat, now)
-    val oldModule = loaded && state.diagnostics.moduleVersion != BuildConfig.VERSION_CODE
+    val summary = DiagnosticsPolicy.summarize(
+        heartbeat = state.diagnostics.heartbeat,
+        moduleVersion = state.diagnostics.moduleVersion,
+        appVersion = BuildConfig.VERSION_CODE,
+        paused = state.diagnostics.paused,
+        activeRule = state.diagnostics.activeRule,
+        ruleDetail = state.diagnostics.ruleDetail,
+        foreground = state.diagnostics.foreground,
+        vpnConnected = state.diagnostics.vpnConnected,
+        network = state.diagnostics.network,
+        log = state.diagnostics.log,
+        now = now,
+    )
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp)) {
             Text(
-                text = when {
-                    !loaded -> "等待注入"
-                    state.diagnostics.paused -> "已暂停"
-                    else -> "运行中"
-                },
+                text = summary.headline,
                 fontSize = 26.sp,
                 fontWeight = FontWeight.Bold,
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = when {
-                    !loaded -> "超过 60 秒没有收到系统框架心跳，去 LSPosed 里检查作用域并重启"
-                    oldModule -> "App 已更新到 v${BuildConfig.VERSION_CODE}，" +
-                        "系统框架仍是 v${state.diagnostics.moduleVersion}，重启手机后生效"
-                    state.diagnostics.paused -> "快捷磁贴暂停了自动联动，点「恢复联动」或磁贴恢复"
-                    else -> "系统框架心跳 ${formatAge(age)}前 · 当前网络 ${state.diagnostics.network}"
-                },
+                text = summary.subtitle,
                 fontSize = 12.sp,
+                lineHeight = 17.sp,
                 color = colors.onSurfaceVariantSummary,
             )
             Spacer(modifier = Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                StatColumn(value = state.config.targets.size.toString(), label = "目标应用")
-                StatColumn(value = state.config.offTargets.size.toString(), label = "打开即关闭")
-                StatColumn(
-                    value = if (state.diagnostics.takenByModule) "接管中" else "未接管",
-                    label = "常驻 VPN",
-                )
-            }
+            StatusRow(label = "前台应用", value = summary.foreground)
+            StatusRow(label = "命中规则", value = summary.rule)
+            StatusRow(label = "实际状态", value = summary.actual, tone = summary.actualTone)
+            StatusRow(label = "上次动作", value = summary.lastAction, tone = DiagnosticsPolicy.Tone.MUTED)
             Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = "目标应用 ${state.config.targets.size} · " +
+                    "打开即关闭 ${state.config.offTargets.size} · " +
+                    if (state.diagnostics.takenByModule) "常驻 VPN 已接管" else "常驻 VPN 未接管",
+                fontSize = 11.sp,
+                color = colors.onSurfaceVariantSummary,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(text = "打开 LSPosed", onClick = { state.openLsposed() })
                 TextButton(text = "刷新", onClick = { state.refreshDiagnostics() })
@@ -457,14 +463,33 @@ private fun HeroStatusCard(state: AppState) {
     }
 }
 
+/** 状态卡的一行：左侧固定标签，右侧值按 tone 取色 */
 @Composable
-private fun StatColumn(value: String, label: String) {
-    Column {
-        Text(text = value, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+private fun StatusRow(
+    label: String,
+    value: String,
+    tone: DiagnosticsPolicy.Tone = DiagnosticsPolicy.Tone.NORMAL,
+) {
+    val colors = MiuixTheme.colorScheme
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Text(
             text = label,
-            fontSize = 11.sp,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            fontSize = 12.sp,
+            color = colors.onSurfaceVariantSummary,
+            modifier = Modifier.width(64.dp),
+        )
+        Text(
+            text = value,
+            fontSize = 12.sp,
+            lineHeight = 17.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            color = when (tone) {
+                DiagnosticsPolicy.Tone.WARN -> colors.error
+                DiagnosticsPolicy.Tone.MUTED -> colors.onSurfaceVariantSummary
+                DiagnosticsPolicy.Tone.NORMAL -> colors.onSurface
+            },
+            modifier = Modifier.weight(1f),
         )
     }
 }
@@ -1005,20 +1030,13 @@ private fun offVpnSummary(state: AppState): String {
     return "$head\n打开时自动断开，退出前不再自动连接"
 }
 
-private fun formatAge(ms: Long): String {
-    val minutes = TimeUnit.MILLISECONDS.toMinutes(ms)
-    return when {
-        minutes < 1 -> "不到 1 分钟"
-        minutes < 60 -> "$minutes 分钟"
-        else -> "${TimeUnit.MINUTES.toHours(minutes)} 小时"
-    }
-}
-
 /** 项目仓库地址：关于页的「项目主页 / 问题反馈」都指向这里 */
 private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
+    "1.38.0：首页状态卡改为因果链展示，直接显示「前台应用 / 命中规则 / 实际状态 / 上次动作」，" +
+        "不再只给出「未接管」这种模糊结论。\n" +
     "1.37.0：新增「客户端适配」向导，检测 VpnService、外部控制入口与快捷磁贴，" +
         "可直接测试外部控制或 VpnService，并记住成功的启动方式。\n" +
     "1.36.0：目标应用从最近任务划掉时，即使前台服务让进程还活着也会断开 VPN；" +

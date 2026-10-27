@@ -18,7 +18,13 @@ internal object RuntimeDiagnostics {
     private const val SCHEMA = 1
     private const val TAG = "VpnAutoSwitch"
 
-    fun publishRuntime(ctx: Context, activeRule: String, detail: String, transport: Int) {
+    fun publishRuntime(
+        ctx: Context,
+        activeRule: String,
+        detail: String,
+        transport: Int,
+        foreground: String? = null,
+    ) {
         try {
             val json = JSONObject()
                 .put("schema", SCHEMA)
@@ -26,6 +32,7 @@ internal object RuntimeDiagnostics {
                 .put("activeRule", activeRule)
                 .put("detail", detail)
                 .put("transport", transport)
+                .put("foreground", foreground.orEmpty())
             Settings.Secure.putString(ctx.contentResolver, RUNTIME_KEY, json.toString())
         } catch (t: Throwable) {
             XposedBridge.log("[$TAG] runtime snapshot failed: $t")
