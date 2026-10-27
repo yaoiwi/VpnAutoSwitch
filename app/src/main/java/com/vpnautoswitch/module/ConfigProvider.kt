@@ -42,7 +42,8 @@ class ConfigProvider : ContentProvider() {
     ): Int = 0
 
     companion object {
-        const val AUTHORITY = "com.vpnautoswitch.module.config"
+        /** 跟随 applicationId，避免与旧包名同时安装时 authority 冲突 */
+        val AUTHORITY: String = "${BuildConfig.APPLICATION_ID}.config"
         const val COLUMN_JSON = "json"
         val CONTENT_URI: Uri = Uri.parse("content://$AUTHORITY/config")
     }

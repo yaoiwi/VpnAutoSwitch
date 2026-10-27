@@ -17,6 +17,7 @@ import android.os.Process
 import android.os.SystemClock
 import android.provider.Settings
 import android.widget.Toast
+import com.vpnautoswitch.module.BuildConfig
 import com.vpnautoswitch.module.Config
 import com.vpnautoswitch.module.ModuleContract
 import de.robv.android.xposed.XposedBridge
@@ -42,7 +43,8 @@ internal object Engine {
     /** App 通过这个 action 请求重启（受 signature 权限保护） */
     /** App 请求清空运行日志（App 没有 WRITE_SECURE_SETTINGS，只能让 system_server 代删） */
     const val ACTION_CLEAR_LOG = "com.vpnautoswitch.module.action.CLEAR_LOG"
-    private const val REBOOT_PERMISSION = "com.vpnautoswitch.module.permission.REBOOT"
+    /** 跟随 applicationId，和清单里的 signature 权限保持一致 */
+    private val REBOOT_PERMISSION = "${BuildConfig.APPLICATION_ID}.permission.REBOOT"
 
     private const val RECONCILE_INTERVAL_MS = 5_000L
 
@@ -1096,9 +1098,11 @@ internal object Engine {
         offToken++
         // 手动连上的 VPN 没有接管标记，也要提示「已关闭」
         val wasActive = VpnSwitcher.isActive(ctx.contentResolver) || hasVpnTransport(ctx)
-        VpnSwitcher.disable(ctx, cfg.restoreOriginal, cfg.vpnPackage)
-        // 外部控制模式没有接管标记，但历史遗留的 always-on 仍会不断把客户端 bind 起来
-        VpnSwitcher.clearIfPointsTo(ctx, cfg.vpnPackage)
+        // 外部控制模式（重启 VpnService）不会写 always_on，因此 disable 会被跳过；
+        // 用返回值区分「真的关掉了设置」和「只是请求客户端自己断开」
+        val settingCleared = VpnSwitcher.disable(ctx, cfg.restoreOriginal, cfg.vpnPackage)
+        val staleCleared = VpnSwitcher.clearIfPointsTo(ctx, cfg.vpnPackage)
+        val tookOwnership = settingCleared || staleCleared
         reapplyCount = 0
         tileAttempts = 0
         externalAttempts = 0
@@ -1109,11 +1113,17 @@ internal object Engine {
         pendingExternalMode = null
         autoSession = false
         userOff = false
-        log(ctx, "vpn OFF ($reason)")
+        log(
+            ctx,
+            if (tookOwnership) "vpn OFF ($reason)"
+            else "off requested ($reason, 未接管常驻设置)",
+        )
         if (wasActive) toast(ctx, "VPN 已关闭", cfg.toastEnabled)
 
-        // 清掉 always-on 未必能断开「用户手动连上的」VPN，稍等一下确认
-        handler.postDelayed({ verifyOff(ctx, cfg.vpnPackage, generation) }, 1_200L)
+        // 清掉 always-on 未必能断开「用户手动连上的」VPN，稍等一下确认。
+        // 外部控制模式没有设置项可清，直接把校验提前，尽快进入停止链路。
+        val verifyDelay = if (tookOwnership) 1_200L else 400L
+        handler.postDelayed({ verifyOff(ctx, cfg.vpnPackage, generation) }, verifyDelay)
         publishRuntime(ctx)
     }
 
@@ -1146,13 +1156,14 @@ internal object Engine {
         }
 
         // 1) 无 UI：给客户端发它自己的停止广播（Clash 系支持）。
-        //    已经确认是 service 模式的客户端（v2rayNG 等）根本没有这个接收器，
-        //    发了也是白发，直接跳过，别白等一轮。
-        val clashLike = expectedPackage.isNotEmpty() &&
-            ExternalControl.modeOf(ctx, expectedPackage) != "service"
-        if (clashLike && ExternalControl.requestStop(ctx, expectedPackage)) {
-            // 广播只是「请求」，多数客户端会忽略它：轮询 2 秒，隧道一断就立刻收工
-            awaitDown(ctx, expectedPackage, generation, 2_000L) { down ->
+        //    service 模式也试一次——某些客户端（mihomo / Clash.Meta）虽然只能靠
+        //    VpnService 启动，但仍然实现了 STOP 广播，发一下比直接强杀更温和。
+        val isServiceMode = expectedPackage.isNotEmpty() &&
+            ExternalControl.modeOf(ctx, expectedPackage) == "service"
+        if (expectedPackage.isNotEmpty() && ExternalControl.requestStop(ctx, expectedPackage)) {
+            // 广播只是「请求」，多数客户端会忽略它：轮询到隧道断开就立刻收工
+            val deadline = if (isServiceMode) 800L else 2_000L
+            awaitDown(ctx, expectedPackage, generation, deadline) { down ->
                 if (down) {
                     log(ctx, "verify: vpn is down (client stopped)")
                 } else {

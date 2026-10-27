@@ -13,8 +13,8 @@ fun signingValue(env: String, prop: String): String? =
         ?: signingProps.getProperty(prop)?.takeIf { it.isNotBlank() }
 
 // 版本只在这里维护；CI 通过 :app:printVersionName 读取，避免解析脚本
-val appVersionCode = 72
-val appVersionName = "1.38.0"
+val appVersionCode = 75
+val appVersionName = "1.39.1"
 
 val storePath = signingValue("KEYSTORE_FILE", "storeFile")
 val storePwd = signingValue("KEYSTORE_PASSWORD", "storePassword")
@@ -35,7 +35,8 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.vpnautoswitch.module"
+        // LSPosed 模块仓库要求：不拥有域名时使用 io.github.<username> 前缀
+        applicationId = "io.github.yaoiwi.vpnautoswitch"
         minSdk = 26
         targetSdk = 37
         versionCode = appVersionCode

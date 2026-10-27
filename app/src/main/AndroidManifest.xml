@@ -11,9 +11,9 @@
 
     <!-- 只允许本 App 触发模块执行重启 -->
     <permission
-        android:name="com.vpnautoswitch.module.permission.REBOOT"
+        android:name="${applicationId}.permission.REBOOT"
         android:protectionLevel="signature" />
-    <uses-permission android:name="com.vpnautoswitch.module.permission.REBOOT" />
+    <uses-permission android:name="${applicationId}.permission.REBOOT" />
 
     <!-- 读取当前网络类型（Wi-Fi / 移动数据） -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -81,7 +81,7 @@
         <!-- 供 system_server 里的模块进程读取配置（只读，无敏感数据） -->
         <provider
             android:name=".ConfigProvider"
-            android:authorities="com.vpnautoswitch.module.config"
+            android:authorities="${applicationId}.config"
             android:exported="true"
             android:grantUriPermissions="false" />
     </application>

@@ -161,6 +161,8 @@ fun MainScreen(state: AppState) {
     var showLog by remember { mutableStateOf(false) }
     var showClientAdapter by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
+    var settingsQuery by remember { mutableStateOf("") }
+    val settingsMatches = remember(settingsQuery) { SettingsSearch.matchedTitles(settingsQuery) }
     /** null=未打开；"on"=编辑「开 VPN」列表；"off"=编辑「关 VPN」列表 */
     var ssidMode by remember { mutableStateOf<String?>(null) }
 
@@ -290,6 +292,9 @@ fun MainScreen(state: AppState) {
                             settingsItems(
                                 state = state,
                                 showLog = showLog,
+                                query = settingsQuery,
+                                onQueryChange = { settingsQuery = it },
+                                visibleSections = settingsMatches,
                                 onToggleLog = {
                                     showLog = !showLog
                                     if (showLog) state.refreshDiagnostics()
@@ -622,9 +627,24 @@ private fun AppToggleCard(state: AppState, pkg: String, onRemove: () -> Unit) {
     }
 }
 
+/** 设置页顶部的搜索框，输入即过滤分组 */
+@Composable
+private fun SettingsSearchField(query: String, onQueryChange: (String) -> Unit) {
+    TextField(
+        value = query,
+        onValueChange = onQueryChange,
+        modifier = Modifier.fillMaxWidth(),
+        label = "搜索设置",
+    )
+}
+
 private fun LazyListScope.settingsItems(
     state: AppState,
     showLog: Boolean,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    /** null 表示未搜索、显示全部；否则只显示集合内的分组 */
+    visibleSections: Set<String>?,
     onToggleLog: () -> Unit,
     onRefresh: () -> Unit,
     onExport: () -> Unit,
@@ -632,7 +652,26 @@ private fun LazyListScope.settingsItems(
     onEditSsid: (String) -> Unit,
     context: Context,
 ) {
+    fun visible(title: String): Boolean = visibleSections == null || title in visibleSections
+
     item {
+        SettingsSearchField(query = query, onQueryChange = onQueryChange)
+    }
+
+    if (visibleSections != null && visibleSections.isEmpty()) {
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "没有找到「$query」相关的设置",
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 20.dp),
+                    fontSize = 13.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+        }
+    }
+
+    if (visible("网络条件")) item {
         SectionTitle("网络条件")
         Card(modifier = Modifier.fillMaxWidth()) {
             SettingsSwitch(
@@ -672,7 +711,7 @@ private fun LazyListScope.settingsItems(
         }
     }
 
-    item {
+    if (visible("外观")) item {
         SectionTitle("外观")
         Card(modifier = Modifier.fillMaxWidth()) {
             val systemDark = isSystemInDarkTheme()
@@ -711,7 +750,7 @@ private fun LazyListScope.settingsItems(
             )
         }
     }
-    item {
+    if (visible("界面与动画")) item {
         SectionTitle("界面与动画")
         Card(modifier = Modifier.fillMaxWidth()) {
             SettingsSwitch(
@@ -747,7 +786,7 @@ private fun LazyListScope.settingsItems(
         }
     }
 
-    item {
+    if (visible("高级")) item {
         SectionTitle("高级")
         Card(modifier = Modifier.fillMaxWidth()) {
             SettingsSwitch(
@@ -804,7 +843,7 @@ private fun LazyListScope.settingsItems(
         }
     }
 
-    item {
+    if (visible("备份与恢复")) item {
         SectionTitle("备份与恢复")
         Card(modifier = Modifier.fillMaxWidth()) {
             SettingsActionWithArrow(
@@ -822,12 +861,12 @@ private fun LazyListScope.settingsItems(
         }
     }
 
-    item {
+    if (visible("状态诊断")) item {
         SectionTitle("状态诊断")
         SelfCheckSection(state)
     }
 
-    item {
+    if (visible("运行日志")) item {
         SectionTitle("运行日志")
         Card(modifier = Modifier.fillMaxWidth()) {
             val lines = state.diagnostics.log.lines().filter { it.isNotBlank() }
@@ -1035,23 +1074,12 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
+    "1.39.1：修复外部控制模式下关闭 VPN 时日志误报「vpn OFF」的问题；" +
+        "service 模式的客户端也会先尝试停止广播，减少直接强杀；更新日志只保留最近 3 个版本。\n" +
+    "1.39.0：设置页新增搜索框，输入「wifi」「深色」「锁定」「日志」等关键词即可直达对应分组，" +
+        "不用在 15 个分组里翻找。\n" +
     "1.38.0：首页状态卡改为因果链展示，直接显示「前台应用 / 命中规则 / 实际状态 / 上次动作」，" +
-        "不再只给出「未接管」这种模糊结论。\n" +
-    "1.37.0：新增「客户端适配」向导，检测 VpnService、外部控制入口与快捷磁贴，" +
-        "可直接测试外部控制或 VpnService，并记住成功的启动方式。\n" +
-    "1.36.0：目标应用从最近任务划掉时，即使前台服务让进程还活着也会断开 VPN；" +
-        "可在「高级」关闭「划掉任务即断开」，关闭后恢复只有主进程结束才断开的行为。" +
-        "「界面与动画」新增悬浮导航栏开关，可切换液态玻璃悬浮底栏和贴底普通导航栏。\n" +
-    "1.35.0：一键自检新增「隧道状态」检查，对照当前规则与系统实际 VPN transport；" +
-        "自检面板直接显示最近 6 条运行事件，连接/断开异常更容易定位。\n" +
-    "1.34.1：卸载已选应用后，自动从「目标应用 / 打开即关闭」列表移除，不再显示失效开关；" +
-        "重新安装该应用时默认关闭，不会继承卸载前的状态。\n" +
-    "1.34.0：新增快捷设置磁贴，点按暂停 / 恢复自动联动，模块未运行时点按打开 App；" +
-        "升级后自动清空旧版本日志；修复部分应用图标缺失或模糊（改为 128px 渲染，" +
-        "优先读取启动 Activity 图标，失败时显示首字符占位）。\n" +
-    "1.33.0：稳定性版本。修复延迟启动/关闭任务失效不彻底、看门狗重复排队、关闭验证链误伤新会话、" +
-        "开机初始化顺序等问题；新增每 15 秒独立心跳与「设置 → 状态诊断 → 一键自检」，" +
-        "可直接检查模块运行、VPN 客户端、当前命中规则与最近失败，并复制诊断报告。"
+        "不再只给出「未接管」这种模糊结论。"
 
 private const val PRIVACY_TIPS =
     "本模块完全离线运行：不联网、不收集、不上传任何数据。\n" +
