@@ -128,6 +128,7 @@ import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Contacts
 import top.yukonga.miuix.kmp.icon.extended.GridView
 import top.yukonga.miuix.kmp.icon.extended.Favorites
 import top.yukonga.miuix.kmp.icon.extended.Hide
@@ -1015,6 +1016,7 @@ private fun formatAge(ms: Long): String {
 
 /** 项目仓库地址：关于页的「项目主页 / 问题反馈」都指向这里 */
 private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
+private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
     "1.37.0：新增「客户端适配」向导，检测 VpnService、外部控制入口与快捷磁贴，" +
@@ -1139,6 +1141,19 @@ private fun AboutPage(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item { Spacer(modifier = Modifier.height(heroHeight)) }
+
+            item {
+                SectionTitle("开发者")
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    SettingsAction(
+                        title = "yaoiwi",
+                        icon = MiuixIcons.Contacts,
+                        summary = "github.com/yaoiwi",
+                        endIcon = MiuixIcons.Link,
+                        endIconSize = 26.dp,
+                    ) { haptic(); openUrl(context, DEV_URL) }
+                }
+            }
 
             item {
                 SectionTitle("致谢")
