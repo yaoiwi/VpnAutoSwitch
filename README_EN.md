@@ -46,7 +46,7 @@
 
 ## 📖 Usage
 
-1. Download `VpnAutoSwitch-<version>.apk` from [Releases](https://github.com/yaoiwi/VpnAutoSwitch/releases/latest) (upgrading in place keeps your settings).
+1. Open [Releases](https://github.com/yaoiwi/VpnAutoSwitch/releases/latest) and download `VpnAutoSwitch-1.41.0.apk` (upgrading in place keeps your settings).
 2. Open **LSPosed Manager → Modules**, enable this module, **select only the "System Framework" scope**, then reboot.
 3. Open the app:
    - Pick the apps that should turn the VPN on under **Target apps**;

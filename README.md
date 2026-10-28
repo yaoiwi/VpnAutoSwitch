@@ -46,7 +46,7 @@
 
 ## 📖 使用文档
 
-1. 从 [Release](https://github.com/yaoiwi/VpnAutoSwitch/releases/latest) 下载 `VpnAutoSwitch-<版本>.apk`（覆盖安装即可，配置会保留）。
+1. 打开 [Release](https://github.com/yaoiwi/VpnAutoSwitch/releases/latest)，下载 `VpnAutoSwitch-1.41.0.apk`（覆盖安装即可，配置会保留）。
 2. 打开 **LSPosed 管理器 → 模块**，启用本模块，**作用域只勾选「系统框架」**，然后重启手机。
 3. 打开 App：
    - 「目标应用」选择需要自动连接 VPN 的应用；
