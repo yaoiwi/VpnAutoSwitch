@@ -156,6 +156,14 @@ jobs:
             "$APKSIGNER" verify --verbose --print-certs "$APK"
           done
 
+      - name: Name the APK with its version
+        run: |
+          set -euo pipefail
+          VERSION="$(./gradlew -q :app:printVersionName | tail -n 1 | tr -d '[:space:]')"
+          cd app/build/outputs/apk/release
+          mv -f app-release.apk "VpnAutoSwitch-${VERSION}.apk"
+          ls -l
+
       - name: Write APK checksum
         run: |
           cd app/build/outputs/apk/release

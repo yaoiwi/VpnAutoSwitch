@@ -172,4 +172,48 @@ class EnginePolicyTest {
         assertEquals(2_400L, EnginePolicy.nextGuardInterval(1_536L))
         assertEquals(2_400L, EnginePolicy.nextGuardInterval(2_400L))
     }
+
+    @Test
+    fun `stop order follows capability flags`() {
+        assertEquals(
+            listOf(
+                EnginePolicy.StopStep.BROADCAST,
+                EnginePolicy.StopStep.ACTIVITY,
+                EnginePolicy.StopStep.TILE,
+                EnginePolicy.StopStep.FORCE_STOP,
+            ),
+            EnginePolicy.stopOrder(true, true, true, true),
+        )
+        assertEquals(
+            listOf(
+                EnginePolicy.StopStep.BROADCAST,
+                EnginePolicy.StopStep.TILE,
+                EnginePolicy.StopStep.FORCE_STOP,
+            ),
+            EnginePolicy.stopOrder(true, false, true, true),
+        )
+        assertEquals(
+            listOf(EnginePolicy.StopStep.BROADCAST, EnginePolicy.StopStep.FORCE_STOP),
+            EnginePolicy.stopOrder(true, false, false, true),
+        )
+        assertEquals(
+            listOf(EnginePolicy.StopStep.BROADCAST, EnginePolicy.StopStep.TILE),
+            EnginePolicy.stopOrder(true, false, true, false),
+        )
+    }
+
+    @Test
+    fun `stop order without package only allows force stop`() {
+        assertEquals(
+            listOf(EnginePolicy.StopStep.FORCE_STOP),
+            EnginePolicy.stopOrder(false, true, true, true),
+        )
+        assertEquals(emptyList<EnginePolicy.StopStep>(), EnginePolicy.stopOrder(false, true, true, false))
+    }
+
+    @Test
+    fun `service clients get a shorter broadcast wait`() {
+        assertEquals(800L, EnginePolicy.broadcastWaitMs(true))
+        assertEquals(2_000L, EnginePolicy.broadcastWaitMs(false))
+    }
 }

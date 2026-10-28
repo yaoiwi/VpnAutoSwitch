@@ -1081,12 +1081,12 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
+    "1.41.0：关闭链改为可测试的纯函数，外部控制 / 磁贴 / 强制停止的先后顺序不再靠真机试错；" +
+        "Release 里的 APK 改为带版本号的文件名。\n" +
     "1.40.0：新增「关闭后继续抑制」：外部控制模式关掉 VPN 后观察 8 秒，" +
-        "客户端自己把 VPN 拉回来时会再关一次，连续 3 次仍回来则停止并提示。\n" +
+        "客户端自己把 VPN 拉回来时会再关一次，最多两次。\n" +
     "1.39.1：修复外部控制模式下关闭 VPN 时日志误报「vpn OFF」的问题；" +
-        "service 模式的客户端也会先尝试停止广播，减少直接强杀。\n" +
-    "1.39.0：设置页新增搜索框，输入「wifi」「深色」「锁定」「日志」等关键词即可直达对应分组，" +
-        "不用在 15 个分组里翻找。"
+        "service 模式的客户端也会先尝试停止广播，减少直接强杀。"
 
 private const val PRIVACY_TIPS =
     "本模块完全离线运行：不联网、不收集、不上传任何数据。\n" +

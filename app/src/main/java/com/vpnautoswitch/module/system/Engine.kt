@@ -1165,24 +1165,36 @@ internal object Engine {
             return
         }
 
+        val cfg = ConfigRepo.get(ctx)
+        val hasTile = expectedPackage.isNotEmpty() && QuickTiles.find(ctx, expectedPackage) != null
+        val plan = EnginePolicy.stopOrder(
+            hasPackage = expectedPackage.isNotEmpty(),
+            allowActivityUi = cfg.allowVpnUi,
+            hasTile = hasTile,
+            forceStopEnabled = cfg.forceStopVpn,
+        )
+
         // 1) 无 UI：给客户端发它自己的停止广播（Clash 系支持）。
         //    service 模式也试一次——某些客户端（mihomo / Clash.Meta）虽然只能靠
         //    VpnService 启动，但仍然实现了 STOP 广播，发一下比直接强杀更温和。
         val isServiceMode = expectedPackage.isNotEmpty() &&
             ExternalControl.modeOf(ctx, expectedPackage) == "service"
-        if (expectedPackage.isNotEmpty() && ExternalControl.requestStop(ctx, expectedPackage)) {
-            // 广播只是「请求」，多数客户端会忽略它：轮询到隧道断开就立刻收工
-            val deadline = if (isServiceMode) 800L else 2_000L
-            awaitDown(ctx, expectedPackage, generation, deadline) { down ->
+        if (EnginePolicy.StopStep.BROADCAST in plan &&
+            ExternalControl.requestStop(ctx, expectedPackage)
+        ) {
+            awaitDown(
+                ctx, expectedPackage, generation,
+                EnginePolicy.broadcastWaitMs(isServiceMode),
+            ) { down ->
                 if (down) {
                     log(ctx, "verify: vpn is down (client stopped)")
                 } else {
-                    verifyOffStep(ctx, expectedPackage, generation, true)
+                    verifyOffStep(ctx, expectedPackage, generation, true, plan)
                 }
             }
             return
         }
-        verifyOffStep(ctx, expectedPackage, generation, true)
+        verifyOffStep(ctx, expectedPackage, generation, true, plan)
     }
 
     /**
@@ -1274,6 +1286,7 @@ internal object Engine {
         expectedPackage: String,
         generation: Int,
         allowActivity: Boolean,
+        plan: List<EnginePolicy.StopStep>,
     ) {
         if (!closeChainValid(ctx, expectedPackage, generation)) return
         val cfg = ConfigRepo.get(ctx)
@@ -1283,32 +1296,37 @@ internal object Engine {
         }
 
         // 2) 客户端导出的 STOP_CLASH 入口
-        if (allowActivity && cfg.allowVpnUi && expectedPackage.isNotEmpty() &&
+        if (allowActivity && EnginePolicy.StopStep.ACTIVITY in plan &&
+            cfg.allowVpnUi && expectedPackage.isNotEmpty() &&
             ExternalControl.stop(ctx, expectedPackage)
         ) {
             awaitDown(ctx, expectedPackage, generation, 2_500L) { down ->
                 if (down) {
                     log(ctx, "verify: vpn is down (client stop activity)")
                 } else {
-                    verifyOffStep(ctx, expectedPackage, generation, false)
+                    verifyOffStep(ctx, expectedPackage, generation, false, plan)
                 }
             }
             return
         }
 
         // 3) 快捷磁贴
-        val tile = if (expectedPackage.isNotEmpty()) QuickTiles.find(ctx, expectedPackage) else null
+        val tile = if (EnginePolicy.StopStep.TILE in plan) {
+            QuickTiles.find(ctx, expectedPackage)
+        } else {
+            null
+        }
         if (tile != null && QuickTiles.click(ctx, tile)) {
             awaitDown(ctx, expectedPackage, generation, 2_000L) { down ->
                 if (down) {
                     log(ctx, "verify: vpn is down (qs tile)")
                 } else {
-                    finishVerifyOff(ctx, expectedPackage, generation, 0)
+                    finishVerifyOff(ctx, expectedPackage, generation, 0, plan)
                 }
             }
             return
         }
-        finishVerifyOff(ctx, expectedPackage, generation, 0)
+        finishVerifyOff(ctx, expectedPackage, generation, 0, plan)
     }
 
     /**
@@ -1323,6 +1341,7 @@ internal object Engine {
         expectedPackage: String,
         generation: Int,
         attempt: Int,
+        plan: List<EnginePolicy.StopStep>,
     ) {
         if (!closeChainValid(ctx, expectedPackage, generation)) return
         val cfg = ConfigRepo.get(ctx)
@@ -1333,8 +1352,10 @@ internal object Engine {
             )
             return
         }
-        if (!cfg.forceStopVpn || expectedPackage.isEmpty()) {
-            log(ctx, "verify: vpn still up, force stop disabled")
+        if (EnginePolicy.StopStep.FORCE_STOP !in plan ||
+            !cfg.forceStopVpn || expectedPackage.isEmpty()
+        ) {
+            log(ctx, "verify: vpn still up, no further step allowed")
             return
         }
         if (attempt >= MAX_FORCE_STOP_ATTEMPTS) {
@@ -1368,7 +1389,7 @@ internal object Engine {
                     "verify: still up after force stop, app alive=" +
                         "${isProcessAlive(ctx, expectedPackage)}"
                 )
-                finishVerifyOff(ctx, expectedPackage, generation, attempt + 1)
+                finishVerifyOff(ctx, expectedPackage, generation, attempt + 1, plan)
             }
         }, FORCE_STOP_RECHECK_MS * (attempt + 1))
     }

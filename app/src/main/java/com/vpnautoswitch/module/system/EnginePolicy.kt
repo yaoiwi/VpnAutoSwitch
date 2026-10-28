@@ -52,6 +52,34 @@ internal object EnginePolicy {
     fun nextGuardInterval(currentMs: Long): Long =
         (currentMs * 1.6f).toLong().coerceAtMost(2_400L)
 
+    /** 关闭链里的一步，顺序由 [stopOrder] 决定 */
+    enum class StopStep { BROADCAST, ACTIVITY, TILE, FORCE_STOP }
+
+    /**
+     * 关闭链的步骤顺序。
+     *
+     * 只决定「允许尝试哪些步骤」，不判断运行时是否真的成功；
+     * 这样关闭逻辑可以脱离 Android 环境做回归测试。
+     */
+    fun stopOrder(
+        hasPackage: Boolean,
+        allowActivityUi: Boolean,
+        hasTile: Boolean,
+        forceStopEnabled: Boolean,
+    ): List<StopStep> {
+        if (!hasPackage) {
+            return if (forceStopEnabled) listOf(StopStep.FORCE_STOP) else emptyList()
+        }
+        val steps = mutableListOf(StopStep.BROADCAST)
+        if (allowActivityUi) steps += StopStep.ACTIVITY
+        if (hasTile) steps += StopStep.TILE
+        if (forceStopEnabled) steps += StopStep.FORCE_STOP
+        return steps
+    }
+
+    /** 停止广播的等待时长：service 模式大多不响应，少等一会儿 */
+    fun broadcastWaitMs(isServiceMode: Boolean): Long = if (isServiceMode) 800L else 2_000L
+
     /**
      * 是否处理“从最近任务划掉”。
      *
