@@ -27,6 +27,8 @@ data class Config(
     val disconnectOnTaskRemoved: Boolean = true,
     /** 无法用后台方式拉起时，是否允许短暂打开 VPN 客户端界面（默认不允许） */
     val allowVpnUi: Boolean = false,
+    /** 关闭后继续观察几秒，客户端自己把 VPN 拉回来时再关一次 */
+    val offGuard: Boolean = true,
     /** 是否隐藏系统「始终开启的 VPN 已断开连接」通知 */
     val hideVpnNotification: Boolean = true,
     /** 底栏是否使用液态玻璃效果 */
@@ -63,6 +65,7 @@ data class Config(
         o.put("forceStop", forceStopVpn)
         o.put("taskRemoved", disconnectOnTaskRemoved)
         o.put("allowVpnUi", allowVpnUi)
+        o.put("offGuard", offGuard)
         o.put("hideVpnNotif", hideVpnNotification)
         o.put("glassBar", glassBottomBar)
         o.put("swipe", swipePaging)
@@ -98,6 +101,7 @@ data class Config(
                     forceStopVpn = o.optBoolean("forceStop", true),
                     disconnectOnTaskRemoved = o.optBoolean("taskRemoved", true),
                     allowVpnUi = o.optBoolean("allowVpnUi", false),
+                    offGuard = o.optBoolean("offGuard", true),
                     hideVpnNotification = o.optBoolean("hideVpnNotif", true),
                     glassBottomBar = o.optBoolean("glassBar", true),
                     swipePaging = o.optBoolean("swipe", true),

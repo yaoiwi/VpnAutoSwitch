@@ -48,6 +48,12 @@ internal object Engine {
 
     private const val RECONCILE_INTERVAL_MS = 5_000L
 
+    /** 关后守卫：窗口总长与最多重关次数 */
+    private const val GUARD_WINDOW_MS = 8_000L
+    private const val MAX_GUARD_ATTEMPTS = 2
+
+    private var offGuardToken = 0
+
     /** 独立心跳：不依赖目标应用或看门狗，App 用它判断模块是否仍在运行 */
     private const val HEARTBEAT_INTERVAL_MS = 15_000L
 
@@ -1124,6 +1130,10 @@ internal object Engine {
         // 外部控制模式没有设置项可清，直接把校验提前，尽快进入停止链路。
         val verifyDelay = if (tookOwnership) 1_200L else 400L
         handler.postDelayed({ verifyOff(ctx, cfg.vpnPackage, generation) }, verifyDelay)
+        // 外部控制模式下客户端可能自己把 VPN 拉回来，关掉后盯一小会儿
+        if (!tookOwnership && wasActive) {
+            startOffGuard(ctx, cfg, generation, ++offGuardToken)
+        }
         publishRuntime(ctx)
     }
 
@@ -1173,6 +1183,64 @@ internal object Engine {
             return
         }
         verifyOffStep(ctx, expectedPackage, generation, true)
+    }
+
+    /**
+     * 关后守卫。
+     *
+     * 外部控制模式（重启 VpnService）关掉之后，客户端可能被自己的服务、JobScheduler
+     * 或系统重新拉起来。这里在 8 秒窗口内盯几次，发现隧道又起来就再关一次；
+     * 连续多次仍回来就放弃并记录，避免和客户端互相拉扯。
+     *
+     * 省电设计：只在没有接管常驻设置时启动；间隔递增（600ms 起，最慢 2.4s），
+     * 整个窗口只查 5 次左右；窗口结束不留下任何定时器。
+     */
+    private fun startOffGuard(ctx: Context, cfg: Config, generation: Int, token: Int) {
+        if (!cfg.offGuard || cfg.vpnPackage.isEmpty()) return
+        var attempts = 0
+        var interval = 600L
+        var elapsed = 0L
+
+        fun tick() {
+            if (token != offGuardToken) return
+            if (elapsed >= GUARD_WINDOW_MS) return
+            handler.postDelayed({
+                elapsed += interval
+                if (token != offGuardToken) return@postDelayed
+                if (!closeChainValid(ctx, cfg.vpnPackage, generation)) return@postDelayed
+
+                if (!hasVpnTransport(ctx)) {
+                    interval = EnginePolicy.nextGuardInterval(interval)
+                    tick()
+                    return@postDelayed
+                }
+
+                attempts++
+                if (!EnginePolicy.shouldGuard(
+                        guardEnabled = cfg.offGuard,
+                        tookOwnership = false,
+                        attempts = attempts,
+                        maxAttempts = MAX_GUARD_ATTEMPTS,
+                        closable = true,
+                    )
+                ) {
+                    log(
+                        ctx,
+                        "guard: 客户端已 $attempts 次重新拉起 VPN，停止抑制，" +
+                            "请检查客户端的「自动连接」设置",
+                    )
+                    return@postDelayed
+                }
+                log(ctx, "guard: vpn came back -> re-off ($attempts/$MAX_GUARD_ATTEMPTS)")
+                // 走完整关闭链（停止广播 → 磁贴 → 强停），而不是只点磁贴：
+                // 磁贴是切换语义，连续点两次会把 VPN 又打开
+                verifyOff(ctx, cfg.vpnPackage, generation)
+                // 等关闭链跑完再查（广播 2s + 磁贴 2s），避免在 transport 还没刷新时重复动手
+                interval = 3_500L
+                tick()
+            }, interval)
+        }
+        tick()
     }
 
     /** 每 400ms 看一次隧道是否断开，最多等 [deadlineMs]，避免固定 sleep 白等 */

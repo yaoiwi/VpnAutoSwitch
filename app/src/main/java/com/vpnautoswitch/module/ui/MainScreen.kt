@@ -806,6 +806,13 @@ private fun LazyListScope.settingsItems(
                 },
             )
             SettingsSwitch(
+                title = "关闭后继续抑制",
+                summary = "外部控制模式下关闭 VPN 后观察 8 秒，客户端自己又把 VPN 拉起来时再关一次",
+                icon = MiuixIcons.Lock,
+                checked = state.config.offGuard,
+                onCheckedChange = { state.save(state.config.copy(offGuard = it)) },
+            )
+            SettingsSwitch(
                 title = "显示开关提示（Toast）",
                 summary = "VPN 开启 / 关闭时在屏幕上弹出提示",
                 icon = MiuixIcons.Messages,
@@ -1074,12 +1081,12 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
+    "1.40.0：新增「关闭后继续抑制」：外部控制模式关掉 VPN 后观察 8 秒，" +
+        "客户端自己把 VPN 拉回来时会再关一次，连续 3 次仍回来则停止并提示。\n" +
     "1.39.1：修复外部控制模式下关闭 VPN 时日志误报「vpn OFF」的问题；" +
-        "service 模式的客户端也会先尝试停止广播，减少直接强杀；更新日志只保留最近 3 个版本。\n" +
+        "service 模式的客户端也会先尝试停止广播，减少直接强杀。\n" +
     "1.39.0：设置页新增搜索框，输入「wifi」「深色」「锁定」「日志」等关键词即可直达对应分组，" +
-        "不用在 15 个分组里翻找。\n" +
-    "1.38.0：首页状态卡改为因果链展示，直接显示「前台应用 / 命中规则 / 实际状态 / 上次动作」，" +
-        "不再只给出「未接管」这种模糊结论。"
+        "不用在 15 个分组里翻找。"
 
 private const val PRIVACY_TIPS =
     "本模块完全离线运行：不联网、不收集、不上传任何数据。\n" +

@@ -35,6 +35,24 @@ internal object EnginePolicy {
         removedTarget && remainingTargets == 0
 
     /**
+     * 关后守卫是否继续观察。
+     *
+     * 只在「没有接管常驻设置」时才有意义：always-on 模式关掉设置就断了，
+     * 只有靠重启 VpnService 拉起的外部控制模式，才可能被客户端自己再拉回来。
+     */
+    fun shouldGuard(
+        guardEnabled: Boolean,
+        tookOwnership: Boolean,
+        attempts: Int,
+        maxAttempts: Int,
+        closable: Boolean,
+    ): Boolean = guardEnabled && !tookOwnership && closable && attempts <= maxAttempts
+
+    /** 观察间隔递增，前密后疏，避免 8 秒里反复唤醒 */
+    fun nextGuardInterval(currentMs: Long): Long =
+        (currentMs * 1.6f).toLong().coerceAtMost(2_400L)
+
+    /**
      * 是否处理“从最近任务划掉”。
      *
      * 只有目标应用、功能开启、没有暂停/关闭规则压制，并且这个包确实在存活集合里时才处理，

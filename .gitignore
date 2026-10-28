@@ -23,3 +23,12 @@ keystore.properties
 
 # Kotlin 编译会话（构建产物）
 .kotlin/
+
+# 本地密钥与配置（绝不提交）
+.env
+.env.*
+*.pem
+*.key
+*.p12
+config.json
+secrets.json

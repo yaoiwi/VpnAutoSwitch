@@ -155,4 +155,21 @@ class EnginePolicyTest {
         hasAliveTarget = hasAliveTarget,
         wifiOnActive = wifiOnActive,
     )
+
+    @Test
+    fun `guard only runs when settings were not taken over`() {
+        assertTrue(EnginePolicy.shouldGuard(true, false, 1, 3, true))
+        assertFalse(EnginePolicy.shouldGuard(false, false, 1, 3, true))
+        assertFalse(EnginePolicy.shouldGuard(true, true, 1, 3, true))
+        assertFalse(EnginePolicy.shouldGuard(true, false, 4, 3, true))
+        assertFalse(EnginePolicy.shouldGuard(true, false, 1, 3, false))
+    }
+
+    @Test
+    fun `guard interval grows and caps`() {
+        assertEquals(960L, EnginePolicy.nextGuardInterval(600L))
+        assertEquals(1_536L, EnginePolicy.nextGuardInterval(960L))
+        assertEquals(2_400L, EnginePolicy.nextGuardInterval(1_536L))
+        assertEquals(2_400L, EnginePolicy.nextGuardInterval(2_400L))
+    }
 }
