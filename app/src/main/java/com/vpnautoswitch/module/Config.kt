@@ -46,7 +46,9 @@ data class Config(
     /** 连上这些 Wi-Fi 时始终开启 VPN（优先于目标应用判断） */
     val wifiOn: Set<String> = emptySet(),
     /** 连上这些 Wi-Fi 时始终关闭 VPN，且不再自动开启 */
-    val wifiOff: Set<String> = emptySet()
+    val wifiOff: Set<String> = emptySet(),
+    /** 已选应用列表按名称排序（默认按添加顺序） */
+    val sortAppsByName: Boolean = false
 ) {
 
     fun toJson(): String {
@@ -75,6 +77,7 @@ data class Config(
         o.put("darkMode", darkMode)
         o.put("wifiOn", JSONArray(wifiOn.toList()))
         o.put("wifiOff", JSONArray(wifiOff.toList()))
+        o.put("sortApps", sortAppsByName)
         return o.toString()
     }
 
@@ -110,6 +113,7 @@ data class Config(
                     hapticFeedback = o.optBoolean("haptic", true),
                     wifiOn = readSet(o.optJSONArray("wifiOn")),
                     wifiOff = readSet(o.optJSONArray("wifiOff")),
+                    sortAppsByName = o.optBoolean("sortApps", false),
                     darkMode = when (o.optString("darkMode", "system")) {
                         "dark" -> "dark"
                         "light" -> "light"

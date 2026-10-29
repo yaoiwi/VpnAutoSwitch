@@ -110,6 +110,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vpnautoswitch.module.BuildConfig
 import com.vpnautoswitch.module.R
+import com.vpnautoswitch.module.RuleConflict
+import com.vpnautoswitch.module.RuleConflicts
 import com.vpnautoswitch.module.ui.hyper.BarBackdropContent
 import com.vpnautoswitch.module.ui.hyper.BarBlurHost
 import com.vpnautoswitch.module.ui.hyper.LiquidGlassNavigationBar
@@ -162,6 +164,7 @@ fun MainScreen(state: AppState) {
     var showClientAdapter by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
     var settingsQuery by remember { mutableStateOf("") }
+    var appQuery by remember { mutableStateOf("") }
     val settingsMatches = remember(settingsQuery) { SettingsSearch.matchedTitles(settingsQuery) }
     /** null=未打开；"on"=编辑「开 VPN」列表；"off"=编辑「关 VPN」列表 */
     var ssidMode by remember { mutableStateOf<String?>(null) }
@@ -281,7 +284,11 @@ fun MainScreen(state: AppState) {
                             padding = outer,
                             bottomInset = bottomInset,
                         ) {
-                            appsItems(state)
+                            appsItems(
+                                state = state,
+                                query = appQuery,
+                                onQueryChange = { appQuery = it },
+                            )
                         }
 
                         2 -> PageList(
@@ -499,7 +506,31 @@ private fun StatusRow(
     }
 }
 
-private fun LazyListScope.appsItems(state: AppState) {
+private fun LazyListScope.appsItems(
+    state: AppState,
+    query: String,
+    onQueryChange: (String) -> Unit,
+) {
+    val conflict = RuleConflicts.find(state.config)
+    val total = state.config.targets.size + state.config.offTargets.size
+
+    if (AppListPolicy.shouldShowSearch(total)) {
+        item {
+            AppListFilterBar(
+                query = query,
+                onQueryChange = onQueryChange,
+                sortByName = state.config.sortAppsByName,
+                onToggleSort = {
+                    state.save(state.config.copy(sortAppsByName = !state.config.sortAppsByName))
+                },
+            )
+        }
+    }
+
+    if (!conflict.isEmpty) {
+        item { RuleConflictCard(conflict, state::labelOf) }
+    }
+
     item { SectionTitle("目标应用") }
     item {
         Card(modifier = Modifier.fillMaxWidth()) {
@@ -522,7 +553,16 @@ private fun LazyListScope.appsItems(state: AppState) {
             }
         }
     } else {
-        state.config.targets.forEach { pkg ->
+        val shown = AppListPolicy.display(
+            packages = state.config.targets,
+            labelOf = state::labelOf,
+            query = query,
+            sortByName = state.config.sortAppsByName,
+        )
+        if (shown.isEmpty()) {
+            item { AppListEmptyMatch() }
+        }
+        shown.forEach { pkg ->
             item {
                 AppToggleCard(state, pkg) {
                     state.save(state.config.copy(targets = state.config.targets - pkg))
@@ -553,7 +593,16 @@ private fun LazyListScope.appsItems(state: AppState) {
             }
         }
     } else {
-        state.config.offTargets.forEach { pkg ->
+        val shown = AppListPolicy.display(
+            packages = state.config.offTargets,
+            labelOf = state::labelOf,
+            query = query,
+            sortByName = state.config.sortAppsByName,
+        )
+        if (shown.isEmpty()) {
+            item { AppListEmptyMatch() }
+        }
+        shown.forEach { pkg ->
             item {
                 AppToggleCard(state, pkg) {
                     state.save(state.config.copy(offTargets = state.config.offTargets - pkg))
@@ -572,6 +621,94 @@ private fun LazyListScope.appsItems(state: AppState) {
                 onClick = { state.openPicker(AppState.MODE_SINGLE) },
             )
         }
+    }
+}
+
+/** 应用页顶部的筛选框 + 排序切换，只在已选应用较多时出现 */
+@Composable
+private fun AppListFilterBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    sortByName: Boolean,
+    onToggleSort: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TextField(
+            value = query,
+            onValueChange = onQueryChange,
+            label = "筛选已选应用",
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(
+            text = if (sortByName) "按名称" else "按顺序",
+            onClick = onToggleSort,
+        )
+    }
+}
+
+/**
+ * 同一个应用 / Wi-Fi 同时命中「开」「关」两组规则。
+ *
+ * 运行时按「关」优先，所以不会出错，只是行为和用户的预期可能相反，
+ * 这里把原因写在界面上，省得他去翻日志猜。
+ */
+@Composable
+private fun RuleConflictCard(conflict: RuleConflict, labelOf: (String) -> String) {
+    val colors = MiuixTheme.colorScheme
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp)) {
+            Text(
+                text = "规则冲突",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = colors.error,
+            )
+            if (conflict.apps.isNotEmpty()) {
+                Text(
+                    text = "${conflict.apps.size} 个应用同时在两个列表里，打开时按「关闭」处理：" +
+                        conflict.apps.take(4).joinToString("、") { labelOf(it) } +
+                        if (conflict.apps.size > 4) " 等" else "",
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                    color = colors.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            if (conflict.wifi.isNotEmpty()) {
+                Text(
+                    text = "${conflict.wifi.size} 个 Wi-Fi 同时在开启和关闭名单里，按「关闭」处理：" +
+                        conflict.wifi.take(4).joinToString("、") +
+                        if (conflict.wifi.size > 4) " 等" else "",
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                    color = colors.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            Text(
+                text = "重新保存任一列表会按「关闭优先」自动去重。",
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+                color = colors.onSurfaceVariantSummary,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+    }
+}
+
+/** 筛选后一个都不剩，但列表本身非空 */
+@Composable
+private fun AppListEmptyMatch() {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "没有匹配的应用",
+            fontSize = 12.sp,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+        )
     }
 }
 
@@ -954,14 +1091,26 @@ private fun ssidSummary(list: Set<String>, empty: String): String =
 private fun SsidRuleDialog(mode: String, state: AppState, onDismiss: () -> Unit) {
     val isOn = mode == "on"
     val colors = MiuixTheme.colorScheme
+    val context = LocalContext.current
     var input by remember { mutableStateOf("") }
     val list = if (isOn) state.config.wifiOn else state.config.wifiOff
     val current = state.diagnostics.currentSsid
 
     fun update(next: Set<String>) {
-        state.save(
-            if (isOn) state.config.copy(wifiOn = next) else state.config.copy(wifiOff = next)
-        )
+        // 同一个 SSID 不能既算「始终开」又算「始终关」，保存时按关闭优先去重
+        val (cfg, dropped) = if (isOn) {
+            RuleConflicts.keepWifiOn(state.config, next)
+        } else {
+            RuleConflicts.keepWifiOff(state.config, next)
+        }
+        state.save(cfg)
+        if (dropped > 0) {
+            Toast.makeText(
+                context,
+                "已从另一侧名单移除 $dropped 个同名 Wi-Fi",
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
     }
 
     Dialog(
@@ -1081,12 +1230,13 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
+    "1.43.0：同一个应用同时在「目标应用」和「打开时关闭 VPN」里时会提示冲突，" +
+        "保存时按「关闭优先」自动去重；已选应用支持按名称排序和筛选，" +
+        "选择客户端时常见客户端会置顶。\n" +
     "1.42.0：目标应用、关闭列表的「添加 / 管理」入口都移到各自列表上方，" +
         "已选应用再多也不用滚到最底部才能添加。\n" +
     "1.41.0：关闭链改为可测试的纯函数，外部控制 / 磁贴 / 强制停止的先后顺序不再靠真机试错；" +
-        "Release 里的 APK 改为带版本号的文件名。\n" +
-    "1.40.0：新增「关闭后继续抑制」：外部控制模式关掉 VPN 后观察 8 秒，" +
-        "客户端自己把 VPN 拉回来时会再关一次，最多两次。"
+        "Release 里的 APK 改为带版本号的文件名。"
 
 private const val PRIVACY_TIPS =
     "本模块完全离线运行：不联网、不收集、不上传任何数据。\n" +

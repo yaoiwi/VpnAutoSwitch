@@ -17,6 +17,7 @@ import com.vpnautoswitch.module.BuildConfig
 import com.vpnautoswitch.module.Config
 import com.vpnautoswitch.module.ConfigCleaner
 import com.vpnautoswitch.module.ModuleContract
+import com.vpnautoswitch.module.RuleConflicts
 import com.vpnautoswitch.module.apps.AppInfo
 import com.vpnautoswitch.module.apps.AppsRepository
 import com.vpnautoswitch.module.system.Engine
@@ -361,13 +362,25 @@ class AppState(private val context: Context) {
     }
 
     fun confirmPicker() {
-        save(
-            when (pickerMode) {
-                MODE_SINGLE -> config.copy(vpnPackage = pickerSelection.firstOrNull().orEmpty())
-                MODE_OFF -> config.copy(offTargets = LinkedHashSet(pickerSelection))
-                else -> config.copy(targets = LinkedHashSet(pickerSelection))
-            }
-        )
+        val selection = LinkedHashSet(pickerSelection)
+        val (next, dropped) = when (pickerMode) {
+            MODE_SINGLE -> config.copy(vpnPackage = pickerSelection.firstOrNull().orEmpty()) to 0
+            MODE_OFF -> RuleConflicts.keepOff(config, selection)
+            else -> RuleConflicts.keepOn(config, selection)
+        }
+        save(next)
+        if (dropped > 0) {
+            // 交叉项会被静默清掉，说一声，免得用户以为自己的选择丢了
+            Toast.makeText(
+                context,
+                if (pickerMode == MODE_OFF) {
+                    "已从「目标应用」移出 $dropped 个冲突项"
+                } else {
+                    "已从「打开时关闭 VPN」移出 $dropped 个冲突项"
+                },
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
         screen = Screen.Main
     }
 
@@ -398,8 +411,18 @@ class AppState(private val context: Context) {
         } else {
             // 导入的配置可能来自旧设备，里面会有这台手机没装的应用，先摘掉
             val gone = ConfigCleaner.findMissing(context, parsed)
-            save(if (gone.isEmpty()) parsed else parsed.withoutPackages(gone))
+            val trimmed = if (gone.isEmpty()) parsed else parsed.withoutPackages(gone)
+            // 旧配置里可能同一个应用同时在「开」「关」两边，导入时按「关优先」清一次
+            val (cleaned, conflicts) = RuleConflicts.normalize(trimmed)
+            save(cleaned)
             refreshDiagnostics()
+            if (!conflicts.isEmpty) {
+                Toast.makeText(
+                    context,
+                    "已清理 ${conflicts.apps.size} 个应用 / ${conflicts.wifi.size} 个 Wi-Fi 的冲突规则",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
             true
         }
     } catch (t: Throwable) {

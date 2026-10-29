@@ -119,6 +119,36 @@ fun AppPickerScreen(state: AppState) {
                         }
                     }
 
+                    // 选默认 VPN 时，把已安装的常见客户端提到最前面，
+                    // 省得在几百个应用里翻包名
+                    if (single && query.isBlank()) {
+                        val presets = VpnClientPresets.installed(state.apps.map { it.packageName })
+                        if (presets.isNotEmpty()) {
+                            item {
+                                SectionTitle("已安装的常见客户端")
+                                Card(modifier = Modifier.fillMaxWidth()) {
+                                    presets.forEach { preset ->
+                                        val app = state.apps.firstOrNull {
+                                            it.packageName == preset.packageName
+                                        }
+                                        if (app != null) {
+                                            AppRow(
+                                                app = app,
+                                                selected = state.pickerSelection
+                                                    .contains(preset.packageName),
+                                                showCheckbox = false,
+                                                onClick = {
+                                                    state.toggleSelection(preset.packageName)
+                                                    state.confirmPicker()
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     if (state.appsLoading && state.apps.isEmpty()) {
                         item {
                             Text(
