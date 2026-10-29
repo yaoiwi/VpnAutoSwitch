@@ -501,6 +501,15 @@ private fun StatusRow(
 
 private fun LazyListScope.appsItems(state: AppState) {
     item { SectionTitle("目标应用") }
+    item {
+        Card(modifier = Modifier.fillMaxWidth()) {
+            SettingsActionWithArrow(
+                title = "添加 / 管理目标应用",
+                icon = MiuixIcons.GridView,
+                onClick = { state.openPicker(AppState.MODE_MULTI) },
+            )
+        }
+    }
     if (state.config.targets.isEmpty()) {
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
@@ -521,17 +530,17 @@ private fun LazyListScope.appsItems(state: AppState) {
             }
         }
     }
+
+    item { SectionTitle("打开时关闭 VPN") }
     item {
         Card(modifier = Modifier.fillMaxWidth()) {
             SettingsActionWithArrow(
-                title = "添加 / 管理目标应用",
-                icon = MiuixIcons.GridView,
-                onClick = { state.openPicker(AppState.MODE_MULTI) },
+                title = "添加 / 管理关闭列表",
+                icon = MiuixIcons.Hide,
+                onClick = { state.openPicker(AppState.MODE_OFF) },
             )
         }
     }
-
-    item { SectionTitle("打开时关闭 VPN") }
     if (state.config.offTargets.isEmpty()) {
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
@@ -550,15 +559,6 @@ private fun LazyListScope.appsItems(state: AppState) {
                     state.save(state.config.copy(offTargets = state.config.offTargets - pkg))
                 }
             }
-        }
-    }
-    item {
-        Card(modifier = Modifier.fillMaxWidth()) {
-            SettingsActionWithArrow(
-                title = "添加 / 管理关闭列表",
-                icon = MiuixIcons.Hide,
-                onClick = { state.openPicker(AppState.MODE_OFF) },
-            )
         }
     }
 
@@ -1081,12 +1081,12 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
+    "1.42.0：目标应用、关闭列表的「添加 / 管理」入口都移到各自列表上方，" +
+        "已选应用再多也不用滚到最底部才能添加。\n" +
     "1.41.0：关闭链改为可测试的纯函数，外部控制 / 磁贴 / 强制停止的先后顺序不再靠真机试错；" +
         "Release 里的 APK 改为带版本号的文件名。\n" +
     "1.40.0：新增「关闭后继续抑制」：外部控制模式关掉 VPN 后观察 8 秒，" +
-        "客户端自己把 VPN 拉回来时会再关一次，最多两次。\n" +
-    "1.39.1：修复外部控制模式下关闭 VPN 时日志误报「vpn OFF」的问题；" +
-        "service 模式的客户端也会先尝试停止广播，减少直接强杀。"
+        "客户端自己把 VPN 拉回来时会再关一次，最多两次。"
 
 private const val PRIVACY_TIPS =
     "本模块完全离线运行：不联网、不收集、不上传任何数据。\n" +
