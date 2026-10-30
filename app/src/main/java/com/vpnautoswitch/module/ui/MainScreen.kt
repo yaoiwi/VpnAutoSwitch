@@ -120,20 +120,22 @@ import com.vpnautoswitch.module.ui.hyper.LiquidGlassNavigationItem
 import com.vpnautoswitch.module.ui.hyper.IslandTopBar
 import com.vpnautoswitch.module.ui.hyper.PageList
 import com.vpnautoswitch.module.ui.hyper.SectionTitle
+import com.vpnautoswitch.module.ui.effect.BgEffectBackground
+import top.yukonga.miuix.kmp.icon.extended.Contacts
+import top.yukonga.miuix.kmp.icon.extended.Favorites
 import com.vpnautoswitch.module.ui.hyper.SettingsAction
 import com.vpnautoswitch.module.ui.hyper.SettingsActionWithArrow
 import com.vpnautoswitch.module.ui.hyper.SettingsSwitch
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Contacts
 import top.yukonga.miuix.kmp.icon.extended.GridView
-import top.yukonga.miuix.kmp.icon.extended.Favorites
 import top.yukonga.miuix.kmp.icon.extended.Hide
 import top.yukonga.miuix.kmp.icon.extended.Home
 import top.yukonga.miuix.kmp.icon.extended.Image
@@ -1230,13 +1232,38 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
+    "1.43.2：关于页保留原来的版式（大图标 + 卡片），开发者 / 致谢 / 项目合成一张卡；" +
+        "卡片换成半透明玻璃，四周环境光一直透到卡片和页面底部，滚动时也不会整块暗掉；" +
+        "环境光用着色器绘制：四团光缓慢游走，明暗与饱和度跟着噪声起伏。\n" +
     "1.43.0：同一个应用同时在「目标应用」和「打开时关闭 VPN」里时会提示冲突，" +
         "保存时按「关闭优先」自动去重；已选应用支持按名称排序和筛选，" +
         "选择客户端时常见客户端会置顶。\n" +
     "1.42.0：目标应用、关闭列表的「添加 / 管理」入口都移到各自列表上方，" +
-        "已选应用再多也不用滚到最底部才能添加。\n" +
-    "1.41.0：关闭链改为可测试的纯函数，外部控制 / 磁贴 / 强制停止的先后顺序不再靠真机试错；" +
-        "Release 里的 APK 改为带版本号的文件名。"
+        "已选应用再多也不用滚到最底部才能添加。"
+
+private const val ACK_TIPS =
+    "本模块的实现离不开这些开源项目，在此致谢：\n\n" +
+        "HyperIsland\nMIT License · © 2026 1812z\n" +
+        "液态玻璃导航栏、Lens 折射着色器、模糊顶栏与页面骨架参考 / 移植自该项目。\n" +
+        "github.com/1812z/HyperIsland\n\n" +
+        "Miuix\nApache License 2.0 · © compose-miuix-ui\n" +
+        "界面组件库（Card / TopAppBar / Switch / 图标 / 模糊与着色器）。\n" +
+        "github.com/compose-miuix-ui/miuix\n\n" +
+        "AppMarket\n© zeroedx\n" +
+        "关于页的版式与四周环境光着色器参考自该项目。\n" +
+        "github.com/zeroedx/AppMarket\n\n" +
+        "Jetpack Compose · AndroidX\nApache License 2.0 · © The Android Open Source Project\n" +
+        "UI 运行时、Activity Compose、Pager 与 Lifecycle。\n" +
+        "developer.android.com/jetpack/androidx\n\n" +
+        "Kotlin · kotlinx.coroutines\nApache License 2.0 · © JetBrains s.r.o.\n" +
+        "开发语言与协程调度。\n" +
+        "kotlinlang.org\n\n" +
+        "Xposed API\nApache License 2.0\n" +
+        "模块注入接口（编译期依赖，运行时由 LSPosed 提供）。\n" +
+        "github.com/LSPosed/LSPosed\n\n" +
+        "Android Open Source Project\nApache License 2.0 · © Google\n" +
+        "Settings.Secure、ActivityManager、PackageManager 等系统接口。\n" +
+        "source.android.com"
 
 private const val PRIVACY_TIPS =
     "本模块完全离线运行：不联网、不收集、不上传任何数据。\n" +
@@ -1252,27 +1279,6 @@ private const val USAGE_TIPS =
         "通过改写系统的「始终开启的 VPN」（always_on_vpn_app）驱动连接 / 断开。\n" +
         "客户端不响应常驻 VPN 时，依次尝试它自己的外部控制广播、快捷设置磁贴、以及重启它的 VpnService，" +
         "全程在后台完成，不会把 VPN 客户端界面弹到前台。"
-
-private const val ACK_TIPS =
-    "本模块的实现离不开这些开源项目，在此致谢：\n\n" +
-        "HyperIsland\nMIT License · © 2026 1812z\n" +
-        "液态玻璃导航栏、Lens 折射着色器、模糊顶栏与页面骨架参考 / 移植自该项目。\n" +
-        "github.com/1812z/HyperIsland\n\n" +
-        "Miuix\nApache License 2.0 · © compose-miuix-ui\n" +
-        "界面组件库（Card / TopAppBar / Switch / 图标 / 模糊与着色器）。\n" +
-        "github.com/compose-miuix-ui/miuix\n\n" +
-        "Jetpack Compose · AndroidX\nApache License 2.0 · © The Android Open Source Project\n" +
-        "UI 运行时、Activity Compose、Pager 与 Lifecycle。\n" +
-        "developer.android.com/jetpack/androidx\n\n" +
-        "Kotlin · kotlinx.coroutines\nApache License 2.0 · © JetBrains s.r.o.\n" +
-        "开发语言与协程调度。\n" +
-        "kotlinlang.org\n\n" +
-        "Xposed API\nApache License 2.0\n" +
-        "模块注入接口（编译期依赖，运行时由 LSPosed 提供）。\n" +
-        "github.com/LSPosed/LSPosed\n\n" +
-        "Android Open Source Project\nApache License 2.0 · © Google\n" +
-        "Settings.Secure、ActivityManager、PackageManager 等系统接口。\n" +
-        "source.android.com"
 
 // ---------------------------------------------------------------- 关于（HyperIsland 风格）
 
@@ -1293,7 +1299,15 @@ private fun AboutPage(
             else listState.firstVisibleItemScrollOffset.toFloat()
         }
     }
-    val backgroundAlpha = 1f - (scrollOffset / (heroPx * 0.55f)).coerceIn(0f, 1f)
+    // 背景光不再随滚动淡出。卡片是半透明的玻璃，底光一淡整块卡片就跟着发暗，
+    // 滚动时会看到一片明暗跳变；让它一直铺满，内容从光上滑过去才像 HyperOS 那样。
+    val backgroundAlpha = 1f
+
+    // 深色主题下玻璃更透，光晕才真的透得上来；浅色主题也跟着再透一点，别糊成一块实色
+    val darkSurface = MiuixTheme.colorScheme.surface.luminance() < 0.5f
+    val glassColor = MiuixTheme.colorScheme.surface.copy(
+        alpha = if (darkSurface) 0.44f else 0.60f,
+    )
 
     // 滚动驱动的过渡：淡出 + 轻微缩小 + 上移视差，跟着手指连续变化，不会一下子消失
     val fadeDistance = with(density) { 130.dp.toPx() }
@@ -1301,17 +1315,6 @@ private fun AboutPage(
     val heroAlpha = 1f - heroProgress
     val heroScale = 1f - heroProgress * 0.08f
     val heroShift = -scrollOffset * 0.28f
-
-    val transition = rememberInfiniteTransition(label = "about")
-    val phase by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 20_000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "phase",
-    )
 
     var dialogTitle by remember { mutableStateOf<String?>(null) }
     var dialogBody by remember { mutableStateOf("") }
@@ -1322,15 +1325,19 @@ private fun AboutPage(
         dialogBody = body
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        AboutBackground(
-            phase = phase,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(heroHeight)
-                .alpha(backgroundAlpha),
-        )
-
+    BgEffectBackground(
+        modifier = Modifier.fillMaxSize(),
+        alpha = { backgroundAlpha },
+        // 老系统没有 AGSL，退回原来的径向渐变，至少不会白一块
+        fallback = {
+            AboutBackground(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(heroHeight)
+                    .alpha(backgroundAlpha),
+            )
+        },
+    ) {
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize().overScrollVertical(),
@@ -1345,9 +1352,15 @@ private fun AboutPage(
         ) {
             item { Spacer(modifier = Modifier.height(heroHeight)) }
 
+            // 开发者 / 致谢 / 项目合成一张卡，行之间靠组件自带的分隔线，
+            // 不再各占一个分组标题——那几段空白正好把环境光隔成了几条
             item {
-                SectionTitle("开发者")
-                Card(modifier = Modifier.fillMaxWidth()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    // 卡片是半透明的玻璃：底下的环境光透上来，才有 HyperOS 那种
+                    // 上下一片渐变、而不是“渐变到卡片就断掉”的感觉
+                    colors = CardDefaults.defaultColors(color = glassColor),
+                ) {
                     SettingsAction(
                         title = "yaoiwi",
                         icon = MiuixIcons.Contacts,
@@ -1355,25 +1368,13 @@ private fun AboutPage(
                         endIcon = MiuixIcons.Link,
                         endIconSize = 26.dp,
                     ) { haptic(); openUrl(context, DEV_URL) }
-                }
-            }
-
-            item {
-                SectionTitle("致谢")
-                Card(modifier = Modifier.fillMaxWidth()) {
                     SettingsAction(
                         title = "开源项目与许可",
                         icon = MiuixIcons.Favorites,
-                        summary = "HyperIsland · Miuix · Compose · Kotlin · Xposed API",
+                        summary = "HyperIsland · Miuix · AppMarket · Compose · Kotlin",
                         endIcon = MiuixIcons.Link,
                         endIconSize = 26.dp,
                     ) { show("致谢 · 开源项目", ACK_TIPS) }
-                }
-            }
-
-            item {
-                SectionTitle("项目")
-                Card(modifier = Modifier.fillMaxWidth()) {
                     SettingsAction(
                         title = "使用说明与工作原理",
                         icon = MiuixIcons.Info,
@@ -1530,11 +1531,23 @@ private fun openUrl(context: Context, url: String) {
 
 /** 缓慢流动的环境光背景，对应 HyperIsland 关于页的动态渐变 */
 @Composable
-private fun AboutBackground(phase: Float, modifier: Modifier = Modifier) {
+private fun AboutBackground(modifier: Modifier = Modifier) {
     val colors = MiuixTheme.colorScheme
     val surface = colors.surface
     val primary = colors.primary
     val dark = surface.luminance() < 0.5f
+
+    // 老系统没有 AGSL 时的替身：同样四团光，只是用径向渐变画，不做噪声调制
+    val transition = rememberInfiniteTransition(label = "aboutFallback")
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 20_000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "phase",
+    )
 
     // 四团环境光：以应用主题色为基准，往紫 / 青 / 绿各偏一点，
     // 位置与运动节奏照 HyperIsland 的关于页（四角缓慢漂移）。
