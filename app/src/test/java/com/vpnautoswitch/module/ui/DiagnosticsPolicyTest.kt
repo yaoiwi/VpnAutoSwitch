@@ -14,8 +14,8 @@ class DiagnosticsPolicyTest {
         assertFalse(DiagnosticsPolicy.isHeartbeatFresh(0L, now))
         assertFalse(DiagnosticsPolicy.isHeartbeatFresh(now + 1, now))
         assertTrue(DiagnosticsPolicy.isHeartbeatFresh(now, now))
-        assertTrue(DiagnosticsPolicy.isHeartbeatFresh(now - 60_000L, now))
-        assertFalse(DiagnosticsPolicy.isHeartbeatFresh(now - 60_001L, now))
+        assertTrue(DiagnosticsPolicy.isHeartbeatFresh(now - 90_000L, now))
+        assertFalse(DiagnosticsPolicy.isHeartbeatFresh(now - 90_001L, now))
     }
 
     @Test

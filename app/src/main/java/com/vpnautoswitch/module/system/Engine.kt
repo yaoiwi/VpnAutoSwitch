@@ -55,7 +55,13 @@ internal object Engine {
     private var offGuardToken = 0
 
     /** 独立心跳：不依赖目标应用或看门狗，App 用它判断模块是否仍在运行 */
-    private const val HEARTBEAT_INTERVAL_MS = 15_000L
+    private const val HEARTBEAT_ACTIVE_MS = 30_000L
+
+    /** 没有目标应用、也没有模块自己的会话时降频：少写一次就少唤醒一次设置观察者 */
+    private const val HEARTBEAT_IDLE_MS = 60_000L
+
+    /** 版本号兜底重写的间隔（按心跳次数算）：设置被外部清掉时还能自己补回来 */
+    private const val VERSION_REWRITE_TICKS = 20
 
     /**
      * 重写 always-on 设置会先清空再写回，等于让系统 unbind + rebind 一次 VpnService。
@@ -94,6 +100,9 @@ internal object Engine {
     private val handler = Handler(thread.looper)
     private var heartbeatStarted = false
 
+    /** 心跳计数，用来决定哪一次心跳顺手重写一次版本号 */
+    private var versionTicks = 0
+
     private val heartbeat = object : Runnable {
         override fun run() {
             val ctx = context()
@@ -101,8 +110,17 @@ internal object Engine {
                 beat(ctx)
                 publishRuntime(ctx)
             }
-            handler.postDelayed(this, HEARTBEAT_INTERVAL_MS)
+            handler.postDelayed(this, heartbeatDelay())
         }
+    }
+
+    /**
+     * 空闲时把心跳放慢一档。15 秒一次、每次写两个键，一天下来近万次设置写入，
+     * 每次都会让 SettingsProvider 的观察者（系统设置、其他模块）跟着醒一次。
+     */
+    private fun heartbeatDelay(): Long {
+        val idle = aliveTargets.isEmpty() && offAppForeground == null && !autoSession
+        return if (idle) HEARTBEAT_IDLE_MS else HEARTBEAT_ACTIVE_MS
     }
 
     @Volatile
@@ -472,11 +490,16 @@ internal object Engine {
     private fun beat(ctx: Context): Boolean {
         return try {
             Settings.Secure.putLong(ctx.contentResolver, HEARTBEAT_KEY, System.currentTimeMillis())
-            Settings.Secure.putInt(
-                ctx.contentResolver,
-                MODULE_VERSION_KEY,
-                com.vpnautoswitch.module.BuildConfig.VERSION_CODE
-            )
+            // 版本号只在变化时写。原来每次心跳都重复写同一个值，
+            // 对 SettingsProvider 来说仍是一次实打实的写入 + 通知。
+            if (versionTicks == 0) {
+                Settings.Secure.putInt(
+                    ctx.contentResolver,
+                    MODULE_VERSION_KEY,
+                    com.vpnautoswitch.module.BuildConfig.VERSION_CODE
+                )
+            }
+            versionTicks = (versionTicks + 1) % VERSION_REWRITE_TICKS
             true
         } catch (t: Throwable) {
             XposedBridge.log("[$TAG] heartbeat failed (AMS not ready?): $t")

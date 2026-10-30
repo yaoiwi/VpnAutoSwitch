@@ -1232,9 +1232,9 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
-    "1.43.2：关于页保留原来的版式（大图标 + 卡片），开发者 / 致谢 / 项目合成一张卡；" +
-        "卡片换成半透明玻璃，四周环境光一直透到卡片和页面底部，滚动时也不会整块暗掉；" +
-        "环境光用着色器绘制：四团光缓慢游走，明暗与饱和度跟着噪声起伏。\n" +
+    "1.43.2：关于页保留原来的版式（大图标 + 卡片），开发者 / 致谢 / 项目合成一张卡，" +
+        "项目主页和问题反馈挪到开发者下面；卡片换成半透明玻璃，环境光透到卡片和页面底部，滚动时不再整块暗掉；" +
+        "模块心跳放慢到 30 秒（空闲 60 秒），版本号只在变化时写，减少设置写入。\n" +
     "1.43.0：同一个应用同时在「目标应用」和「打开时关闭 VPN」里时会提示冲突，" +
         "保存时按「关闭优先」自动去重；已选应用支持按名称排序和筛选，" +
         "选择客户端时常见客户端会置顶。\n" +
@@ -1369,20 +1369,6 @@ private fun AboutPage(
                         endIconSize = 26.dp,
                     ) { haptic(); openUrl(context, DEV_URL) }
                     SettingsAction(
-                        title = "开源项目与许可",
-                        icon = MiuixIcons.Favorites,
-                        summary = "HyperIsland · Miuix · AppMarket · Compose · Kotlin",
-                        endIcon = MiuixIcons.Link,
-                        endIconSize = 26.dp,
-                    ) { show("致谢 · 开源项目", ACK_TIPS) }
-                    SettingsAction(
-                        title = "使用说明与工作原理",
-                        icon = MiuixIcons.Info,
-                        summary = "触发条件、配置步骤与实现方式",
-                        endIcon = MiuixIcons.Link,
-                        endIconSize = 26.dp,
-                    ) { show("使用说明与工作原理", USAGE_TIPS) }
-                    SettingsAction(
                         title = "项目主页",
                         icon = MiuixIcons.Home,
                         summary = "github.com/yaoiwi/VpnAutoSwitch",
@@ -1396,6 +1382,20 @@ private fun AboutPage(
                         endIcon = MiuixIcons.Link,
                         endIconSize = 26.dp,
                     ) { haptic(); openUrl(context, "$REPO_URL/issues") }
+                    SettingsAction(
+                        title = "开源项目与许可",
+                        icon = MiuixIcons.Favorites,
+                        summary = "HyperIsland · Miuix · AppMarket · Compose · Kotlin",
+                        endIcon = MiuixIcons.Link,
+                        endIconSize = 26.dp,
+                    ) { show("致谢 · 开源项目", ACK_TIPS) }
+                    SettingsAction(
+                        title = "使用说明与工作原理",
+                        icon = MiuixIcons.Info,
+                        summary = "触发条件、配置步骤与实现方式",
+                        endIcon = MiuixIcons.Link,
+                        endIconSize = 26.dp,
+                    ) { show("使用说明与工作原理", USAGE_TIPS) }
                     SettingsAction(
                         title = "更新日志",
                         icon = MiuixIcons.Notes,

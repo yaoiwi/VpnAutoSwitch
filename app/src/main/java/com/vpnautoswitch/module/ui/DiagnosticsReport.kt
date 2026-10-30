@@ -36,7 +36,7 @@ internal object DiagnosticsReport {
             DiagnosticsPolicy.ModuleState.STALE -> CheckItem(
                 "模块运行",
                 CheckStatus.FAIL,
-                "上次心跳在 ${ago(diagnostics.heartbeat, now)}，超过 60 秒没有新心跳。" +
+                "上次心跳在 ${ago(diagnostics.heartbeat, now)}，超过 90 秒没有新心跳。" +
                     "检查 LSPosed 是否启用模块、作用域是否只有「系统框架」",
             )
             DiagnosticsPolicy.ModuleState.NEVER -> CheckItem(

@@ -3,7 +3,11 @@ package com.vpnautoswitch.module.ui
 /** 纯诊断判断，和 UI 分离，便于固定边界行为。 */
 object DiagnosticsPolicy {
 
-    const val HEARTBEAT_FRESH_MS = 60_000L
+    /**
+     * 心跳间隔 30 秒（空闲时 60 秒），判定阈值留三倍余量：
+     * 一次丢失不会误报「模块未运行」。
+     */
+    const val HEARTBEAT_FRESH_MS = 90_000L
 
     enum class ModuleState {
         /** 心跳新鲜且版本一致 */
@@ -118,7 +122,7 @@ object DiagnosticsPolicy {
 
         val subtitle = when {
             !fresh && heartbeat == 0L ->
-                "超过 60 秒没有收到系统框架心跳，去 LSPosed 里检查作用域并重启"
+                "超过 90 秒没有收到系统框架心跳，去 LSPosed 里检查作用域并重启"
             !fresh -> "心跳已中断，最后一次是 ${formatAge(age)}前"
             state == ModuleState.OLD_CODE ->
                 "App 是 v$appVersion，系统框架仍是 v$moduleVersion，重启手机后生效"
