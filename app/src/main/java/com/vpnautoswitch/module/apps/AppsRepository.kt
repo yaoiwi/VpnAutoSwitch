@@ -3,6 +3,7 @@ package com.vpnautoswitch.module.apps
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -22,7 +23,9 @@ data class AppInfo(
     val label: String,
     val hasVpnService: Boolean,
     val activityName: String? = null,
-    val icon: ImageBitmap? = null
+    val icon: ImageBitmap? = null,
+    /** 预装应用。选择页里单独分一组，免得在几百个系统应用里翻自己的 App */
+    val isSystem: Boolean = false
 )
 
 object AppsRepository {
@@ -58,11 +61,19 @@ object AppsRepository {
             ).forEach { info ->
                 val pkg = info.activityInfo.packageName
                 if (!result.containsKey(pkg)) {
+                    val systemFlags = try {
+                        pm.getApplicationInfo(pkg, 0).flags
+                    } catch (t: Throwable) {
+                        0
+                    }
                     result[pkg] = AppInfo(
                         packageName = pkg,
                         label = info.loadLabel(pm).toString(),
                         hasVpnService = vpnPackages.contains(pkg),
                         activityName = info.activityInfo.name,
+                        isSystem = (systemFlags and (
+                            ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP
+                            )) != 0,
                     )
                 }
             }

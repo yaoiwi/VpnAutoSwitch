@@ -35,6 +35,34 @@ internal object EnginePolicy {
         removedTarget && remainingTargets == 0
 
     /**
+     * 离开一个目标后，剩下的是不是全是「挂在后台的残留进程」。
+     *
+     * 这里不看「离开的是不是刚在用的那个」，而是看现在有没有别的目标还停在前台：
+     * 有就说明用户还在用别的目标，会话要留着；没有就说明目标全在后台，可以收掉。
+     */
+    fun anotherTargetInForeground(
+        foreground: String?,
+        leavingPackage: String,
+        aliveTargets: Set<String>,
+    ): Boolean = foreground != null && foreground != leavingPackage && aliveTargets.contains(foreground)
+
+    /**
+     * 离开的是不是「刚在用的那个」，并且还有别的目标挂在后台。
+     *
+     * 这种情况要结束整段会话：否则后台残留的进程会让 VPN 一直连着，
+     * 用户划掉当前应用却看不到断开。
+     *
+     * [dismissAny] 打开时，只要目标都在后台，划掉任意一个也算会话结束；
+     * 关掉时只认「划掉正在用的那个」，后台目标被回收不影响会话。
+     */
+    fun shouldEndSessionOnLeave(
+        removedWasForeground: Boolean,
+        remainingTargets: Int,
+        dismissAny: Boolean = false,
+        anotherTargetInForeground: Boolean = false,
+    ): Boolean = remainingTargets > 0 && (removedWasForeground || (dismissAny && !anotherTargetInForeground))
+
+    /**
      * 关后守卫是否继续观察。
      *
      * 只在「没有接管常驻设置」时才有意义：always-on 模式关掉设置就断了，
@@ -61,6 +89,15 @@ internal object EnginePolicy {
      * 只决定「允许尝试哪些步骤」，不判断运行时是否真的成功；
      * 这样关闭逻辑可以脱离 Android 环境做回归测试。
      */
+    /**
+     * 关闭时第一阶段是否允许直接强制停止客户端。
+     *
+     * 开了「保留客户端进程」就先只用温和手段（停止广播 / 快捷磁贴），
+     * 让进程活着；确实关不掉时 Engine 再单独补一次强停。
+     */
+    fun allowForceStopOnClose(forceStopEnabled: Boolean, keepClientAlive: Boolean): Boolean =
+        forceStopEnabled && !keepClientAlive
+
     fun stopOrder(
         hasPackage: Boolean,
         allowActivityUi: Boolean,
@@ -78,7 +115,7 @@ internal object EnginePolicy {
     }
 
     /** 停止广播的等待时长：service 模式大多不响应，少等一会儿 */
-    fun broadcastWaitMs(isServiceMode: Boolean): Long = if (isServiceMode) 800L else 2_000L
+    fun broadcastWaitMs(isServiceMode: Boolean): Long = if (isServiceMode) 700L else 1_200L
 
     /**
      * 是否处理“从最近任务划掉”。
@@ -106,12 +143,38 @@ internal object EnginePolicy {
     /** null 表示进程列表不可信，不能当成全部死亡。 */
     fun shouldEnsureForProcessState(anyTargetAlive: Boolean?): Boolean = anyTargetAlive != false
 
+    /**
+     * 重写常驻设置前要等多久。
+     *
+     * 首次（[reapplyCount] 为 0）用 [firstMs]：这时往往只是客户端还没把隧道建好，
+     * 等一个完整的建隧道时间就够，没必要按「防打断」的 12 秒硬等。
+     * 连续失败以后才拉长，避免反复 unbind 把正在建隧道的过程打断。
+     */
     fun reapplyInterval(
         reapplyCount: Int,
         maxFastReapply: Int = 4,
         fastMs: Long = 12_000L,
         slowMs: Long = 60_000L,
-    ): Long = if (reapplyCount >= maxFastReapply) slowMs else fastMs
+        firstMs: Long = fastMs,
+    ): Long = when {
+        reapplyCount <= 0 -> firstMs
+        reapplyCount >= maxFastReapply -> slowMs
+        else -> fastMs
+    }
+
+    /**
+     * 看门狗下一拍的间隔。
+     *
+     * 已经发起连接但隧道还没起来时用短间隔，免得「第一次没连上、第二次要等 5 秒」；
+     * 连续快跑 [maxFastTicks] 拍仍未连上就退回常规间隔，避免长期高频轮询耗电。
+     */
+    fun reconcileDelay(
+        connected: Boolean,
+        connectingTicks: Int,
+        maxFastTicks: Int = 8,
+        fastMs: Long = 900L,
+        normalMs: Long = 5_000L,
+    ): Long = if (!connected && connectingTicks < maxFastTicks) fastMs else normalMs
 
     fun cooldownReady(now: Long, lastAt: Long, cooldownMs: Long): Boolean =
         now - lastAt >= cooldownMs

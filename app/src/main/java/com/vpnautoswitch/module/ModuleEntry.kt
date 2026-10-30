@@ -2,6 +2,7 @@ package com.vpnautoswitch.module
 
 import android.app.Notification
 import android.content.Context
+import android.content.Intent
 import android.os.IBinder
 import com.vpnautoswitch.module.system.ActivityRecords
 import com.vpnautoswitch.module.system.ConfigRepo
@@ -49,6 +50,7 @@ class ModuleEntry : IXposedHookLoadPackage {
         ProcessRecords.attach(lpparam.classLoader)
         Engine.attach(ctx)
 
+        val launchHooks = hookActivityStart(lpparam.classLoader)
         val resumedHooks = hookActivityResumed(lpparam.classLoader)
         val stateHooks = hookActivityRecordState(lpparam.classLoader)
         val deathHooks = hookProcessDeath(lpparam.classLoader)
@@ -56,13 +58,40 @@ class ModuleEntry : IXposedHookLoadPackage {
         val notifHooks = hookVpnNotification(lpparam.classLoader)
 
         val summary =
-            "hooks: activityResumed=$resumedHooks, setState=$stateHooks, death=$deathHooks, " +
-                "taskRemoved=$taskHooks, notif=$notifHooks"
+            "hooks: startActivity=$launchHooks, activityResumed=$resumedHooks, setState=$stateHooks, " +
+                "death=$deathHooks, taskRemoved=$taskHooks, notif=$notifHooks"
         XposedBridge.log("[VpnAutoSwitch] $summary")
         ModuleLog.append(ctx, "system_server loaded ($summary)")
     }
 
     // ------------------------------------------------------------ Activity 前台
+
+    /**
+     * ActivityTaskManagerService.startActivity(..., Intent, ...)。
+     *
+     * 用户点开应用的那一刻就能拿到包名，比 activityResumed（第一帧画出后）早半秒到一秒。
+     * 提前把常驻 VPN 写上，让系统在目标应用启动的同时 bind VpnService，
+     * 而不是等应用已经打开、用户已经开始等网络了才动手。
+     */
+    private fun hookActivityStart(cl: ClassLoader): Int {
+        val cls = findClass("com.android.server.wm.ActivityTaskManagerService", cl) ?: return 0
+        val callback = object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                try {
+                    val intent = param.args.firstOrNull { it is Intent } as? Intent ?: return
+                    val pkg = intent.component?.packageName ?: intent.`package`
+                    if (!pkg.isNullOrEmpty()) Engine.onAppLaunching(pkg)
+                } catch (t: Throwable) {
+                    XposedBridge.log(t)
+                }
+            }
+        }
+        var total = 0
+        for (name in arrayOf("startActivity", "startActivityAsUser", "startActivityAsUserEvenIfSleeping")) {
+            total += XposedBridge.hookAllMethods(cls, name, callback).size
+        }
+        return total
+    }
 
     /**
      * ActivityTaskManagerService.activityResumed(IBinder token[, boolean])，

@@ -12,7 +12,7 @@ import java.util.Locale
 object AppListPolicy {
 
     /** 少于这个数量就不显示搜索框，免得空占一行 */
-    const val SEARCH_THRESHOLD = 8
+    const val SEARCH_THRESHOLD = 5
 
     fun shouldShowSearch(count: Int): Boolean = count >= SEARCH_THRESHOLD
 

@@ -13,8 +13,8 @@ fun signingValue(env: String, prop: String): String? =
         ?: signingProps.getProperty(prop)?.takeIf { it.isNotBlank() }
 
 // 版本只在这里维护；CI 通过 :app:printVersionName 读取，避免解析脚本
-val appVersionCode = 81
-val appVersionName = "1.43.2"
+val appVersionCode = 83
+val appVersionName = "1.44.0"
 
 val storePath = signingValue("KEYSTORE_FILE", "storeFile")
 val storePwd = signingValue("KEYSTORE_PASSWORD", "storePassword")

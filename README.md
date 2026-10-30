@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/Kotlin-2.4-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin" />
   <img src="https://img.shields.io/badge/Compose-1.12-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white" alt="Compose" />
   <img src="https://img.shields.io/badge/Miuix-0.9.4-FF6B00?style=flat-square" alt="Miuix" />
-  <img src="https://img.shields.io/badge/Release-1.43.2-brightgreen?style=flat-square" alt="Release" />
+  <img src="https://img.shields.io/badge/Release-1.44.0-brightgreen?style=flat-square" alt="Release" />
   <img src="https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square" alt="License" />
 </p>
 
@@ -46,7 +46,7 @@
 
 ## 📖 使用文档
 
-1. 打开 [Release](https://github.com/yaoiwi/VpnAutoSwitch/releases/latest)，下载 `VpnAutoSwitch-1.43.2.apk`（覆盖安装即可，配置会保留）。
+1. 打开 [Release](https://github.com/yaoiwi/VpnAutoSwitch/releases/latest)，下载 `VpnAutoSwitch-1.44.0.apk`（覆盖安装即可，配置会保留）。
 2. 打开 **LSPosed 管理器 → 模块**，启用本模块，**作用域只勾选「系统框架」**，然后重启手机。
 3. 打开 App：
    - 「目标应用」选择需要自动连接 VPN 的应用；
@@ -85,6 +85,7 @@
 | 客户端要能被自动拉起 | 优先使用系统「始终开启的 VPN」；Clash 系走外部控制、重启 `VpnService` 或快捷磁贴。都不支持时需在客户端里打开「自动连接」，可先用「客户端适配」测试可用方式 |
 | 手动连上的 VPN 需要强制停止 | 清除常驻设置不会断开手动连接，1.2 秒后仍连着会结束客户端进程（可在「高级」关闭） |
 | 「划掉」默认即断开 | 从最近任务划掉目标应用后，即使前台服务让进程还活着也会断开；可在「高级」关闭「划掉任务即断开」，关闭后只有主进程结束才断开。任务回调不可用时仍按进程结束断开 |
+| 划掉任意一个都断开 | 同时选了多个目标时，只要它们都在后台，划掉其中任意一个就断开（默认开启「划掉任意目标即断开」，可在「高级」关闭，关闭后只有划掉正在用的那个才断开）。有目标还停在前台时不会断 |
 | 与系统常驻 VPN 共用设置 | 模块开启期间该设置指向你的客户端，关闭时恢复原值；只对主用户生效，深度定制 ROM 可能需要按日志适配 |
 
 ---

@@ -25,6 +25,12 @@ data class Config(
     val forceStopVpn: Boolean = true,
     /** 从最近任务划掉应用时，即使进程仍在运行也断开 VPN */
     val disconnectOnTaskRemoved: Boolean = true,
+    /**
+     * 目标都在后台时，划掉其中任意一个也断开 VPN。
+     *
+     * 关掉时只在划掉「正在用的那个」才断开；后台残留的目标会被忽略。
+     */
+    val disconnectOnAnyDismiss: Boolean = true,
     /** 无法用后台方式拉起时，是否允许短暂打开 VPN 客户端界面（默认不允许） */
     val allowVpnUi: Boolean = false,
     /** 关闭后继续观察几秒，客户端自己把 VPN 拉回来时再关一次 */
@@ -48,7 +54,9 @@ data class Config(
     /** 连上这些 Wi-Fi 时始终关闭 VPN，且不再自动开启 */
     val wifiOff: Set<String> = emptySet(),
     /** 已选应用列表按名称排序（默认按添加顺序） */
-    val sortAppsByName: Boolean = false
+    val sortAppsByName: Boolean = false,
+    /** 关闭 VPN 后保留客户端进程（下次打开应用时不用冷启动，代价是客户端常驻后台） */
+    val keepClientAlive: Boolean = true
 ) {
 
     fun toJson(): String {
@@ -66,6 +74,7 @@ data class Config(
         o.put("toast", toastEnabled)
         o.put("forceStop", forceStopVpn)
         o.put("taskRemoved", disconnectOnTaskRemoved)
+        o.put("anyDismiss", disconnectOnAnyDismiss)
         o.put("allowVpnUi", allowVpnUi)
         o.put("offGuard", offGuard)
         o.put("hideVpnNotif", hideVpnNotification)
@@ -78,6 +87,7 @@ data class Config(
         o.put("wifiOn", JSONArray(wifiOn.toList()))
         o.put("wifiOff", JSONArray(wifiOff.toList()))
         o.put("sortApps", sortAppsByName)
+        o.put("keepAlive", keepClientAlive)
         return o.toString()
     }
 
@@ -103,6 +113,7 @@ data class Config(
                     toastEnabled = o.optBoolean("toast", true),
                     forceStopVpn = o.optBoolean("forceStop", true),
                     disconnectOnTaskRemoved = o.optBoolean("taskRemoved", true),
+                    disconnectOnAnyDismiss = o.optBoolean("anyDismiss", true),
                     allowVpnUi = o.optBoolean("allowVpnUi", false),
                     offGuard = o.optBoolean("offGuard", true),
                     hideVpnNotification = o.optBoolean("hideVpnNotif", true),
@@ -114,6 +125,7 @@ data class Config(
                     wifiOn = readSet(o.optJSONArray("wifiOn")),
                     wifiOff = readSet(o.optJSONArray("wifiOff")),
                     sortAppsByName = o.optBoolean("sortApps", false),
+                    keepClientAlive = o.optBoolean("keepAlive", true),
                     darkMode = when (o.optString("darkMode", "system")) {
                         "dark" -> "dark"
                         "light" -> "light"

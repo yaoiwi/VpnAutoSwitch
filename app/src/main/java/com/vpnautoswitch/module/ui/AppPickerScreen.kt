@@ -169,19 +169,43 @@ fun AppPickerScreen(state: AppState) {
                         }
                     }
 
-                    item {
-                        SectionTitle(if (single) "全部应用" else "应用列表")
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            shown.forEach { app ->
-                                AppRow(
-                                    app = app,
-                                    selected = state.pickerSelection.contains(app.packageName),
-                                    showCheckbox = !single,
-                                    onClick = {
-                                        state.toggleSelection(app.packageName)
-                                        if (single) state.confirmPicker()
-                                    },
-                                )
+                    // 多选时按「第三方 / 系统」分两组：几百个预装应用堆在一起，
+                    // 找自己的 App 要翻很久。单选（选 VPN 客户端）保持一张表，
+                    // 否则「已安装的常见客户端」会被拆散。
+                    val userApps = if (single) shown else shown.filter { !it.isSystem }
+                    val systemApps = if (single) emptyList() else shown.filter { it.isSystem }
+
+                    if (userApps.isNotEmpty() || single) {
+                        item {
+                            SectionTitle(if (single) "全部应用" else "应用")
+                            Card(modifier = Modifier.fillMaxWidth()) {
+                                userApps.forEach { app ->
+                                    AppRow(
+                                        app = app,
+                                        selected = state.pickerSelection.contains(app.packageName),
+                                        showCheckbox = !single,
+                                        onClick = {
+                                            state.toggleSelection(app.packageName)
+                                            if (single) state.confirmPicker()
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (systemApps.isNotEmpty()) {
+                        item {
+                            SectionTitle("系统应用")
+                            Card(modifier = Modifier.fillMaxWidth()) {
+                                systemApps.forEach { app ->
+                                    AppRow(
+                                        app = app,
+                                        selected = state.pickerSelection.contains(app.packageName),
+                                        showCheckbox = true,
+                                        onClick = { state.toggleSelection(app.packageName) },
+                                    )
+                                }
                             }
                         }
                     }

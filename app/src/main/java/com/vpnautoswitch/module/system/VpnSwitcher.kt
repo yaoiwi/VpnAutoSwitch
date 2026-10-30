@@ -51,7 +51,8 @@ internal object VpnSwitcher {
         val cr = ctx.contentResolver
         return try {
             clearAlwaysOn(ctx, "reapply")
-            Thread.sleep(250)
+            // 只需让设置的 ContentObserver 收到一次变化，250ms 是白等
+            Thread.sleep(120)
             applyAlwaysOn(ctx, vpnPackage, lockdown)
         } catch (t: Throwable) {
             ModuleLog.append(ctx, "reapply failed: $t")

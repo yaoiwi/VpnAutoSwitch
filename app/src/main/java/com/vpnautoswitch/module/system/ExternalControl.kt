@@ -3,7 +3,11 @@ package com.vpnautoswitch.module.system
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
 import android.provider.Settings
 
 /**
@@ -124,6 +128,61 @@ internal object ExternalControl {
             ctx.stopService(Intent().setComponent(ComponentName(pkg, service)))
             true
         } catch (t: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * 预热客户端进程：bind 一下它的 VpnService，把进程拉进内存，但不建立隧道。
+     *
+     * bindService 只会触发 onCreate / onBind，客户端不会 establish——那一步在
+     * onStartCommand 或用户点「连接」时才发生，所以不会出现「想关却把它打开了」。
+     * 拿到连接后立刻解绑，不留悬挂 binder；失败就当作没预热，下次照旧冷启动。
+     */
+    fun prewarm(ctx: Context, pkg: String): Boolean {
+        if (pkg.isEmpty()) return false
+        val service = findVpnService(ctx, pkg) ?: return false
+
+        val released = java.util.concurrent.atomic.AtomicBoolean(false)
+        var conn: ServiceConnection? = null
+        val main = Handler(Looper.getMainLooper())
+        val release = {
+            val c = conn
+            if (c != null && released.compareAndSet(false, true)) {
+                try {
+                    ctx.unbindService(c)
+                } catch (t: Throwable) {
+                    // 已经解绑或从未绑上，忽略
+                }
+            }
+        }
+
+        conn = object : ServiceConnection {
+            override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+                ModuleLog.append(ctx, "prewarm: $pkg 进程已就绪")
+                main.post { release() }
+            }
+
+            override fun onServiceDisconnected(name: ComponentName?) {}
+        }
+
+        return try {
+            val bound = ctx.bindService(
+                Intent().setComponent(ComponentName(pkg, service)),
+                conn,
+                Context.BIND_AUTO_CREATE
+            )
+            if (!bound) {
+                released.set(true)
+                false
+            } else {
+                // 万一 onServiceConnected 迟迟不来（服务卡住），3 秒后自己解绑
+                main.postDelayed({ release() }, 3_000L)
+                true
+            }
+        } catch (t: Throwable) {
+            released.set(true)
+            ModuleLog.append(ctx, "prewarm failed: $t")
             false
         }
     }

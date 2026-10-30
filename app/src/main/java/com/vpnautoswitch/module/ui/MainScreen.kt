@@ -29,6 +29,10 @@ import top.yukonga.miuix.kmp.icon.extended.Link
 import top.yukonga.miuix.kmp.icon.extended.Backup
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.state.ToggleableState
+import top.yukonga.miuix.kmp.basic.Checkbox
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.alpha
 import androidx.compose.runtime.derivedStateOf
@@ -100,6 +104,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -167,6 +172,9 @@ fun MainScreen(state: AppState) {
     var refreshing by remember { mutableStateOf(false) }
     var settingsQuery by remember { mutableStateOf("") }
     var appQuery by remember { mutableStateOf("") }
+    /** 批量选择：null 表示未进入选择模式，否则是当前勾中的包名 */
+    var targetSelection by remember { mutableStateOf<Set<String>?>(null) }
+    var offSelection by remember { mutableStateOf<Set<String>?>(null) }
     val settingsMatches = remember(settingsQuery) { SettingsSearch.matchedTitles(settingsQuery) }
     /** null=未打开；"on"=编辑「开 VPN」列表；"off"=编辑「关 VPN」列表 */
     var ssidMode by remember { mutableStateOf<String?>(null) }
@@ -290,6 +298,10 @@ fun MainScreen(state: AppState) {
                                 state = state,
                                 query = appQuery,
                                 onQueryChange = { appQuery = it },
+                                targetSelection = targetSelection,
+                                onTargetSelectionChange = { targetSelection = it },
+                                offSelection = offSelection,
+                                onOffSelectionChange = { offSelection = it },
                             )
                         }
 
@@ -512,11 +524,17 @@ private fun LazyListScope.appsItems(
     state: AppState,
     query: String,
     onQueryChange: (String) -> Unit,
+    targetSelection: Set<String>?,
+    onTargetSelectionChange: (Set<String>?) -> Unit,
+    offSelection: Set<String>?,
+    onOffSelectionChange: (Set<String>?) -> Unit,
 ) {
     val conflict = RuleConflicts.find(state.config)
     val total = state.config.targets.size + state.config.offTargets.size
+    val selecting = targetSelection != null || offSelection != null
 
-    if (AppListPolicy.shouldShowSearch(total)) {
+    // 选择模式下先把筛选栏收起来，免得刚点完全选列表又被筛掉一截
+    if (AppListPolicy.shouldShowSearch(total) && !selecting) {
         item {
             AppListFilterBar(
                 query = query,
@@ -539,6 +557,7 @@ private fun LazyListScope.appsItems(
             SettingsActionWithArrow(
                 title = "添加 / 管理目标应用",
                 icon = MiuixIcons.GridView,
+                summary = "长按列表项可批量移除或移动",
                 onClick = { state.openPicker(AppState.MODE_MULTI) },
             )
         }
@@ -564,11 +583,54 @@ private fun LazyListScope.appsItems(
         if (shown.isEmpty()) {
             item { AppListEmptyMatch() }
         }
+        val sel = targetSelection
+        if (sel != null) {
+            item {
+                AppSelectionBar(
+                    count = sel.size,
+                    allSelected = shown.isNotEmpty() && sel.containsAll(shown),
+                    moveLabel = "移到关闭",
+                    onSelectAll = {
+                        onTargetSelectionChange(
+                            if (shown.isNotEmpty() && sel.containsAll(shown)) emptySet()
+                            else shown.toSet()
+                        )
+                    },
+                    onCancel = { onTargetSelectionChange(null) },
+                    onRemove = {
+                        state.save(state.config.copy(targets = state.config.targets - sel))
+                        onTargetSelectionChange(null)
+                    },
+                    onMove = {
+                        // 移动即「关优先」：挪过去的同时从目标列表里摘掉
+                        val (next, _) = RuleConflicts.keepOff(
+                            state.config,
+                            state.config.offTargets + sel,
+                        )
+                        state.save(next)
+                        onTargetSelectionChange(null)
+                    },
+                )
+            }
+        }
         shown.forEach { pkg ->
             item {
-                AppToggleCard(state, pkg) {
-                    state.save(state.config.copy(targets = state.config.targets - pkg))
-                }
+                AppToggleCard(
+                    state = state,
+                    pkg = pkg,
+                    selecting = sel != null,
+                    checked = sel?.contains(pkg) == true,
+                    onRemove = {
+                        state.save(state.config.copy(targets = state.config.targets - pkg))
+                    },
+                    onEnterSelection = { onTargetSelectionChange(setOf(pkg)) },
+                    onToggleRow = {
+                        val current = sel ?: emptySet()
+                        onTargetSelectionChange(
+                            if (current.contains(pkg)) current - pkg else current + pkg
+                        )
+                    },
+                )
             }
         }
     }
@@ -579,6 +641,7 @@ private fun LazyListScope.appsItems(
             SettingsActionWithArrow(
                 title = "添加 / 管理关闭列表",
                 icon = MiuixIcons.Hide,
+                summary = "长按列表项可批量移除或移动",
                 onClick = { state.openPicker(AppState.MODE_OFF) },
             )
         }
@@ -604,11 +667,53 @@ private fun LazyListScope.appsItems(
         if (shown.isEmpty()) {
             item { AppListEmptyMatch() }
         }
+        val sel = offSelection
+        if (sel != null) {
+            item {
+                AppSelectionBar(
+                    count = sel.size,
+                    allSelected = shown.isNotEmpty() && sel.containsAll(shown),
+                    moveLabel = "移到目标",
+                    onSelectAll = {
+                        onOffSelectionChange(
+                            if (shown.isNotEmpty() && sel.containsAll(shown)) emptySet()
+                            else shown.toSet()
+                        )
+                    },
+                    onCancel = { onOffSelectionChange(null) },
+                    onRemove = {
+                        state.save(state.config.copy(offTargets = state.config.offTargets - sel))
+                        onOffSelectionChange(null)
+                    },
+                    onMove = {
+                        val (next, _) = RuleConflicts.keepOn(
+                            state.config,
+                            state.config.targets + sel,
+                        )
+                        state.save(next)
+                        onOffSelectionChange(null)
+                    },
+                )
+            }
+        }
         shown.forEach { pkg ->
             item {
-                AppToggleCard(state, pkg) {
-                    state.save(state.config.copy(offTargets = state.config.offTargets - pkg))
-                }
+                AppToggleCard(
+                    state = state,
+                    pkg = pkg,
+                    selecting = sel != null,
+                    checked = sel?.contains(pkg) == true,
+                    onRemove = {
+                        state.save(state.config.copy(offTargets = state.config.offTargets - pkg))
+                    },
+                    onEnterSelection = { onOffSelectionChange(setOf(pkg)) },
+                    onToggleRow = {
+                        val current = sel ?: emptySet()
+                        onOffSelectionChange(
+                            if (current.contains(pkg)) current - pkg else current + pkg
+                        )
+                    },
+                )
             }
         }
     }
@@ -626,6 +731,78 @@ private fun LazyListScope.appsItems(
     }
 }
 
+/**
+ * 批量选择时的操作条。
+ *
+ * 只在长按进入选择模式后出现，平时应用页的形态一点不变。
+ */
+@Composable
+private fun AppSelectionBar(
+    count: Int,
+    allSelected: Boolean,
+    moveLabel: String,
+    onSelectAll: () -> Unit,
+    onCancel: () -> Unit,
+    onRemove: () -> Unit,
+    onMove: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Text(
+                text = if (count == 0) "选择要处理的应用" else "已选 $count 项",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
+            )
+            // 四个按钮等宽平分一行：文案压到 4 字以内，minWidth 归零、内边距收窄，窄屏也不会换行
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                BulkActionButton(
+                    text = if (allSelected) "取消全选" else "全选",
+                    onClick = onSelectAll,
+                    modifier = Modifier.weight(1f),
+                )
+                BulkActionButton(
+                    text = "移除",
+                    enabled = count > 0,
+                    onClick = onRemove,
+                    modifier = Modifier.weight(1f),
+                )
+                BulkActionButton(
+                    text = moveLabel,
+                    enabled = count > 0,
+                    onClick = onMove,
+                    modifier = Modifier.weight(1f),
+                )
+                BulkActionButton(
+                    text = "退出",
+                    onClick = onCancel,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+/** 选择模式下的等宽按钮：复用 Miuix 的 TextButton 拿主题配色，只把最小宽度和内边距压掉，四个刚好一行 */
+@Composable
+private fun BulkActionButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    TextButton(
+        text = text,
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+        minWidth = 0.dp,
+        minHeight = 36.dp,
+        insideMargin = PaddingValues(horizontal = 2.dp),
+        textStyle = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium),
+    )
+}
+
 /** 应用页顶部的筛选框 + 排序切换，只在已选应用较多时出现 */
 @Composable
 private fun AppListFilterBar(
@@ -637,6 +814,7 @@ private fun AppListFilterBar(
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         TextField(
             value = query,
@@ -644,9 +822,13 @@ private fun AppListFilterBar(
             label = "筛选已选应用",
             modifier = Modifier.weight(1f),
         )
+        // 排序按钮给足宽高：默认只包住三个字，和左边的输入框比显得又窄又矮
         TextButton(
             text = if (sortByName) "按名称" else "按顺序",
             onClick = onToggleSort,
+            modifier = Modifier.height(52.dp),
+            minWidth = 84.dp,
+            insideMargin = PaddingValues(horizontal = 12.dp),
         )
     }
 }
@@ -715,13 +897,35 @@ private fun AppListEmptyMatch() {
 }
 
 /** 单个应用一张卡：应用图标 + 名称 + 开关，关掉即从列表移除 */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AppToggleCard(state: AppState, pkg: String, onRemove: () -> Unit) {
+private fun AppToggleCard(
+    state: AppState,
+    pkg: String,
+    selecting: Boolean = false,
+    checked: Boolean = false,
+    onRemove: () -> Unit,
+    onEnterSelection: () -> Unit = {},
+    onToggleRow: () -> Unit = {},
+) {
     val icon = state.apps.firstOrNull { it.packageName == pkg }?.icon
+    val haptic = LocalHapticFeedback.current
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                // 长按进入批量选择；平时点整行不做任何事，开关仍由右侧 Switch 负责
+                .combinedClickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = { if (selecting) onToggleRow() },
+                    onLongClick = {
+                        if (!selecting) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onEnterSelection()
+                        }
+                    },
+                )
                 .padding(horizontal = 18.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -758,10 +962,18 @@ private fun AppToggleCard(state: AppState, pkg: String, onRemove: () -> Unit) {
                     modifier = Modifier.padding(top = 2.dp),
                 )
             }
-            Switch(
-                checked = true,
-                onCheckedChange = { if (!it) onRemove() },
-            )
+            if (selecting) {
+                Checkbox(
+                    state = if (checked) ToggleableState.On else ToggleableState.Off,
+                    onClick = null,
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+            } else {
+                Switch(
+                    checked = true,
+                    onCheckedChange = { if (!it) onRemove() },
+                )
+            }
         }
     }
 }
@@ -945,6 +1157,17 @@ private fun LazyListScope.settingsItems(
                 },
             )
             SettingsSwitch(
+                title = "划掉任意目标即断开",
+                summary = "目标应用都在后台时，划掉其中任意一个就断开 VPN，不必是刚才在用的那个；" +
+                    "关掉后只有划掉正在用的那个才断开",
+                icon = MiuixIcons.GridView,
+                checked = state.config.disconnectOnAnyDismiss,
+                enabled = state.config.disconnectOnTaskRemoved,
+                onCheckedChange = {
+                    state.save(state.config.copy(disconnectOnAnyDismiss = it))
+                },
+            )
+            SettingsSwitch(
                 title = "关闭后继续抑制",
                 summary = "外部控制模式下关闭 VPN 后观察 8 秒，客户端自己又把 VPN 拉起来时再关一次",
                 icon = MiuixIcons.Lock,
@@ -978,6 +1201,14 @@ private fun LazyListScope.settingsItems(
                 icon = MiuixIcons.Delete,
                 checked = state.config.forceStopVpn,
                 onCheckedChange = { state.save(state.config.copy(forceStopVpn = it)) },
+            )
+            SettingsSwitch(
+                title = "关闭 VPN 后保留客户端进程",
+                summary = "断开后让 VPN 客户端留在内存，下次打开目标应用无需冷启动，通常快 1 秒以上；" +
+                    "代价是客户端常驻后台，会多一些耗电。确实关不掉时仍会强制停止一次。",
+                icon = MiuixIcons.Pin,
+                checked = state.config.keepClientAlive,
+                onCheckedChange = { state.save(state.config.copy(keepClientAlive = it)) },
             )
             SettingsSwitch(
                 title = "关闭时恢复原有常驻 VPN 设置",
@@ -1232,14 +1463,16 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
-    "1.43.2：关于页保留原来的版式（大图标 + 卡片），开发者 / 致谢 / 项目合成一张卡，" +
-        "项目主页和问题反馈挪到开发者下面；卡片换成半透明玻璃，环境光透到卡片和页面底部，滚动时不再整块暗掉；" +
-        "模块心跳放慢到 30 秒（空闲 60 秒），版本号只在变化时写，减少设置写入。\n" +
+    "1.44.0：新增「划掉任意目标即断开」——多个目标都在后台时，划掉任意一个就断 VPN，" +
+        "不必是刚才在用的那个（设置里可关）；打开目标应用时更早开始连 VPN（点图标就动手，" +
+        "不等界面画完），没连上时重试间隔从 5 秒缩到 0.9 秒；关闭后默认保留 VPN 客户端进程，" +
+        "下次打开不用冷启动；划掉正在用的目标即断开，不再被后台其它目标拽住；" +
+        "应用页支持长按批量移除 / 移动。\n" +
+    "1.43.2：关于页版式不变，开发者 / 致谢 / 项目合成一张卡，" +
+        "项目主页和问题反馈挪到开发者下面；卡片换成半透明玻璃，环境光透到卡片和页面底部，滚动时不再整块暗掉。\n" +
     "1.43.0：同一个应用同时在「目标应用」和「打开时关闭 VPN」里时会提示冲突，" +
         "保存时按「关闭优先」自动去重；已选应用支持按名称排序和筛选，" +
-        "选择客户端时常见客户端会置顶。\n" +
-    "1.42.0：目标应用、关闭列表的「添加 / 管理」入口都移到各自列表上方，" +
-        "已选应用再多也不用滚到最底部才能添加。"
+        "选择客户端时常见客户端会置顶。"
 
 private const val ACK_TIPS =
     "本模块的实现离不开这些开源项目，在此致谢：\n\n" +
@@ -1273,7 +1506,8 @@ private const val PRIVACY_TIPS =
 private const val USAGE_TIPS =
     "1. 在 LSPosed 中启用本模块，作用域只勾选「系统框架」，然后重启手机。\n" +
         "2. 在「应用」页选择目标应用、默认 VPN 客户端；需要反向联动时再选「打开时关闭 VPN」的列表。\n" +
-        "3. 打开目标应用 → 自动连接 VPN；从最近任务里划掉它 → 自动断开（默认即使进程还在）。\n\n" +
+        "3. 打开目标应用 → 自动连接 VPN；从最近任务里划掉它 → 自动断开（默认即使进程还在）。\n" +
+        "   同时选了多个目标时，只要它们都在后台，划掉其中任意一个也会断开。\n\n" +
         "工作原理：模块只注入 system_server，监听目标应用的界面显示（activityResumed）、" +
         "最近任务移除与进程结束事件，" +
         "通过改写系统的「始终开启的 VPN」（always_on_vpn_app）驱动连接 / 断开。\n" +

@@ -48,6 +48,21 @@ internal object Engine {
 
     private const val RECONCILE_INTERVAL_MS = 5_000L
 
+    /**
+     * 已经发起连接、隧道还没起来时的对账间隔。
+     *
+     * 原来固定 5 秒一拍：第一次尝试没连上，用户就要多等 5 秒才轮到第二次。
+     * 连接窗口里改成 0.9 秒一拍，连上或拍数用尽后自动退回 [RECONCILE_INTERVAL_MS]。
+     */
+    private const val RECONCILE_CONNECTING_MS = 900L
+    private const val RECONCILE_CONNECTING_TICKS = 8
+
+    /** 同一次启动会连着走几次 startActivity，同一个包在这个窗口内只提前探一次 */
+    private const val PREWARM_DEDUPE_MS = 1_200L
+
+    /** 首次重写常驻设置前的等待：给客户端一个建隧道的时间，又不至于等满 12 秒 */
+    private const val REAPPLY_FIRST_MS = 4_000L
+
     /** 关后守卫：窗口总长与最多重关次数 */
     private const val GUARD_WINDOW_MS = 8_000L
     private const val MAX_GUARD_ATTEMPTS = 2
@@ -71,7 +86,7 @@ internal object Engine {
     private const val REAPPLY_GUARD_MS = 12_000L
     private const val REAPPLY_SLOW_MS = 60_000L
     private const val MAX_FAST_REAPPLY = 4
-    private const val TILE_AFTER_REAPPLY = 2
+    private const val TILE_AFTER_REAPPLY = 1
     private const val TILE_COOLDOWN_MS = 30_000L
     private const val MAX_TILE_ATTEMPTS = 3
 
@@ -82,8 +97,14 @@ internal object Engine {
     /** 已经确认要用外部控制的客户端，重试间隔可以短一些 */
     private const val EXTERNAL_ONLY_GUARD_MS = 6_000L
 
-    /** 目标进程刚死时先等一会儿再关 VPN，避免应用秒重启导致来回抖 */
-    private const val OFF_DEBOUNCE_MS = 2_500L
+    /**
+     * 关闭前的去抖。
+     *
+     * 划掉任务、看门狗确认没有目标存活时，用户意图已经很明确，0.5 秒就够；
+     * 进程死亡有可能是系统回收后立刻重启，多等一会儿免得来回抖。
+     */
+    private const val OFF_FAST_MS = 500L
+    private const val OFF_SLOW_MS = 1_500L
 
     /** 强制停止后隧道可能还要几秒才消失：分批复查，仍连着就再停一次 */
     private const val FORCE_STOP_RECHECK_MS = 2_000L
@@ -129,6 +150,14 @@ internal object Engine {
     private val aliveTargets = HashSet<String>()
 
     /**
+     * 最近一个真正回到前台的目标应用。
+     *
+     * [lastForeground] 会被任何应用（含桌面）覆盖，划掉任务的回调又可能晚于桌面 resume，
+     * 用它判断「用户刚收起的是不是正在用的那个」会看走眼，所以单独记一份。
+     */
+    private var lastForegroundTarget: String? = null
+
+    /**
      * 当前正在前台的「打开即关闭」应用。
      * 非空期间不再自动开启 VPN，直到它自己退出进程、或用户回到目标应用。
      */
@@ -149,6 +178,13 @@ internal object Engine {
     /** 最近出现在前台的包：用来区分「重新打开应用」和「应用内部 resume」 */
     private var lastForeground: String? = null
     private var watchdogRunning = false
+
+    /** 连接窗口里已经快轮询了几拍，连上就清零 */
+    private var connectingTicks = 0
+
+    /** 上一次提前连接的包与时间，用来给同一次启动去重 */
+    private var lastPrewarmPkg: String? = null
+    private var lastPrewarmAt = 0L
     private var lastApplyAt = 0L
     private var lastTileClickAt = 0L
     private var tileAttempts = 0
@@ -202,6 +238,41 @@ internal object Engine {
 
     fun onForeground(packageName: String) {
         handler.post { dispatchForeground(packageName) }
+    }
+
+    /**
+     * 应用刚开始启动（Activity 还没 resumed）时的探测。
+     *
+     * activityResumed 要等应用画出第一帧才回调，那时才开始连 VPN，
+     * 用户看到的就是「应用已经打开了，网还没通」。这里在 startActivity 阶段先看一眼：
+     * 是目标应用、VPN 又没连上，就提前把常驻设置写上，让系统在应用启动的同时 bind VpnService。
+     */
+    fun onAppLaunching(packageName: String) {
+        if (packageName.isEmpty()) return
+        handler.post { prewarm(packageName) }
+    }
+
+    private fun prewarm(pkg: String) {
+        val ctx = context() ?: return
+        val cfg = ConfigRepo.get(ctx)
+        if (!cfg.enabled || cfg.vpnPackage.isEmpty()) return
+        if (pkg == cfg.vpnPackage || pkg == BuildConfig.APPLICATION_ID) return
+        if (!cfg.targets.contains(pkg)) return
+        if (automationPaused || userOff || wifiSuppressed || offAppForeground != null) return
+        if (!isNetworkAllowed(cfg)) return
+        // 已经连着就不用插手，resumed 之后走正常流程
+        if (hasVpnTransport(ctx)) return
+
+        // 同一次启动会连着走好几次 startActivity，同一个包只提前探一次
+        val now = SystemClock.elapsedRealtime()
+        if (pkg == lastPrewarmPkg && now - lastPrewarmAt < PREWARM_DEDUPE_MS) return
+        lastPrewarmPkg = pkg
+        lastPrewarmAt = now
+
+        log(ctx, "$pkg launching -> prewarm")
+        ensureVpn(ctx, cfg)
+        // 点了又立刻退出时没人收尾，交给看门狗发现「没有目标存活」后再关
+        startWatchdog()
     }
 
     fun onProcessDied(packageName: String) {
@@ -791,6 +862,7 @@ internal object Engine {
         // 目标又回到前台，取消上一次「进程结束」排队的关闭
         offToken++
         aliveTargets.add(pkg)
+        lastForegroundTarget = pkg
 
         if (userOff) {
             if (!EnginePolicy.shouldResumeAfterUserOff(freshOpen)) {
@@ -818,14 +890,36 @@ internal object Engine {
             offAppForeground = null
             log(context(), "$pkg (off trigger) exited")
         }
+        val wasForeground = lastForegroundTarget == pkg
+        // 别的目标还停在前台时不能收会话，否则正在用的那个会被一起断掉
+        val anotherInFront = EnginePolicy.anotherTargetInForeground(lastForeground, pkg, aliveTargets)
         val removed = aliveTargets.remove(pkg)
         if (!removed) return
         val ctx = context()
         log(ctx, "$pkg -> process died")
-        if (!EnginePolicy.shouldScheduleOffAfterDeath(removed, aliveTargets.size)) return
+        if (lastForeground == pkg) lastForeground = null
+        if (wasForeground) lastForegroundTarget = null
+        // 死的是刚才在用的那个，或者开着「划掉任意目标即断开」：其它目标只是挂在后台的残留进程，
+        // 算这次会话结束。如果它只是被系统回收后重启，下面的 1.5 秒防抖里会重新回到前台并取消这次关闭。
+        val dismissAny = ctx != null && ConfigRepo.get(ctx).disconnectOnAnyDismiss
+        if (EnginePolicy.shouldEndSessionOnLeave(
+                removedWasForeground = wasForeground,
+                remainingTargets = aliveTargets.size,
+                dismissAny = dismissAny,
+                anotherTargetInForeground = anotherInFront,
+            )
+        ) {
+            aliveTargets.clear()
+            log(
+                ctx,
+                if (wasForeground) "other targets only in background -> end session"
+                else "a background target left -> end session",
+            )
+        }
+        if (!EnginePolicy.shouldScheduleOffAfterDeath(true, aliveTargets.size)) return
         // 应用有时只是进程重启（被系统回收后立刻恢复），等一下再决定要不要关，
         // 否则会出现「刚连上就被关、关了又重连」的抖动。
-        scheduleOff(ctx, "$pkg died")
+        scheduleOff(ctx, "$pkg died", OFF_SLOW_MS)
     }
 
     /**
@@ -846,15 +940,35 @@ internal object Engine {
             )
         ) return
 
+        val wasForeground = lastForegroundTarget == pkg
+        // 另一目标正停在前台时保留会话，避免把用户还在用的那个一起断掉
+        val anotherInFront = EnginePolicy.anotherTargetInForeground(lastForeground, pkg, aliveTargets)
         aliveTargets.remove(pkg)
         if (lastForeground == pkg) lastForeground = null
+        if (wasForeground) lastForegroundTarget = null
         log(ctx, "$pkg -> task removed")
+        // 划掉的正好是刚在用的那个，或者开着「划掉任意目标即断开」：其它目标只是挂在后台的进程，
+        // 算这次会话结束。否则它们的存活会让 VPN 一直被拽住，划掉当前应用也不断开。
+        if (EnginePolicy.shouldEndSessionOnLeave(
+                removedWasForeground = wasForeground,
+                remainingTargets = aliveTargets.size,
+                dismissAny = cfg.disconnectOnAnyDismiss,
+                anotherTargetInForeground = anotherInFront,
+            )
+        ) {
+            aliveTargets.clear()
+            log(
+                ctx,
+                if (wasForeground) "other targets only in background -> end session"
+                else "a background target was dismissed -> end session",
+            )
+        }
         if (EnginePolicy.shouldScheduleOffAfterDeath(true, aliveTargets.size)) {
             scheduleOff(ctx, "$pkg task removed")
         }
     }
 
-    private fun scheduleOff(ctx: Context?, reason: String) {
+    private fun scheduleOff(ctx: Context?, reason: String, debounceMs: Long = OFF_FAST_MS) {
         val context = ctx ?: return
         val token = ++offToken
         handler.postDelayed({
@@ -869,7 +983,7 @@ internal object Engine {
                 )
             ) return@postDelayed
             turnOff(reason)
-        }, OFF_DEBOUNCE_MS)
+        }, debounceMs)
     }
 
     /**
@@ -905,7 +1019,8 @@ internal object Engine {
                 return@postDelayed
             }
             ExternalControl.startVpnService(ctx, scheduledPackage)
-        }, 600L)
+            // 原来等 600ms 是为了让 stopService 先落地；250ms 足够，用户感知上是半秒差距
+        }, 250L)
     }
 
     // ---------------------------------------------------------------- VPN 控制
@@ -1001,7 +1116,13 @@ internal object Engine {
             return
         }
 
-        val interval = EnginePolicy.reapplyInterval(reapplyCount, MAX_FAST_REAPPLY, REAPPLY_GUARD_MS, REAPPLY_SLOW_MS)
+        val interval = EnginePolicy.reapplyInterval(
+            reapplyCount = reapplyCount,
+            maxFastReapply = MAX_FAST_REAPPLY,
+            fastMs = REAPPLY_GUARD_MS,
+            slowMs = REAPPLY_SLOW_MS,
+            firstMs = REAPPLY_FIRST_MS,
+        )
         if (!EnginePolicy.cooldownReady(now, lastApplyAt, interval)) return
 
         if (active && settingPointsToUs) {
@@ -1151,11 +1272,33 @@ internal object Engine {
 
         // 清掉 always-on 未必能断开「用户手动连上的」VPN，稍等一下确认。
         // 外部控制模式没有设置项可清，直接把校验提前，尽快进入停止链路。
-        val verifyDelay = if (tookOwnership) 1_200L else 400L
-        handler.postDelayed({ verifyOff(ctx, cfg.vpnPackage, generation) }, verifyDelay)
+        // 清掉常驻设置后系统很快会 unbind，1.2 秒是白等；外部控制模式本来就没有设置项，直接查
+        val verifyDelay = if (tookOwnership) 600L else 300L
+        handler.postDelayed({
+            verifyOff(
+                ctx, cfg.vpnPackage, generation,
+                // 开了「保留客户端进程」就先只走温和手段，实在关不掉再强停
+                forceStopAllowed = EnginePolicy.allowForceStopOnClose(
+                    forceStopEnabled = cfg.forceStopVpn,
+                    keepClientAlive = cfg.keepClientAlive,
+                ),
+            )
+        }, verifyDelay)
         // 外部控制模式下客户端可能自己把 VPN 拉回来，关掉后盯一小会儿
         if (!tookOwnership && wasActive) {
             startOffGuard(ctx, cfg, generation, ++offGuardToken)
+        }
+        // 保留客户端进程：等到隧道真的断了再 bind 一次 VpnService，把进程拉热。
+        // 进程还在就什么都不做；这样下次点开目标应用不用等冷启动。
+        if (cfg.keepClientAlive && cfg.vpnPackage.isNotEmpty()) {
+            handler.postDelayed({
+                if (!closeChainValid(ctx, cfg.vpnPackage, generation)) return@postDelayed
+                if (hasVpnTransport(ctx)) return@postDelayed
+                if (isProcessAlive(ctx, cfg.vpnPackage)) return@postDelayed
+                // 上一轮强停可能留下了 stopped 标记，先清掉再 bind，否则拉不起来
+                Packages.unstop(cfg.vpnPackage)
+                ExternalControl.prewarm(ctx, cfg.vpnPackage)
+            }, 1_500L)
         }
         publishRuntime(ctx)
     }
@@ -1181,7 +1324,12 @@ internal object Engine {
      * 关闭后校验：如果隧道还在（典型场景：用户在 VPN 客户端里手动连上的，
      * 清 always-on 设置并不会断开它），就依次尝试「停止请求 → 快捷磁贴 → 强制停止」。
      */
-    private fun verifyOff(ctx: Context, expectedPackage: String, generation: Int) {
+    private fun verifyOff(
+        ctx: Context,
+        expectedPackage: String,
+        generation: Int,
+        forceStopAllowed: Boolean = true,
+    ) {
         if (!closeChainValid(ctx, expectedPackage, generation)) return
         if (!hasVpnTransport(ctx)) {
             log(ctx, "verify: vpn is down")
@@ -1194,7 +1342,7 @@ internal object Engine {
             hasPackage = expectedPackage.isNotEmpty(),
             allowActivityUi = cfg.allowVpnUi,
             hasTile = hasTile,
-            forceStopEnabled = cfg.forceStopVpn,
+            forceStopEnabled = cfg.forceStopVpn && forceStopAllowed,
         )
 
         // 1) 无 UI：给客户端发它自己的停止广播（Clash 系支持）。
@@ -1378,6 +1526,16 @@ internal object Engine {
         if (EnginePolicy.StopStep.FORCE_STOP !in plan ||
             !cfg.forceStopVpn || expectedPackage.isEmpty()
         ) {
+            // 「保留客户端进程」时上面只跑了温和手段；确实关不掉才允许强停一次，
+            // 宁可让进程被杀，也不能出现「点了断开、VPN 还连着」
+            if (cfg.keepClientAlive && cfg.forceStopVpn && expectedPackage.isNotEmpty()) {
+                log(ctx, "verify: 温和手段没关掉，改为强制停止（进程会在关闭后重新预热）")
+                finishVerifyOff(
+                    ctx, expectedPackage, generation, attempt,
+                    listOf(EnginePolicy.StopStep.FORCE_STOP),
+                )
+                return
+            }
             log(ctx, "verify: vpn still up, no further step allowed")
             return
         }
@@ -1534,7 +1692,19 @@ internal object Engine {
                     log(ctx, "reconcile: vpn is off but target alive -> enable")
                 }
                 ensureVpn(ctx, cfg)
-                handler.postDelayed(this, RECONCILE_INTERVAL_MS)
+                // 没连上就快步重试：原来的固定 5 秒一拍会让「第一次没成功」再白等 5 秒
+                val connected = hasVpnTransport(ctx)
+                connectingTicks = if (connected) 0 else connectingTicks + 1
+                handler.postDelayed(
+                    this,
+                    EnginePolicy.reconcileDelay(
+                        connected = connected,
+                        connectingTicks = connectingTicks,
+                        maxFastTicks = RECONCILE_CONNECTING_TICKS,
+                        fastMs = RECONCILE_CONNECTING_MS,
+                        normalMs = RECONCILE_INTERVAL_MS,
+                    ),
+                )
             }
         }
     }
@@ -1542,11 +1712,13 @@ internal object Engine {
     private fun startWatchdog() {
         if (watchdogRunning) return
         watchdogRunning = true
-        handler.postDelayed(watchdog, RECONCILE_INTERVAL_MS)
+        // 首拍用连接窗口的短间隔：刚发起连接就复核一次，不用干等 5 秒
+        handler.postDelayed(watchdog, RECONCILE_CONNECTING_MS)
     }
 
     private fun stopWatchdog() {
         watchdogRunning = false
+        connectingTicks = 0
         handler.removeCallbacks(watchdog)
     }
 
