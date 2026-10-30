@@ -79,6 +79,18 @@ internal object Engine {
     private const val VERSION_REWRITE_TICKS = 20
 
     /**
+     * 心跳的最短写入间隔。
+     *
+     * 应用内换页、弹窗、从系统面板返回都会各来一次 activityResumed，
+     * 每次写一遍心跳纯属浪费：SettingsProvider 每写一次就唤醒所有观察者。
+     * App 的判活阈值是 90 秒，3 秒节流完全不影响判断。
+     */
+    private const val BEAT_MIN_INTERVAL_MS = 3_000L
+
+    /** 运行时快照内容没变时，最多每 5 秒重写一次 */
+    private const val RUNTIME_REWRITE_MS = 5_000L
+
+    /**
      * 重写 always-on 设置会先清空再写回，等于让系统 unbind + rebind 一次 VpnService。
      * 客户端（尤其 Clash 系）建立隧道要好几秒，写得太频繁会一直打断它，
      * 表现就是「connected 永远 false，偶尔才成功」——所以这里给足冷却时间。
@@ -197,6 +209,19 @@ internal object Engine {
     private var wasConnected = false
     private var offToken = 0
     private var startToken = 0
+
+    /**
+     * 上一次「断开」发生的时刻（模块主动关，或检测到用户手动断开）。
+     *
+     * 断开后一两秒里 VPN 常常又被客户端自己重连、或被「始终开启的 VPN」拉回来；
+     * 那一下不是用户打开的，不能再提示「VPN 已开启」，否则他刚点了关闭却看到已开启。
+     */
+    private var lastOffAt = 0L
+
+    /** 心跳与运行时快照的写入节流，见 [BEAT_MIN_INTERVAL_MS] / [RUNTIME_REWRITE_MS] */
+    private var lastBeatAt = 0L
+    private var lastRuntimeAt = 0L
+    private var lastRuntimeKey: String? = null
 
     /** 每次关闭验证链的代次；新的开启意图或新的关闭链都会推进它 */
     private var offGeneration = 0
@@ -559,6 +584,10 @@ internal object Engine {
 
     /** @return true 表示 Settings 写入成功，说明 AMS / ContentProvider 已经就绪 */
     private fun beat(ctx: Context): Boolean {
+        // 应用内换页会连续触发前台回调，每页都写一次心跳没有意义
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastBeatAt < BEAT_MIN_INTERVAL_MS) return true
+        lastBeatAt = now
         return try {
             Settings.Secure.putLong(ctx.contentResolver, HEARTBEAT_KEY, System.currentTimeMillis())
             // 版本号只在变化时写。原来每次心跳都重复写同一个值，
@@ -731,6 +760,13 @@ internal object Engine {
         try {
             val cfg = ConfigRepo.get(context)
             val (rule, detail) = currentRule(cfg)
+            // 快照里带时间戳，写一次内容就「变」一次；换成自己比对关键字段，
+            // 没人看诊断时就不必每次前台回调都写一遍设置
+            val key = "$rule|$detail|$lastTransport|${lastForeground.orEmpty()}"
+            val now = SystemClock.elapsedRealtime()
+            if (key == lastRuntimeKey && now - lastRuntimeAt < RUNTIME_REWRITE_MS) return
+            lastRuntimeKey = key
+            lastRuntimeAt = now
             RuntimeDiagnostics.publishRuntime(context, rule, detail, lastTransport, lastForeground)
         } catch (t: Throwable) {
             // 诊断失败不能影响控制逻辑
@@ -1047,7 +1083,13 @@ internal object Engine {
             pendingExternalMode = null
             if (!connectedNotified) {
                 connectedNotified = true
-                toast(ctx, "VPN 已开启", cfg.toastEnabled)
+                // 刚断开的一两秒内又连上：多半是客户端自动重连，或系统按常驻设置把它拉了回来。
+                // 用户刚点的是「关闭」，这时提示「已开启」与他的操作正好相反，宁可不说。
+                if (!EnginePolicy.isFreshOff(SystemClock.elapsedRealtime() - lastOffAt)) {
+                    toast(ctx, "VPN 已开启", cfg.toastEnabled)
+                } else {
+                    log(ctx, "vpn came back right after off -> skip the 'enabled' toast")
+                }
             }
             failureStreak = 0
             failureLogged = false
@@ -1069,6 +1111,17 @@ internal object Engine {
             userOff = true
             startToken++
             stopWatchdog()
+            lastOffAt = SystemClock.elapsedRealtime()
+            // 常驻设置还指着客户端时，系统/客户端往往几秒内就把它重新拉起来，
+            // 用户手动点断开，看到的却是「断一下又连上」。这里按关闭时的同一套还原逻辑收尾。
+            if (active || settingPointsToUs) {
+                val cleared = if (active) {
+                    VpnSwitcher.disable(ctx, cfg.restoreOriginal, cfg.vpnPackage)
+                } else {
+                    VpnSwitcher.clearIfPointsTo(ctx, cfg.vpnPackage)
+                }
+                log(ctx, "vpn dropped, always-on cleared=$cleared so it stays off")
+            }
             log(ctx, "vpn dropped -> stay off until a target app is reopened")
             return
         }
@@ -1258,6 +1311,7 @@ internal object Engine {
         externalAttempts = 0
         connectedNotified = false
         wasConnected = false
+        lastOffAt = SystemClock.elapsedRealtime()
         stopWatchdog()
         startToken++
         pendingExternalMode = null

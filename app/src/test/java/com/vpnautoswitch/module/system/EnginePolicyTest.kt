@@ -38,6 +38,19 @@ class EnginePolicyTest {
     }
 
     @Test
+    fun `the enabled toast is skipped right after turning off`() {
+        // 刚断开就又被连上：客户端自己重连或系统拉回来的，不该提示「已开启」
+        assertTrue(EnginePolicy.isFreshOff(0))
+        assertTrue(EnginePolicy.isFreshOff(1_200))
+        assertFalse(EnginePolicy.isFreshOff(3_000))
+        assertFalse(EnginePolicy.isFreshOff(30_000))
+        // 从没关过（lastOffAt 为 0）时相减是开机时长，正常提示
+        assertFalse(EnginePolicy.isFreshOff(100_000_000L))
+        // 时钟回拨：时间差为负，不当作「刚关掉」
+        assertFalse(EnginePolicy.isFreshOff(-50))
+    }
+
+    @Test
     fun `logs are cleared only when module version changes`() {
         assertTrue(EnginePolicy.shouldClearLogsOnBoot(0, 66))
         assertTrue(EnginePolicy.shouldClearLogsOnBoot(65, 66))

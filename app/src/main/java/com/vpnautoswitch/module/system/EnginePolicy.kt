@@ -20,6 +20,15 @@ internal object EnginePolicy {
 
     fun shouldResumeAfterUserOff(freshOpen: Boolean): Boolean = freshOpen
 
+    /**
+     * 是不是「刚关掉」的这一小段时间。
+     *
+     * 断开后客户端常常自己重连，或系统按常驻设置把它拉回来；那一下不是用户打开的，
+     * 再提示「VPN 已开启」会和他刚点的「关闭」正好相反。[sinceOffMs] 为负（时钟回拨）也不认。
+     */
+    fun isFreshOff(sinceOffMs: Long, windowMs: Long = 3_000L): Boolean =
+        sinceOffMs >= 0 && sinceOffMs < windowMs
+
     /** 模块版本变化（含首次安装）时清空旧日志，保证只看得到当前版本的记录。 */
     fun shouldClearLogsOnBoot(previousVersion: Int, currentVersion: Int): Boolean =
         previousVersion != currentVersion
