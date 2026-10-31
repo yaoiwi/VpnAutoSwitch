@@ -236,6 +236,19 @@ internal object Engine {
     /** 初始化重试期间最多缓存的事件数，防止异常 ROM 下无限增长 */
     private const val MAX_PENDING_EVENTS = 64
 
+    /**
+     * 开机后等配置的耐心。
+     *
+     * 模块拿配置要查询 App 的 provider，而 App 进程可能起不来（刚装完没点开过、
+     * 被 ROM 自启动管理拦住）。8 次 × 2 秒足够覆盖开机初期那段拥堵，
+     * 拿到镜像也算成功，所以真正走完这 8 次的场景很少。
+     */
+    private const val CONFIG_WARMUP_ATTEMPTS = 8
+    private const val CONFIG_WARMUP_INTERVAL_MS = 2_000L
+
+    /** 配置读不到时，这条提醒最多每 30 秒记一次（否则每次切换应用都刷一行） */
+    private const val CONFIG_MISSING_LOG_MS = 30_000L
+
     private val thread = HandlerThread("VpnAutoSwitch").apply {
         priority = Thread.NORM_PRIORITY
         start()
@@ -485,6 +498,9 @@ internal object Engine {
     private var rebootReceiverRegistered = false
     private var booted = false
 
+    /** 上一次记「配置读不到」的时间，用于去重（参见 [noteConfigMissing]） */
+    private var lastConfigMissingAt = 0L
+
     fun attach(ctx: Context?) {
         if (ctx != null) appContext = ctx
         handler.post { onBoot(0) }
@@ -513,7 +529,11 @@ internal object Engine {
 
     private fun prewarm(pkg: String) {
         val ctx = context() ?: return
-        val cfg = ConfigRepo.get(ctx)
+        val cfg = ConfigRepo.getOrNull(ctx)
+        if (cfg == null) {
+            noteConfigMissing(ctx, pkg)
+            return
+        }
         if (!cfg.enabled || cfg.vpnPackage.isEmpty()) return
         if (pkg == cfg.vpnPackage || pkg == BuildConfig.APPLICATION_ID) return
         if (!cfg.targets.contains(pkg)) return
@@ -642,16 +662,63 @@ internal object Engine {
         }
         booted = true
         automationPaused = readPaused(ctx)
-        // 带上版本号：升级后忘了重启作用域、或者装的根本还是旧包时，
-        // 一眼就能看出来跑的是哪一版，不用靠某条日志的具体数值去反推
+        // 带上版本号和开机时长：升级后忘了重启作用域、或者跑的还是旧包时，
+        // 一眼就能看出来；复现「重启后不生效」时也能看出模块是开机多久才就绪的
         log(
             ctx,
             "module ready v${com.vpnautoswitch.module.BuildConfig.VERSION_NAME}" +
-                " (${com.vpnautoswitch.module.BuildConfig.VERSION_CODE}), death hooks + watchdog",
+                " (${com.vpnautoswitch.module.BuildConfig.VERSION_CODE})" +
+                " at uptime ${SystemClock.elapsedRealtime() / 1000}s, death hooks + watchdog",
         )
         startHeartbeat()
+        // 先确认配置能拿到，再重放开机期间排队的事件：
+        // 拿不到配置就去处理这些事件，会把「已配置」误判成「没配置」
+        warmupConfig(ctx, 0)
         replayPendingEvents()
         publishRuntime(ctx)
+    }
+
+    /**
+     * 开机后主动确认一次配置。
+     *
+     * provider 查不通时（App 处于 stopped、被 ROM 拦掉自启动），模块会退回上一次
+     * 写下的镜像；两者都没有才继续重试。日志里能看出这一轮是 provider、镜像，还是
+     * 彻底拿不到——这决定了「打开目标应用不动」到底是配置问题还是别的。
+     */
+    private fun warmupConfig(ctx: Context, attempt: Int) {
+        val cfg = ConfigRepo.getOrNull(ctx)
+        if (cfg != null) {
+            when {
+                attempt > 0 ->
+                    log(ctx, "config ready after ${attempt * 2}s (source=${ConfigRepo.lastSource()})")
+                ConfigRepo.lastSource() != "provider" ->
+                    log(ctx, "config from ${ConfigRepo.lastSource()} cache, app process not up yet")
+            }
+            return
+        }
+        if (attempt == 0) log(ctx, "config not ready yet, waiting for the app process")
+        if (attempt >= CONFIG_WARMUP_ATTEMPTS) {
+            log(
+                ctx,
+                "config unavailable after ${attempt * 2}s: " +
+                    "the module app was never started, automation stays idle",
+            )
+            return
+        }
+        handler.postDelayed({ warmupConfig(ctx, attempt + 1) }, CONFIG_WARMUP_INTERVAL_MS)
+    }
+
+    /**
+     * 配置彻底读不到（provider 失败且没有镜像）时记一句。
+     *
+     * 以前这种情况是静默 return 的：用户看到的就是「打开应用什么都没发生」，
+     * 日志里一个字都没有，只能靠猜。做去重是因为每次切应用都会走到这里。
+     */
+    private fun noteConfigMissing(ctx: Context, pkg: String) {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastConfigMissingAt < CONFIG_MISSING_LOG_MS) return
+        lastConfigMissingAt = now
+        log(ctx, "config unavailable, $pkg ignored (start the module app once)")
     }
 
     private fun readPaused(ctx: Context): Boolean = try {
@@ -1123,7 +1190,11 @@ internal object Engine {
 
     private fun handleNetworkChanged() {
         val ctx = context() ?: return
-        val cfg = ConfigRepo.get(ctx)
+        val cfg = ConfigRepo.getOrNull(ctx)
+        if (cfg == null) {
+            noteConfigMissing(ctx, "network")
+            return
+        }
         if (!cfg.enabled) return
         if (automationPaused) return
 
@@ -1168,7 +1239,13 @@ internal object Engine {
     private fun handleForeground(pkg: String) {
         val ctx = context() ?: return
         beat(ctx)
-        val cfg = ConfigRepo.get(ctx)
+        val cfg = ConfigRepo.getOrNull(ctx)
+        if (cfg == null) {
+            // 「读不到配置」和「用户没配置」是两件事。这里绝不能往下走：
+            // 下面的 `vpnPackage.isEmpty()` 分支会把正在用的 VPN 当成「模块已停用」直接关掉。
+            noteConfigMissing(ctx, pkg)
+            return
+        }
         // 上一次前台不是它 => 这次是「重新打开」，而不是应用内部换页 / 弹窗后 resume。
         // 从 VPN 客户端本身退回来也不算：用户多半是刚在里面点了断开，别立刻给他连回去。
         val freshOpen = EnginePolicy.isFreshOpen(lastForeground, pkg, cfg.vpnPackage)
@@ -2539,7 +2616,14 @@ internal object Engine {
     private val watchdog = object : Runnable {
         override fun run() {
             val ctx = context() ?: return
-            val cfg = ConfigRepo.get(ctx)
+            val cfg = ConfigRepo.getOrNull(ctx)
+            if (cfg == null) {
+                // 配置读不到就先不动：下面第一段判断会把空配置当成「模块已停用」，
+                // 直接把用户正在用的 VPN 关掉，而且连一句日志都不留
+                noteConfigMissing(ctx, "watchdog")
+                handler.postDelayed(this, RECONCILE_INTERVAL_MS)
+                return
+            }
 
             // 这一拍只读一次常驻状态：原来 1~3 个分支各读一遍 Settings.Secure
             val active = VpnSwitcher.isActive(ctx.contentResolver)
