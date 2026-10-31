@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/Kotlin-2.4-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin" />
   <img src="https://img.shields.io/badge/Compose-1.12-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white" alt="Compose" />
   <img src="https://img.shields.io/badge/Miuix-0.9.4-FF6B00?style=flat-square" alt="Miuix" />
-  <img src="https://img.shields.io/badge/Release-1.46.0-brightgreen?style=flat-square" alt="Release" />
+  <img src="https://img.shields.io/badge/Release-1.49.3-brightgreen?style=flat-square" alt="Release" />
   <img src="https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square" alt="License" />
 </p>
 
@@ -28,7 +28,7 @@
 
 | **🎯 Per-app automation** | **🛡️ Disconnect on open** |
 | --- | --- |
-| Connect the VPN when a target app opens<br>Disconnect when its task is removed or its main process dies | Instantly drop the VPN when banking, payment<br>or intranet apps open, and keep it off until they exit |
+| Connect the VPN when a target app opens<br>Disconnect when its task is removed or its main process dies<br>Optionally disconnect after the screen stays off for a while | Instantly drop the VPN when banking, payment<br>or intranet apps open, and keep it off until they exit |
 | **📶 Wi-Fi rules** | **🔍 Built-in self-check** |
 | Force the VPN on or off for specific SSIDs<br>Takes priority over app rules and network type | Inspect module heartbeat, LSPosed scope, client status<br>current rule, always-on target and last failure |
 | **🧩 Client compatibility** | **🪶 Lightweight · offline** |
@@ -38,15 +38,15 @@
 
 ## 📱 Screenshots
 
-| Home | Settings | About |
-| --- | --- | --- |
-| <img src="docs/screenshots/home.jpg" width="220" alt="Home" /> | <img src="docs/screenshots/settings.jpg" width="220" alt="Settings" /> | <img src="docs/screenshots/about.jpg" width="220" alt="About" /> |
+| Home | Apps | Settings | About |
+| --- | --- | --- | --- |
+| <img src="docs/screenshots/home.jpg" width="210" alt="Home" /> | <img src="docs/screenshots/apps.jpg" width="210" alt="Apps" /> | <img src="docs/screenshots/settings.jpg" width="210" alt="Settings" /> | <img src="docs/screenshots/about.jpg" width="210" alt="About" /> |
 
 ---
 
 ## 📖 Usage
 
-1. Open [Releases](https://github.com/yaoiwi/VpnAutoSwitch/releases/latest) and download `VpnAutoSwitch-1.46.0.apk` (upgrading in place keeps your settings).
+1. Open [Releases](https://github.com/yaoiwi/VpnAutoSwitch/releases/latest) and download `VpnAutoSwitch-1.49.3.apk` (upgrading in place keeps your settings).
 2. Open **LSPosed Manager → Modules**, enable this module, **select only the "System Framework" scope**, then reboot.
 3. Open the app:
    - Pick the apps that should turn the VPN on under **Target apps**;

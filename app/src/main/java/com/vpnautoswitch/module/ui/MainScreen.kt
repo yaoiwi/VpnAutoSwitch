@@ -1217,10 +1217,16 @@ private fun LazyListScope.settingsItems(
                 )
                 SettingsSwitch(
                     title = "关闭 VPN 后保留客户端进程",
-                    summary = "断开后让 VPN 客户端留在内存，下次打开目标应用无需冷启动，通常快 1 秒以上；" +
-                        "代价是客户端常驻后台，会多一些耗电。确实关不掉时仍会强制停止一次。",
+                    summary = if (state.config.forceStopImmediately) {
+                        "已关闭：上面开了「直接强制停止」，进程会被杀掉，两者不能同时生效"
+                    } else {
+                        "断开后让 VPN 客户端留在内存，下次打开目标应用无需冷启动，通常快 1 秒以上；" +
+                            "代价是客户端常驻后台，会多一些耗电。开了「关闭后继续抑制」时会等抑制窗口结束再预热；" +
+                            "若客户端一被唤醒就自己连上，会自动改为不再预热。"
+                    },
                     icon = MiuixIcons.Pin,
-                    checked = state.config.keepClientAlive,
+                    checked = state.config.keepClientAlive && !state.config.forceStopImmediately,
+                    enabled = !state.config.forceStopImmediately,
                     onCheckedChange = { state.save(state.config.copy(keepClientAlive = it)) },
                 )
                 SettingsSwitch(
@@ -1230,6 +1236,36 @@ private fun LazyListScope.settingsItems(
                     checked = state.config.restoreOriginal,
                     onCheckedChange = { state.save(state.config.copy(restoreOriginal = it)) },
                 )
+                SettingsSwitch(
+                    title = "锁屏后断开 VPN",
+                    summary = "手机锁屏超过设定时间后自动断开，省流量也省电；" +
+                        "解锁后目标应用还在运行就重新连上，默认关闭",
+                    icon = MiuixIcons.Lock,
+                    checked = state.config.disconnectOnScreenOff,
+                    onCheckedChange = {
+                        state.save(state.config.copy(disconnectOnScreenOff = it))
+                    },
+                )
+                var showScreenOffPicker by remember { mutableStateOf(false) }
+                SettingsActionWithArrow(
+                    title = "锁屏断开等待时间",
+                    summary = if (state.config.disconnectOnScreenOff) {
+                        "${state.config.screenOffMinutes} 分钟后断开"
+                    } else {
+                        "先打开上面的开关 · ${state.config.screenOffMinutes} 分钟"
+                    },
+                    onClick = { if (state.config.disconnectOnScreenOff) showScreenOffPicker = true },
+                )
+                if (showScreenOffPicker) {
+                    ScreenOffMinutesDialog(
+                        current = state.config.screenOffMinutes,
+                        onPick = {
+                            state.save(state.config.copy(screenOffMinutes = it))
+                            showScreenOffPicker = false
+                        },
+                        onDismiss = { showScreenOffPicker = false },
+                    )
+                }
             }
 
             SettingsGroup(
@@ -1259,6 +1295,17 @@ private fun LazyListScope.settingsItems(
                     icon = MiuixIcons.Delete,
                     checked = state.config.forceStopVpn,
                     onCheckedChange = { state.save(state.config.copy(forceStopVpn = it)) },
+                )
+                SettingsSwitch(
+                    title = "关闭时直接强制停止",
+                    summary = "跳过停止广播和快捷磁贴，一步杀掉客户端进程；" +
+                        "最快，但客户端会完全退出，「保留客户端进程」随之失效",
+                    icon = MiuixIcons.Blocklist,
+                    checked = state.config.forceStopImmediately,
+                    enabled = state.config.forceStopVpn,
+                    onCheckedChange = {
+                        state.save(state.config.copy(forceStopImmediately = it))
+                    },
                 )
             }
 
@@ -1335,10 +1382,32 @@ private fun LogBody(
     context: Context,
     onRefresh: () -> Unit,
 ) {
+    var onlyAbnormal by remember { mutableStateOf(false) }
+    val shown = LogFilter.select(lines, onlyAbnormal)
+    val copyText = shown.joinToString("\n")
     val copyLog = {
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        cm.setPrimaryClip(ClipData.newPlainText("VpnAutoSwitch", state.diagnostics.log))
-        Toast.makeText(context, "日志已复制", Toast.LENGTH_SHORT).show()
+        cm.setPrimaryClip(ClipData.newPlainText("VpnAutoSwitch", copyText))
+        Toast.makeText(context, "已复制 ${shown.size} 条", Toast.LENGTH_SHORT).show()
+    }
+    // 导出走系统的「新建文档」：不需要存储权限，位置由用户自己选
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val ok = try {
+            context.contentResolver.openOutputStream(uri)?.use { out ->
+                out.write(copyText.toByteArray())
+            }
+            true
+        } catch (t: Throwable) {
+            false
+        }
+        Toast.makeText(
+            context,
+            if (ok) "日志已导出（${shown.size} 条）" else "导出失败",
+            Toast.LENGTH_SHORT,
+        ).show()
     }
     Row(
         modifier = Modifier
@@ -1347,6 +1416,7 @@ private fun LogBody(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         TextButton(text = "复制", onClick = copyLog)
+        TextButton(text = "导出", onClick = { exportLauncher.launch("vpn-autoswitch-log.txt") })
         TextButton(text = "刷新", onClick = onRefresh)
         TextButton(
             text = "删除",
@@ -1356,6 +1426,23 @@ private fun LogBody(
             },
         )
     }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        TextButton(
+            text = if (onlyAbnormal) "只看异常 ✓" else "只看异常",
+            onClick = { onlyAbnormal = !onlyAbnormal },
+        )
+        Text(
+            text = if (onlyAbnormal) "筛出 ${shown.size} / ${lines.size} 条" else "共 ${lines.size} 条，显示最近 60 条",
+            fontSize = 11.sp,
+            modifier = Modifier.align(Alignment.CenterVertically),
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        )
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1363,16 +1450,16 @@ private fun LogBody(
             .padding(horizontal = 18.dp, vertical = 4.dp),
     ) {
         Text(
-            text = "长按复制全部",
+            text = "长按复制当前列表",
             fontSize = 10.sp,
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = if (lines.isEmpty()) {
-                "暂无日志。模块加载 / 开关 VPN / 进程结束都会记录在这里。"
-            } else {
-                lines.takeLast(30).joinToString("\n")
+            text = when {
+                lines.isEmpty() -> "暂无日志。模块加载 / 开关 VPN / 进程结束都会记录在这里。"
+                shown.isEmpty() -> "没有匹配的异常行，点「只看异常」可切回全部日志。"
+                else -> shown.takeLast(60).joinToString("\n")
             },
             fontSize = 11.sp,
             lineHeight = 15.sp,
@@ -1505,6 +1592,69 @@ private fun SsidRuleDialog(mode: String, state: AppState, onDismiss: () -> Unit)
     }
 }
 
+/**
+ * 锁屏断开等待时间。
+ *
+ * 常用档位直接列出来，省得为了一个分钟数再做个数字输入框；
+ * 「亮屏重新计时」这点写在说明里，免得用户以为亮一下屏幕断开就失效了。
+ */
+@Composable
+private fun ScreenOffMinutesDialog(
+    current: Int,
+    onPick: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = MiuixTheme.colorScheme
+    val options = listOf(5, 10, 15, 30, 60, 120)
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .clip(RoundedCornerShape(24.dp))
+                .background(colors.surface)
+                .padding(horizontal = 20.dp, vertical = 18.dp),
+        ) {
+            Text("锁屏后多久断开", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "锁屏后开始计时，到点才断开；中途亮屏会重新计时。" +
+                    "解锁后目标应用还在运行就自动连回来。",
+                fontSize = 12.sp,
+                color = colors.onSurfaceVariantSummary,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            options.forEach { minutes ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable { onPick(minutes) }
+                        .padding(horizontal = 6.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = if (minutes >= 60) "${minutes / 60} 小时" else "$minutes 分钟",
+                        fontSize = 15.sp,
+                    )
+                    if (minutes == current) {
+                        Text("当前", fontSize = 12.sp, color = colors.primary)
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(text = "取消", onClick = onDismiss)
+            }
+        }
+    }
+}
+
 private fun vpnSummary(state: AppState): String {
     val pkg = state.config.vpnPackage
     if (pkg.isEmpty()) return "未选择"
@@ -1530,14 +1680,15 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
-    "1.46.0：设置页「高级」拆成三组，默认只展开常用的那组，点标题展开收起；" +
-        "状态诊断新增「开关耗时」，慢的时候能直接看出是客户端建隧道慢还是模块在重试；" +
-        "应用选择页改为按需加载图标，打开不再卡一下。\n" +
-    "1.45.1：修复 VPN 连上不到两秒就掉时被当成你手动关闭——之前要退出目标应用再打开才会重连，" +
-        "现在约 1 秒内自动补一次（最多两次），连不稳才放弃。\n" +
-    "1.45.0：新增「划掉任意目标即断开」——多个目标都在后台时，划掉任意一个就断 VPN，" +
-        "不必是刚才在用的那个（设置里可关）；修复手动点磁贴断开后又误弹「VPN 已开启」，" +
-        "并让断开保持住。"
+    "1.49.3：预热全程留日志——找不到 VpnService、bind 被系统拒绝、3 秒内没连上，都单独记一条，" +
+        "不再静默跳过；「进程还活着不用预热」也会写明。" +
+        "\n" +
+    "1.49.2：强停过的这一轮不再整轮跳过预热，等 10 秒后照常拉热客户端；" +
+        "快捷磁贴点不动时会留一条日志，方便看出是哪一步没生效。" +
+        "\n" +
+    "1.49.1：修「保留客户端进程」和「关闭后继续抑制」打架——预热以前固定按 23 秒估算，" +
+        "正常关闭也要等半分钟才变热；现在等关闭链和抑制窗口真的收尾就动手。" +
+        "客户端若一被唤醒就自己连上，会记下来以后不再预热，并再关一次。"
 
 private const val ACK_TIPS =
     "本模块的实现离不开这些开源项目，在此致谢：\n\n" +

@@ -141,9 +141,14 @@ internal object ExternalControl {
      */
     fun prewarm(ctx: Context, pkg: String): Boolean {
         if (pkg.isEmpty()) return false
-        val service = findVpnService(ctx, pkg) ?: return false
+        val service = findVpnService(ctx, pkg)
+        if (service == null) {
+            ModuleLog.append(ctx, "prewarm: 没找到 $pkg 的 VpnService，跳过")
+            return false
+        }
 
         val released = java.util.concurrent.atomic.AtomicBoolean(false)
+        val connected = java.util.concurrent.atomic.AtomicBoolean(false)
         var conn: ServiceConnection? = null
         val main = Handler(Looper.getMainLooper())
         val release = {
@@ -159,6 +164,7 @@ internal object ExternalControl {
 
         conn = object : ServiceConnection {
             override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+                connected.set(true)
                 ModuleLog.append(ctx, "prewarm: $pkg 进程已就绪")
                 main.post { release() }
             }
@@ -173,11 +179,18 @@ internal object ExternalControl {
                 Context.BIND_AUTO_CREATE
             )
             if (!bound) {
+                ModuleLog.append(ctx, "prewarm: bind 被系统拒绝（$pkg）")
                 released.set(true)
                 false
             } else {
                 // 万一 onServiceConnected 迟迟不来（服务卡住），3 秒后自己解绑
-                main.postDelayed({ release() }, 3_000L)
+                main.postDelayed({
+                    if (!connected.get()) {
+                        // 进程被强停过又刚清标记时常见：绑定请求发出去了，客户端没起来
+                        ModuleLog.append(ctx, "prewarm: 3 秒内没连上，放弃本次预热")
+                    }
+                    release()
+                }, 3_000L)
                 true
             }
         } catch (t: Throwable) {

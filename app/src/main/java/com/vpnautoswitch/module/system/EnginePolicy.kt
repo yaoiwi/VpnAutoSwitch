@@ -117,6 +117,16 @@ internal object EnginePolicy {
     fun nextGuardInterval(currentMs: Long): Long =
         (currentMs * 1.6f).toLong().coerceAtMost(2_400L)
 
+    /**
+     * 快捷磁贴能不能点。
+     *
+     * 磁贴是**切换**语义，不是「关闭」：VPN 已经断开时再点一次会把它打开。
+     * 关闭链和关后守卫各自都会走一遍磁贴，两条链挨得太近时就会互相抵消，
+     * 日志里表现为「关掉又起来」和重复的 `vpn is down (qs tile)`。
+     */
+    fun tileToggleAllowed(now: Long, lastToggleAt: Long, guardMs: Long): Boolean =
+        lastToggleAt == 0L || now - lastToggleAt >= guardMs
+
     /** 关闭链里的一步，顺序由 [stopOrder] 决定 */
     enum class StopStep { BROADCAST, ACTIVITY, TILE, FORCE_STOP }
 
@@ -131,16 +141,65 @@ internal object EnginePolicy {
      *
      * 开了「保留客户端进程」就先只用温和手段（停止广播 / 快捷磁贴），
      * 让进程活着；确实关不掉时 Engine 再单独补一次强停。
+     * 用户主动开了「直接强制停止」时以他的选择为准——那个开关本身就意味着不要留进程。
      */
-    fun allowForceStopOnClose(forceStopEnabled: Boolean, keepClientAlive: Boolean): Boolean =
-        forceStopEnabled && !keepClientAlive
+    fun allowForceStopOnClose(
+        forceStopEnabled: Boolean,
+        keepClientAlive: Boolean,
+        directForceStop: Boolean = false,
+    ): Boolean = forceStopEnabled && (directForceStop || !keepClientAlive)
+
+    /**
+     * 关闭链结束后要不要接力启动关后守卫。
+     *
+     * 两个条件是「什么时候需要盯」：没接管常驻设置（接管了系统自己会 unbind），
+     * 以及关闭前隧道确实是通的（本来就没连，没什么好守的）。
+     * 用户手动关过的那条隧道不守——他已经明确表达了「不要它」，再盯着关第二次是越权。
+     */
+    fun shouldHandOffToGuard(
+        guardEnabled: Boolean,
+        tookOwnership: Boolean,
+        wasActive: Boolean,
+        wasUserOff: Boolean,
+    ): Boolean = guardEnabled && !tookOwnership && wasActive && !wasUserOff
+
+    /**
+     * 关闭链正在跑的时候，守卫不许动手。
+     *
+     * 守卫和主链用的是同一套手段（停止广播 → 磁贴 → 强停），同时跑会互相作废对方排队的复查，
+     * 日志里就是同一秒两条 verify、磁贴被点两次、强停计数从 1 重来。
+     * [busyMs] 是兜底：主链某条路径被代次作废后没人释放标志，超时后守卫自行接管。
+     */
+    fun guardMayAct(busy: Boolean, busyForMs: Long, maxBusyMs: Long): Boolean =
+        !busy || busyForMs >= maxBusyMs
+
+    /**
+     * 锁屏到点后是否断开。
+     *
+     * [screenOn] 在计时期间又亮屏了就不要再断；[configuredMinutes] 只用于展示与兜底校验，
+     * 真正的计时由调用方的定时器负责。
+     */
+    fun shouldDisconnectOnScreenOff(
+        enabled: Boolean,
+        screenOn: Boolean,
+        hasTunnel: Boolean,
+        elapsedMs: Long,
+        configuredMinutes: Int,
+    ): Boolean =
+        enabled &&
+            !screenOn &&
+            hasTunnel &&
+            elapsedMs >= configuredMinutes.coerceIn(1, 120) * 60_000L
 
     fun stopOrder(
         hasPackage: Boolean,
         allowActivityUi: Boolean,
         hasTile: Boolean,
         forceStopEnabled: Boolean,
+        directForceStop: Boolean = false,
     ): List<StopStep> {
+        // 「直接强制停止」跳过所有温和手段：用户嫌中间过程慢或客户端不响应时用
+        if (directForceStop && forceStopEnabled) return listOf(StopStep.FORCE_STOP)
         if (!hasPackage) {
             return if (forceStopEnabled) listOf(StopStep.FORCE_STOP) else emptyList()
         }
@@ -256,4 +315,33 @@ internal object EnginePolicy {
         generation == currentGeneration &&
             currentVpnPackage == expectedVpnPackage &&
             canTouchVpn
+
+    /** 预热前的判定结果：要么现在动手，要么再等等，要么这一轮就别做 */
+    enum class PrewarmGate { GO, WAIT_CHAIN, WAIT_GUARD, WAIT_TIME, SKIP_TRANSPORT, SKIP_ALIVE, SKIP_FORCE_STOP }
+
+    /**
+     * 「保留客户端进程」能不能现在就 bind。
+     *
+     * 顺序就是优先级：主链没跑完不动手，守卫还在盯不动手，时间没到不动手；
+     * 隧道还连着、进程还活着、刚强停过，都属于这一轮不该预热。
+     * 预热会把客户端从后台叫醒，对「关闭后继续抑制」是纯干扰，所以这两条链必须先收尾。
+     */
+    fun prewarmGate(
+        chainRunning: Boolean,
+        now: Long,
+        guardUntil: Long,
+        notBefore: Long,
+        hasTransport: Boolean,
+        processAlive: Boolean,
+        sinceForceStopMs: Long,
+        forceStopGuardMs: Long,
+    ): PrewarmGate = when {
+        chainRunning -> PrewarmGate.WAIT_CHAIN
+        now < guardUntil -> PrewarmGate.WAIT_GUARD
+        now < notBefore -> PrewarmGate.WAIT_TIME
+        hasTransport -> PrewarmGate.SKIP_TRANSPORT
+        processAlive -> PrewarmGate.SKIP_ALIVE
+        sinceForceStopMs < forceStopGuardMs -> PrewarmGate.SKIP_FORCE_STOP
+        else -> PrewarmGate.GO
+    }
 }

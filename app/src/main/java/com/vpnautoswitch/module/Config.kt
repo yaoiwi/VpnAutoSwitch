@@ -56,7 +56,18 @@ data class Config(
     /** 已选应用列表按名称排序（默认按添加顺序） */
     val sortAppsByName: Boolean = false,
     /** 关闭 VPN 后保留客户端进程（下次打开应用时不用冷启动，代价是客户端常驻后台） */
-    val keepClientAlive: Boolean = true
+    val keepClientAlive: Boolean = true,
+    /**
+     * 关闭时不走温和手段，直接强制停止客户端。
+     *
+     * 默认关：先发停止广播、点快捷磁贴，实在关不掉才强停。开着「保留客户端进程」时
+     * 这两个开关互相矛盾（一个要留进程、一个要杀进程），界面上会置灰后者。
+     */
+    val forceStopImmediately: Boolean = false,
+    /** 锁屏后等待多久断开 VPN（分钟）；需要 [disconnectOnScreenOff] 打开 */
+    val screenOffMinutes: Int = 10,
+    /** 锁屏超过 [screenOffMinutes] 分钟后断开 VPN（默认关） */
+    val disconnectOnScreenOff: Boolean = false
 ) {
 
     fun toJson(): String {
@@ -88,6 +99,9 @@ data class Config(
         o.put("wifiOff", JSONArray(wifiOff.toList()))
         o.put("sortApps", sortAppsByName)
         o.put("keepAlive", keepClientAlive)
+        o.put("forceStopNow", forceStopImmediately)
+        o.put("screenOff", disconnectOnScreenOff)
+        o.put("screenOffMin", screenOffMinutes)
         return o.toString()
     }
 
@@ -126,6 +140,9 @@ data class Config(
                     wifiOff = readSet(o.optJSONArray("wifiOff")),
                     sortAppsByName = o.optBoolean("sortApps", false),
                     keepClientAlive = o.optBoolean("keepAlive", true),
+                    forceStopImmediately = o.optBoolean("forceStopNow", false),
+                    disconnectOnScreenOff = o.optBoolean("screenOff", false),
+                    screenOffMinutes = o.optInt("screenOffMin", 10).coerceIn(1, 120),
                     darkMode = when (o.optString("darkMode", "system")) {
                         "dark" -> "dark"
                         "light" -> "light"

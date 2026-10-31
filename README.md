@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/Kotlin-2.4-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin" />
   <img src="https://img.shields.io/badge/Compose-1.12-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white" alt="Compose" />
   <img src="https://img.shields.io/badge/Miuix-0.9.4-FF6B00?style=flat-square" alt="Miuix" />
-  <img src="https://img.shields.io/badge/Release-1.46.0-brightgreen?style=flat-square" alt="Release" />
+  <img src="https://img.shields.io/badge/Release-1.49.3-brightgreen?style=flat-square" alt="Release" />
   <img src="https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square" alt="License" />
 </p>
 
@@ -28,7 +28,7 @@
 
 | **🎯 按应用联动** | **🛡️ 打开即关闭** |
 | --- | --- |
-| 打开目标应用自动连接 VPN<br>划掉应用任务、主进程结束自动断开 | 打开银行、支付、内网应用时<br>若 VPN 已连接立即断开，退出前不再自动连 |
+| 打开目标应用自动连接 VPN<br>划掉应用任务、主进程结束自动断开<br>锁屏超过设定时间也会断开 | 打开银行、支付、内网应用时<br>若 VPN 已连接立即断开，退出前不再自动连 |
 | **📶 按 Wi-Fi 规则** | **🔍 一键自检** |
 | 指定 Wi-Fi 强制开启或关闭 VPN<br>优先级高于目标应用与网络类型开关 | 检查模块心跳、LSPosed 作用域、客户端状态<br>当前命中规则、always-on 与最近失败 |
 | **🧩 客户端适配** | **🪶 轻量 · 离线** |
@@ -38,15 +38,15 @@
 
 ## 📱 界面预览
 
-| 首页 | 设置 | 关于 |
-| --- | --- | --- |
-| <img src="docs/screenshots/home.jpg" width="220" alt="首页" /> | <img src="docs/screenshots/settings.jpg" width="220" alt="设置" /> | <img src="docs/screenshots/about.jpg" width="220" alt="关于" /> |
+| 首页 | 应用 | 设置 | 关于 |
+| --- | --- | --- | --- |
+| <img src="docs/screenshots/home.jpg" width="210" alt="首页" /> | <img src="docs/screenshots/apps.jpg" width="210" alt="应用" /> | <img src="docs/screenshots/settings.jpg" width="210" alt="设置" /> | <img src="docs/screenshots/about.jpg" width="210" alt="关于" /> |
 
 ---
 
 ## 📖 使用文档
 
-1. 打开 [Release](https://github.com/yaoiwi/VpnAutoSwitch/releases/latest)，下载 `VpnAutoSwitch-1.46.0.apk`（覆盖安装即可，配置会保留）。
+1. 打开 [Release](https://github.com/yaoiwi/VpnAutoSwitch/releases/latest)，下载 `VpnAutoSwitch-1.49.3.apk`（覆盖安装即可，配置会保留）。
 2. 打开 **LSPosed 管理器 → 模块**，启用本模块，**作用域只勾选「系统框架」**，然后重启手机。
 3. 打开 App：
    - 「目标应用」选择需要自动连接 VPN 的应用；

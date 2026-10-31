@@ -33,7 +33,7 @@ internal object SettingsSearch {
         ),
         Section("备份与恢复", listOf("导出", "导入", "备份", "恢复", "配置", "json")),
         Section("状态诊断", listOf("诊断", "自检", "心跳", "状态", "检查", "transport", "耗时", "快慢")),
-        Section("运行日志", listOf("日志", "log", "刷新", "清空", "记录")),
+        Section("运行日志", listOf("日志", "log", "刷新", "清空", "记录", "异常", "导出", "复制")),
     )
 
     /** 返回命中的分组标题；查询为空时返回 null 表示不过滤 */

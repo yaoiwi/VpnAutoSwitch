@@ -12,6 +12,7 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import android.os.SystemClock
 import android.service.quicksettings.TileService
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -206,23 +207,52 @@ object AppsRepository {
         packageName
     }
 
+    /**
+     * 客户端能力探测的记忆值。
+     *
+     * 主页每次刷新（过去 5 秒一次）都会问一遍：解析 ApplicationInfo、查 VpnService、
+     * 找 START_CLASH / STOP_CLASH、查磁贴服务，全是 PackageManager 的跨进程调用。
+     * 这些信息只有安装 / 卸载 / 启停客户端时才会变，60 秒足够。
+     */
+    private const val INSPECT_TTL_MS = 60_000L
+    private var inspectPkg: String? = null
+    private var inspectAt = 0L
+    private var inspectValue: VpnClientInspection? = null
+
+    /** 强制丢弃缓存：导入配置、换客户端、安装状态变化时调用 */
+    fun invalidateInspection() {
+        synchronized(this) {
+            inspectPkg = null
+            inspectAt = 0L
+            inspectValue = null
+        }
+    }
+
     /** 直接检查配置的 VPN 客户端，不依赖「有启动图标」的应用列表。 */
     fun inspectVpn(context: Context, packageName: String): VpnClientInspection? {
         if (packageName.isBlank()) return null
+        val now = SystemClock.elapsedRealtime()
+        synchronized(this) {
+            if (packageName == inspectPkg && now - inspectAt in 0..INSPECT_TTL_MS) {
+                return inspectValue
+            }
+        }
+        val value = inspectVpnUncached(context, packageName)
+        synchronized(this) {
+            inspectPkg = packageName
+            inspectAt = now
+            inspectValue = value
+        }
+        return value
+    }
+
+    private fun inspectVpnUncached(context: Context, packageName: String): VpnClientInspection? {
         val pm = context.packageManager
         val info = try {
             pm.getApplicationInfo(packageName, PackageManager.MATCH_DISABLED_COMPONENTS)
         } catch (t: Throwable) {
             null
         } ?: return null
-        val hasService = try {
-            pm.queryIntentServices(
-                Intent("android.net.VpnService").setPackage(packageName),
-                PackageManager.MATCH_DISABLED_COMPONENTS,
-            ).isNotEmpty()
-        } catch (t: Throwable) {
-            false
-        }
         val services = try {
             pm.queryIntentServices(
                 Intent("android.net.VpnService").setPackage(packageName),
@@ -231,6 +261,7 @@ object AppsRepository {
         } catch (t: Throwable) {
             emptyList()
         }
+        val hasService = services.isNotEmpty()
         val serviceName = (services.firstOrNull {
             it.serviceInfo.permission == "android.permission.BIND_VPN_SERVICE"
         } ?: services.firstOrNull {

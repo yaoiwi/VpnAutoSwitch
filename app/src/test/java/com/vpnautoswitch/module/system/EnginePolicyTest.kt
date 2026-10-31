@@ -347,4 +347,120 @@ class EnginePolicyTest {
         assertEquals(700L, EnginePolicy.broadcastWaitMs(true))
         assertEquals(1_200L, EnginePolicy.broadcastWaitMs(false))
     }
+
+    @Test
+    fun `the tile is not toggled twice in a row`() {
+        // 从没点过 -> 允许
+        assertTrue(EnginePolicy.tileToggleAllowed(now = 5_000L, lastToggleAt = 0L, guardMs = 8_000L))
+        // 刚点过 1 秒：再点会把刚断开的 VPN 又打开
+        assertFalse(EnginePolicy.tileToggleAllowed(now = 6_000L, lastToggleAt = 5_000L, guardMs = 8_000L))
+        // 刚好满 8 秒 -> 允许
+        assertTrue(EnginePolicy.tileToggleAllowed(now = 13_000L, lastToggleAt = 5_000L, guardMs = 8_000L))
+    }
+
+    @Test
+    fun `guard only starts after the close chain has finished`() {
+        // 外部控制模式、关之前确实连着：接管完主链后要盯一会儿
+        assertTrue(EnginePolicy.shouldHandOffToGuard(true, false, true, false))
+        // 清掉了常驻设置：系统自己 unbind，不需要守
+        assertFalse(EnginePolicy.shouldHandOffToGuard(true, true, true, false))
+        // 本来就没连，没什么好守
+        assertFalse(EnginePolicy.shouldHandOffToGuard(true, false, false, false))
+        // 用户手动关过：盯着再关一次是越权
+        assertFalse(EnginePolicy.shouldHandOffToGuard(true, false, true, true))
+        // 用户自己关了「关闭后继续抑制」
+        assertFalse(EnginePolicy.shouldHandOffToGuard(false, false, true, false))
+    }
+
+    @Test
+    fun `guard waits while the main chain is still running`() {
+        // 主链刚开始跑 1 秒：守卫不许动手
+        assertFalse(EnginePolicy.guardMayAct(busy = true, busyForMs = 1_000L, maxBusyMs = 15_000L))
+        // 超过兜底时长还没释放：认为那条链已经哑了，守卫接管
+        assertTrue(EnginePolicy.guardMayAct(busy = true, busyForMs = 15_000L, maxBusyMs = 15_000L))
+        // 没有链在跑
+        assertTrue(EnginePolicy.guardMayAct(busy = false, busyForMs = 0L, maxBusyMs = 15_000L))
+    }
+
+    @Test
+    fun `screen off disconnect needs a tunnel and an elapsed timer`() {
+        // 还没到点
+        assertFalse(EnginePolicy.shouldDisconnectOnScreenOff(true, false, true, 4 * 60_000L, 5))
+        // 到点、还锁着、隧道在：断
+        assertTrue(EnginePolicy.shouldDisconnectOnScreenOff(true, false, true, 5 * 60_000L, 5))
+        // 中途亮屏了：不断，等下一次锁屏重新计时
+        assertFalse(EnginePolicy.shouldDisconnectOnScreenOff(true, true, true, 10 * 60_000L, 5))
+        // 本来就没连
+        assertFalse(EnginePolicy.shouldDisconnectOnScreenOff(true, false, false, 10 * 60_000L, 5))
+        // 功能没开
+        assertFalse(EnginePolicy.shouldDisconnectOnScreenOff(false, false, true, 10 * 60_000L, 5))
+        // 配置被写成 0 或负数时按 1 分钟算，不会立刻触发也不会永不动手
+        assertFalse(EnginePolicy.shouldDisconnectOnScreenOff(true, false, true, 30_000L, 0))
+        assertTrue(EnginePolicy.shouldDisconnectOnScreenOff(true, false, true, 60_000L, 0))
+    }
+
+    @Test
+    fun `direct force stop skips the gentle steps`() {
+        assertEquals(
+            listOf(EnginePolicy.StopStep.FORCE_STOP),
+            EnginePolicy.stopOrder(true, true, true, true, directForceStop = true),
+        )
+        // 强制停止本身被关掉时，「直接强停」没有可用手段，退回温和顺序
+        assertEquals(
+            listOf(EnginePolicy.StopStep.BROADCAST, EnginePolicy.StopStep.TILE),
+            EnginePolicy.stopOrder(true, false, true, false, directForceStop = true),
+        )
+        // 直接强停意味着不要留进程：即使开着「保留客户端进程」也放行
+        assertTrue(
+            EnginePolicy.allowForceStopOnClose(
+                forceStopEnabled = true,
+                keepClientAlive = true,
+                directForceStop = true,
+            )
+        )
+    }
+
+    @Test
+    fun `prewarm waits for the close chain and the off-guard window`() {
+        fun gate(
+            chainRunning: Boolean = false,
+            now: Long = 20_000L,
+            guardUntil: Long = 0L,
+            notBefore: Long = 0L,
+            hasTransport: Boolean = false,
+            processAlive: Boolean = false,
+            sinceForceStopMs: Long = Long.MAX_VALUE,
+        ) = EnginePolicy.prewarmGate(
+            chainRunning = chainRunning,
+            now = now,
+            guardUntil = guardUntil,
+            notBefore = notBefore,
+            hasTransport = hasTransport,
+            processAlive = processAlive,
+            sinceForceStopMs = sinceForceStopMs,
+            forceStopGuardMs = 10_000L,
+        )
+
+        // 主链没跑完、守卫还在窗口内：都只是等，不能 bind（bind 会把要抑制的客户端叫醒）
+        assertEquals(EnginePolicy.PrewarmGate.WAIT_CHAIN, gate(chainRunning = true))
+        assertEquals(EnginePolicy.PrewarmGate.WAIT_GUARD, gate(guardUntil = 25_000L))
+        assertEquals(EnginePolicy.PrewarmGate.WAIT_TIME, gate(notBefore = 21_500L))
+
+        // 等待优先于跳过：窗口没过完时，即使隧道已经断了也还是等
+        assertEquals(
+            EnginePolicy.PrewarmGate.WAIT_GUARD,
+            gate(guardUntil = 25_000L, hasTransport = true),
+        )
+
+        // 三种「这一轮不该预热」
+        assertEquals(EnginePolicy.PrewarmGate.SKIP_TRANSPORT, gate(hasTransport = true))
+        assertEquals(EnginePolicy.PrewarmGate.SKIP_ALIVE, gate(processAlive = true))
+        assertEquals(
+            EnginePolicy.PrewarmGate.SKIP_FORCE_STOP,
+            gate(sinceForceStopMs = 3_000L),
+        )
+
+        // 都满足才动手
+        assertEquals(EnginePolicy.PrewarmGate.GO, gate())
+    }
 }

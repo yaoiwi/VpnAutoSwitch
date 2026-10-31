@@ -77,6 +77,24 @@ data class Diagnostics(
     val paused: Boolean = false,
 ) {
     companion object {
+        /**
+         * 主页关心的设置键。
+         *
+         * 这些键被模块写入时系统会回调 ContentObserver，界面可以立刻刷新；
+         * 有了它就不必再每 5 秒主动轮询一遍（心跳、规则、失败、耗时、SSID、暂停）。
+         */
+        val WATCHED_KEYS = listOf(
+            Engine.HEARTBEAT_KEY,
+            Engine.MODULE_VERSION_KEY,
+            Engine.SSID_KEY,
+            RuntimeDiagnostics.RUNTIME_KEY,
+            RuntimeDiagnostics.FAILURE_KEY,
+            RuntimeDiagnostics.TIMING_KEY,
+            ModuleContract.PAUSED_KEY,
+            "always_on_vpn_app",
+            "vpn_autoswitch_active",
+        )
+
         fun load(context: Context, config: Config): Diagnostics {
             val cr = context.contentResolver
             val now = System.currentTimeMillis()
@@ -255,6 +273,8 @@ class AppState(private val context: Context) {
     }
 
     fun save(next: Config) {
+        // 换了客户端，能力探测的那份缓存立刻作废，诊断页不用等一分钟后才更新
+        if (next.vpnPackage != config.vpnPackage) AppsRepository.invalidateInspection()
         config = next
         Config.save(context, next)
     }
@@ -276,6 +296,23 @@ class AppState(private val context: Context) {
 
     fun refreshDiagnostics() {
         diagnostics = Diagnostics.load(context, config)
+    }
+
+    private var refreshPosted = false
+
+    /**
+     * 由 Settings.Secure 的观察者调用：合并短时间内的多次变化。
+     *
+     * 一次状态切换常常连着写好几个键（心跳、运行时快照、失败记录、耗时），
+     * 观察者会挨个回调；300 毫秒内只读一次，避免一瞬间把日志和包信息各读十几遍。
+     */
+    fun requestRefresh() {
+        if (refreshPosted) return
+        refreshPosted = true
+        mainHandler.postDelayed({
+            refreshPosted = false
+            refreshDiagnostics()
+        }, 300L)
     }
 
     fun refreshClientTest() {
