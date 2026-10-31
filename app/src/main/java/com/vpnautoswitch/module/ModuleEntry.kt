@@ -4,7 +4,9 @@ import android.app.Notification
 import android.content.Context
 import android.content.Intent
 import android.os.IBinder
+import android.os.SystemClock
 import com.vpnautoswitch.module.system.ActivityRecords
+import com.vpnautoswitch.module.system.ClientStartGuard
 import com.vpnautoswitch.module.system.ConfigRepo
 import com.vpnautoswitch.module.system.Engine
 import com.vpnautoswitch.module.system.ModuleLog
@@ -27,6 +29,7 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage
 class ModuleEntry : IXposedHookLoadPackage {
 
     private var suppressedLogged = false
+    private var blockedStarts = 0
 
     private companion object {
         val PROCESS_HOLDERS = arrayOf(
@@ -56,10 +59,12 @@ class ModuleEntry : IXposedHookLoadPackage {
         val deathHooks = hookProcessDeath(lpparam.classLoader)
         val taskHooks = hookTaskRemoved(lpparam.classLoader)
         val notifHooks = hookVpnNotification(lpparam.classLoader)
+        val startHooks = hookClientStarts(lpparam.classLoader)
 
         val summary =
             "hooks: startActivity=$launchHooks, activityResumed=$resumedHooks, setState=$stateHooks, " +
-                "death=$deathHooks, taskRemoved=$taskHooks, notif=$notifHooks"
+                "death=$deathHooks, taskRemoved=$taskHooks, notif=$notifHooks, " +
+                "blockClientStart=$startHooks"
         XposedBridge.log("[VpnAutoSwitch] $summary")
         ModuleLog.append(ctx, "system_server loaded ($summary)")
     }
@@ -224,6 +229,57 @@ class ModuleEntry : IXposedHookLoadPackage {
     private fun isTaskLike(value: Any?): Boolean {
         val name = value?.javaClass?.name ?: return false
         return name.endsWith(".Task") || name.endsWith(".TaskRecord")
+    }
+
+    // ------------------------------------------------------------ 客户端自启动闸门
+
+    /**
+     * 强停 VPN 客户端之后，拦住几秒内对它的 bind / startService。
+     *
+     * `forceStopPackage` 只压制隐式广播和 Activity 自启，**不压制别人 bind 它的服务**。
+     * 隧道刚断时 system_server 里的 Vpn 还挂着 ServiceConnection，或者客户端自己的前台服务
+     * 被 START_STICKY 拉起，于是进程一秒内复活、隧道重建——日志里就是
+     * `force stopped` → `guard: vpn came back -> re-off` 的同一次退出强停两遍，
+     * 而 MIUI 会在 bind 时弹「正在启动服务」。
+     *
+     * 这里在 [ActiveServices] 的入口拦：窗口由 [ClientStartGuard] 管，只对刚被强停的那个包生效，
+     * 用户主动打开客户端或模块自己 ensureVpn 时会立刻释放，不影响正常使用。
+     */
+    private fun hookClientStarts(cl: ClassLoader): Int {
+        val cls = findClass("com.android.server.am.ActiveServices", cl) ?: return 0
+        val callback = object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                try {
+                    val intent = param.args.firstOrNull { it is Intent } as? Intent ?: return
+                    val pkg = intent.component?.packageName ?: intent.`package`
+                    if (pkg.isNullOrEmpty()) return
+                    if (!ClientStartGuard.blocked(pkg, SystemClock.elapsedRealtime())) return
+
+                    // 注意 bindServiceLocked 返回的是结果码：0 表示成功，负数才是失败。
+                    // 这里必须是负值，返回 0 等于骗调用方「绑上了」，它随后拿不到 binder 会 NPE。
+                    param.result = when ((param.method as? java.lang.reflect.Method)?.returnType) {
+                        Int::class.javaPrimitiveType -> -1
+                        Boolean::class.javaPrimitiveType -> false
+                        else -> null
+                    }
+                    // 每次关闭都会挡几拍，全记下来会淹掉日志，前三次足够证明闸门在工作
+                    if (blockedStarts < 3) {
+                        blockedStarts++
+                        XposedBridge.log(
+                            "[VpnAutoSwitch] blocked ${param.method.name} of $pkg " +
+                                "(client was just force-stopped)"
+                        )
+                    }
+                } catch (t: Throwable) {
+                    XposedBridge.log(t)
+                }
+            }
+        }
+        var total = 0
+        for (name in arrayOf("bindServiceLocked", "startServiceLocked", "startServiceInPackage")) {
+            total += XposedBridge.hookAllMethods(cls, name, callback).size
+        }
+        return total
     }
 
     // ------------------------------------------------------------ 工具

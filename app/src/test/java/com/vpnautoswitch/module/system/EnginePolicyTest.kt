@@ -60,6 +60,27 @@ class EnginePolicyTest {
         assertFalse(EnginePolicy.isStartupFlap(connectedForMs = 60_000, retries = 0, maxRetries = 2))
         // 重试次数用完了就放弃，避免和连不稳的客户端无限拉扯
         assertFalse(EnginePolicy.isStartupFlap(connectedForMs = 500, retries = 2, maxRetries = 2))
+
+        // 目标应用还停在前台：窗口放到 6 秒，2 秒的掉落算「这次没连成」而不是用户手动断开
+        // （采样每 900ms 一次，2 秒的量出来常常就是 2.0~2.9 秒，卡在原来的边界上）
+        assertTrue(
+            EnginePolicy.isStartupFlap(
+                connectedForMs = 2_000,
+                retries = 0,
+                maxRetries = 2,
+                windowMs = EnginePolicy.TARGET_FLAP_MS,
+            )
+        )
+        assertFalse(
+            EnginePolicy.isStartupFlap(
+                connectedForMs = 6_000,
+                retries = 0,
+                maxRetries = 2,
+                windowMs = EnginePolicy.TARGET_FLAP_MS,
+            )
+        )
+        // 「稳」的门槛必须比窗口长，否则窗口内的掉落永远算不完重试次数
+        assertTrue(EnginePolicy.STABLE_CONNECTION_MS > EnginePolicy.TARGET_FLAP_MS)
     }
 
     @Test
@@ -462,5 +483,54 @@ class EnginePolicyTest {
 
         // 都满足才动手
         assertEquals(EnginePolicy.PrewarmGate.GO, gate())
+    }
+
+    @Test
+    fun `do not re-issue start while the client is still initializing`() {
+        // 本轮还没启动过：进程活着也不是「在初始化」，该发就发
+        assertFalse(
+            EnginePolicy.waitForClientInit(
+                alreadyStarted = false,
+                sinceStartMs = 2_000L,
+                processAlive = true,
+                graceMs = 4_000L,
+            )
+        )
+        // 刚启动 2 秒，进程还在：多半正在建隧道，别去打断
+        assertTrue(
+            EnginePolicy.waitForClientInit(
+                alreadyStarted = true,
+                sinceStartMs = 2_000L,
+                processAlive = true,
+                graceMs = 4_000L,
+            )
+        )
+        // 进程已经没了：启动没生效，必须重发
+        assertFalse(
+            EnginePolicy.waitForClientInit(
+                alreadyStarted = true,
+                sinceStartMs = 2_000L,
+                processAlive = false,
+                graceMs = 4_000L,
+            )
+        )
+        // 宽限期已过：客户端真的卡住了，照常重试
+        assertFalse(
+            EnginePolicy.waitForClientInit(
+                alreadyStarted = true,
+                sinceStartMs = 4_000L,
+                processAlive = true,
+                graceMs = 4_000L,
+            )
+        )
+        // 时钟回拨之类的负数不能一直等下去
+        assertFalse(
+            EnginePolicy.waitForClientInit(
+                alreadyStarted = true,
+                sinceStartMs = -1_000L,
+                processAlive = true,
+                graceMs = 4_000L,
+            )
+        )
     }
 }

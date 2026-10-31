@@ -28,6 +28,9 @@ internal object ExternalControl {
     /** 记住哪些客户端需要走外部控制，下次打开应用直接走这条路径，不用再等 always-on 超时 */
     private const val KEY = "vpn_autoswitch_external_pkgs"
 
+    /** 预热时等 onServiceConnected 的上限：客户端可能是冷启动，给足 6 秒 */
+    private const val PREWARM_TIMEOUT_MS = 6_000L
+
     private val unsupportedStart = HashSet<String>()
     private val unsupportedStop = HashSet<String>()
     private val noVpnService = HashSet<String>()
@@ -110,9 +113,17 @@ internal object ExternalControl {
             return false
         }
         return try {
-            ctx.startForegroundService(Intent().setComponent(ComponentName(pkg, service)))
-            ModuleLog.append(ctx, "started VPN service $service")
-            true
+            // startForegroundService 返回 null 表示系统拒绝了这次启动（最常见的是包仍是
+            // stopped 状态，或者被后台限制拦住）。以前不看返回值，一律记「started」，
+            // 日志里就会出现「启动了三次、每次都 started，却十几秒没隧道」的假象。
+            val started = ctx.startForegroundService(Intent().setComponent(ComponentName(pkg, service)))
+            if (started == null) {
+                ModuleLog.append(ctx, "start VPN service rejected: $service（检查 stopped / 后台限制）")
+                false
+            } else {
+                ModuleLog.append(ctx, "started VPN service $service")
+                true
+            }
         } catch (t: Throwable) {
             noVpnService.add(pkg)
             ModuleLog.append(ctx, "start VPN service failed: $t")
@@ -139,7 +150,7 @@ internal object ExternalControl {
      * onStartCommand 或用户点「连接」时才发生，所以不会出现「想关却把它打开了」。
      * 拿到连接后立刻解绑，不留悬挂 binder；失败就当作没预热，下次照旧冷启动。
      */
-    fun prewarm(ctx: Context, pkg: String): Boolean {
+    fun prewarm(ctx: Context, pkg: String, handler: Handler? = null): Boolean {
         if (pkg.isEmpty()) return false
         val service = findVpnService(ctx, pkg)
         if (service == null) {
@@ -150,7 +161,9 @@ internal object ExternalControl {
         val released = java.util.concurrent.atomic.AtomicBoolean(false)
         val connected = java.util.concurrent.atomic.AtomicBoolean(false)
         var conn: ServiceConnection? = null
-        val main = Handler(Looper.getMainLooper())
+        // 回调走调用方的工作线程：system_server 的主线程经常被别的事占住，
+        // 3 秒都排不上队的话会误判成「没连上」
+        val main = handler ?: Handler(Looper.getMainLooper())
         val release = {
             val c = conn
             if (c != null && released.compareAndSet(false, true)) {
@@ -183,14 +196,19 @@ internal object ExternalControl {
                 released.set(true)
                 false
             } else {
-                // 万一 onServiceConnected 迟迟不来（服务卡住），3 秒后自己解绑
+                // 客户端可能是冷启动，6 秒还没连上就放弃（也顺便看出进程到底起来没有）
                 main.postDelayed({
                     if (!connected.get()) {
-                        // 进程被强停过又刚清标记时常见：绑定请求发出去了，客户端没起来
-                        ModuleLog.append(ctx, "prewarm: 3 秒内没连上，放弃本次预热")
+                        val alive = processAlive(ctx, pkg)
+                        ModuleLog.append(
+                            ctx,
+                            "prewarm: 6 秒内没连上（客户端进程" +
+                                (if (alive) "已启动，服务拒绝了绑定" else "没起来") +
+                                "），放弃本次预热",
+                        )
                     }
                     release()
-                }, 3_000L)
+                }, PREWARM_TIMEOUT_MS)
                 true
             }
         } catch (t: Throwable) {
@@ -198,6 +216,16 @@ internal object ExternalControl {
             ModuleLog.append(ctx, "prewarm failed: $t")
             false
         }
+    }
+
+    /** bind 卡住时用来判断「进程起来了但服务没让连」还是「进程根本没被拉起」 */
+    private fun processAlive(ctx: Context, pkg: String): Boolean = try {
+        val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        am.runningAppProcesses?.any {
+            it.processName == pkg || it.processName.startsWith("$pkg:")
+        } == true
+    } catch (t: Throwable) {
+        false
     }
 
     /** 会短暂显示客户端界面：仅在用户明确允许时调用 */

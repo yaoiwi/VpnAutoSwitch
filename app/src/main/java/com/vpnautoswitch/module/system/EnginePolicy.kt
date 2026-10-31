@@ -33,6 +33,19 @@ internal object EnginePolicy {
     const val STARTUP_FLAP_MS = 2_000L
 
     /**
+     * 目标应用还停在前台时的抖动窗口。
+     *
+     * 用户开着目标应用、刚连上就掉，意图很明确就是「要连上」，这时候把掉落当成
+     * 手动断开是最容易误判的：日志里 15:02:57 连上、15:02:59 掉，按 2 秒窗口正好卡在
+     * 边界上判成「保持关闭」，于是开着 Twitter 干等 18 秒才有网。
+     * 窗口放到 6 秒，同时把重试次数照旧限死，不会和客户端无限拉扯。
+     */
+    const val TARGET_FLAP_MS = 6_000L
+
+    /** 连上超过这么久才算「稳定」；不到这个时长不清零抖动重试次数，免得连不稳的客户端无限重试 */
+    const val STABLE_CONNECTION_MS = 8_000L
+
+    /**
      * 隧道刚连上就掉：这是客户端建隧道失败（有的客户端会先 establish 再断开），
      * 不是用户点了关闭。
      *
@@ -274,6 +287,22 @@ internal object EnginePolicy {
 
     fun cooldownReady(now: Long, lastAt: Long, cooldownMs: Long): Boolean =
         now - lastAt >= cooldownMs
+
+    /**
+     * 外部控制模式下，是否该「等客户端把隧道建完」而不是再发一次启动请求。
+     *
+     * 客户端进程还活着，说明上一次启动请求已经被系统接受，隧道多半正在建；
+     * 这时候再 startService，不少客户端会把它当成一次新的连接，把正在建的那条推倒重来
+     * （日志里就是「启动两次 → 7~11 秒才通，通了又掉」）。
+     * 只在「本轮已经启动过、进程还在、距开始不超过 [graceMs]」时等待，
+     * 超过 [graceMs] 后照常重试，免得客户端真的卡死时一直干等。
+     */
+    fun waitForClientInit(
+        alreadyStarted: Boolean,
+        sinceStartMs: Long,
+        processAlive: Boolean,
+        graceMs: Long,
+    ): Boolean = alreadyStarted && processAlive && sinceStartMs in 0 until graceMs
 
     fun shouldRunDelayedStart(
         token: Int,
