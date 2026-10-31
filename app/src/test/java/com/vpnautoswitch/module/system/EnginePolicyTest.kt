@@ -51,6 +51,29 @@ class EnginePolicyTest {
     }
 
     @Test
+    fun `a tunnel that dies right after connecting is retried, not treated as user off`() {
+        // 连上 1 秒就掉：客户端这次没连成，重试
+        assertTrue(EnginePolicy.isStartupFlap(connectedForMs = 900, retries = 0, maxRetries = 2))
+        assertTrue(EnginePolicy.isStartupFlap(connectedForMs = 1_900, retries = 1, maxRetries = 2))
+        // 连上 2 秒以上才掉：按原来的「保持关闭」处理，不能跟用户的关闭操作对着干
+        assertFalse(EnginePolicy.isStartupFlap(connectedForMs = 2_000, retries = 0, maxRetries = 2))
+        assertFalse(EnginePolicy.isStartupFlap(connectedForMs = 60_000, retries = 0, maxRetries = 2))
+        // 重试次数用完了就放弃，避免和连不稳的客户端无限拉扯
+        assertFalse(EnginePolicy.isStartupFlap(connectedForMs = 500, retries = 2, maxRetries = 2))
+    }
+
+    @Test
+    fun `flap retry skips the long cooldown`() {
+        val now = 100_000L
+        // 刚动过手：正常要等满 6 秒冷却，补偿重试只需 250ms
+        val rewound = EnginePolicy.rewindForRetry(now, now, 6_000L, 250L)
+        assertFalse(EnginePolicy.cooldownReady(now, rewound, 6_000L))
+        assertTrue(EnginePolicy.cooldownReady(now + 250, rewound, 6_000L))
+        // 本来就过了冷却的，不动它
+        assertEquals(now - 10_000, EnginePolicy.rewindForRetry(now, now - 10_000, 6_000L, 250L))
+    }
+
+    @Test
     fun `logs are cleared only when module version changes`() {
         assertTrue(EnginePolicy.shouldClearLogsOnBoot(0, 66))
         assertTrue(EnginePolicy.shouldClearLogsOnBoot(65, 66))

@@ -32,6 +32,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.state.ToggleableState
+import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Checkbox
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.alpha
@@ -130,6 +131,7 @@ import top.yukonga.miuix.kmp.icon.extended.Contacts
 import top.yukonga.miuix.kmp.icon.extended.Favorites
 import com.vpnautoswitch.module.ui.hyper.SettingsAction
 import com.vpnautoswitch.module.ui.hyper.SettingsActionWithArrow
+import com.vpnautoswitch.module.ui.hyper.SettingsItemMargin
 import com.vpnautoswitch.module.ui.hyper.SettingsSwitch
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Card
@@ -908,7 +910,7 @@ private fun AppToggleCard(
     onEnterSelection: () -> Unit = {},
     onToggleRow: () -> Unit = {},
 ) {
-    val icon = state.apps.firstOrNull { it.packageName == pkg }?.icon
+    val icon = rememberAppIcon(pkg, state.apps.firstOrNull { it.packageName == pkg }?.activityName)
     val haptic = LocalHapticFeedback.current
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -987,6 +989,42 @@ private fun SettingsSearchField(query: String, onQueryChange: (String) -> Unit) 
         modifier = Modifier.fillMaxWidth(),
         label = "搜索设置",
     )
+}
+
+/**
+ * 可折叠的设置分组标题。
+ *
+ * 标题本身就是一行普通设置项，点一下展开 / 收起。搜索时传 `collapsible = false`：
+ * 全部展开、也不显示「展开 / 收起」，否则搜到命中项却藏在折叠里。
+ *
+ * `content` 不带 receiver：分组内的开关直接铺在同一张卡片的 Column 里，
+ * 不额外套一层 Column，卡片原有的分割线与圆角都不受影响。
+ */
+@Composable
+private fun SettingsGroup(
+    title: String,
+    summary: String,
+    expanded: Boolean,
+    collapsible: Boolean,
+    onToggle: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    BasicComponent(
+        title = title,
+        summary = summary,
+        endActions = {
+            if (collapsible) {
+                Text(
+                    text = if (expanded) "收起" else "展开",
+                    fontSize = 12.sp,
+                    color = MiuixTheme.colorScheme.primary,
+                )
+            }
+        },
+        insideMargin = SettingsItemMargin,
+        onClick = { if (collapsible) onToggle() },
+    )
+    if (expanded) content()
 }
 
 private fun LazyListScope.settingsItems(
@@ -1139,84 +1177,113 @@ private fun LazyListScope.settingsItems(
 
     if (visible("高级")) item {
         SectionTitle("高级")
+        // 十个开关挤在一张卡里，想找「保留客户端进程」得从头滑到尾。
+        // 按用途分三组，默认只展开最常用的「关闭与断开」；搜索时全部展开，免得匹配到却看不见。
+        val searching = visibleSections != null
         Card(modifier = Modifier.fillMaxWidth()) {
-            SettingsSwitch(
-                title = "锁定模式（Lockdown）",
-                summary = "VPN 断开时禁止一切网络访问，可能导致断网，通常无需开启",
-                icon = MiuixIcons.Lock,
-                checked = state.config.lockdown,
-                onCheckedChange = { state.save(state.config.copy(lockdown = it)) },
-            )
-            SettingsSwitch(
-                title = "划掉任务即断开",
-                summary = "从最近任务划掉目标应用时，即使前台服务让进程还活着，也断开 VPN",
-                icon = MiuixIcons.HorizontalSplit,
-                checked = state.config.disconnectOnTaskRemoved,
-                onCheckedChange = {
-                    state.save(state.config.copy(disconnectOnTaskRemoved = it))
-                },
-            )
-            SettingsSwitch(
-                title = "划掉任意目标即断开",
-                summary = "目标应用都在后台时，划掉其中任意一个就断开 VPN，不必是刚才在用的那个；" +
-                    "关掉后只有划掉正在用的那个才断开",
-                icon = MiuixIcons.GridView,
-                checked = state.config.disconnectOnAnyDismiss,
-                enabled = state.config.disconnectOnTaskRemoved,
-                onCheckedChange = {
-                    state.save(state.config.copy(disconnectOnAnyDismiss = it))
-                },
-            )
-            SettingsSwitch(
-                title = "关闭后继续抑制",
-                summary = "外部控制模式下关闭 VPN 后观察 8 秒，客户端自己又把 VPN 拉起来时再关一次",
-                icon = MiuixIcons.Lock,
-                checked = state.config.offGuard,
-                onCheckedChange = { state.save(state.config.copy(offGuard = it)) },
-            )
-            SettingsSwitch(
-                title = "显示开关提示（Toast）",
-                summary = "VPN 开启 / 关闭时在屏幕上弹出提示",
-                icon = MiuixIcons.Messages,
-                checked = state.config.toastEnabled,
-                onCheckedChange = { state.save(state.config.copy(toastEnabled = it)) },
-            )
-            SettingsSwitch(
-                title = "隐藏「始终开启的 VPN 已断开」通知",
-                summary = "VPN 关闭时不再显示系统那条提示；需要诊断时可临时关掉",
-                icon = MiuixIcons.Blocklist,
-                checked = state.config.hideVpnNotification,
-                onCheckedChange = { state.save(state.config.copy(hideVpnNotification = it)) },
-            )
-            SettingsSwitch(
-                title = "允许短暂打开 VPN 客户端界面",
-                summary = "默认全程在后台启动；只有客户端不支持后台拉起时才需要打开这个开关",
-                icon = MiuixIcons.Show,
-                checked = state.config.allowVpnUi,
-                onCheckedChange = { state.save(state.config.copy(allowVpnUi = it)) },
-            )
-            SettingsSwitch(
-                title = "断不开时强制停止 VPN 应用",
-                summary = "清除设置后 VPN 仍连着（例如你手动连上的），直接结束 VPN 应用进程",
-                icon = MiuixIcons.Delete,
-                checked = state.config.forceStopVpn,
-                onCheckedChange = { state.save(state.config.copy(forceStopVpn = it)) },
-            )
-            SettingsSwitch(
-                title = "关闭 VPN 后保留客户端进程",
-                summary = "断开后让 VPN 客户端留在内存，下次打开目标应用无需冷启动，通常快 1 秒以上；" +
-                    "代价是客户端常驻后台，会多一些耗电。确实关不掉时仍会强制停止一次。",
-                icon = MiuixIcons.Pin,
-                checked = state.config.keepClientAlive,
-                onCheckedChange = { state.save(state.config.copy(keepClientAlive = it)) },
-            )
-            SettingsSwitch(
-                title = "关闭时恢复原有常驻 VPN 设置",
-                summary = "关闭后会自动还原你原本的「始终开启的 VPN」配置",
-                icon = MiuixIcons.Reset,
-                checked = state.config.restoreOriginal,
-                onCheckedChange = { state.save(state.config.copy(restoreOriginal = it)) },
-            )
+            SettingsGroup(
+                title = "关闭与断开",
+                summary = "划掉任务怎么断、断开后客户端留不留",
+                expanded = searching || AppState.ADV_GROUP_CLOSE in state.advancedGroups,
+                collapsible = !searching,
+                onToggle = { state.toggleAdvancedGroup(AppState.ADV_GROUP_CLOSE) },
+            ) {
+                SettingsSwitch(
+                    title = "划掉任务即断开",
+                    summary = "从最近任务划掉目标应用时，即使前台服务让进程还活着，也断开 VPN",
+                    icon = MiuixIcons.HorizontalSplit,
+                    checked = state.config.disconnectOnTaskRemoved,
+                    onCheckedChange = {
+                        state.save(state.config.copy(disconnectOnTaskRemoved = it))
+                    },
+                )
+                SettingsSwitch(
+                    title = "划掉任意目标即断开",
+                    summary = "目标应用都在后台时，划掉其中任意一个就断开 VPN，不必是刚才在用的那个；" +
+                        "关掉后只有划掉正在用的那个才断开",
+                    icon = MiuixIcons.GridView,
+                    checked = state.config.disconnectOnAnyDismiss,
+                    enabled = state.config.disconnectOnTaskRemoved,
+                    onCheckedChange = {
+                        state.save(state.config.copy(disconnectOnAnyDismiss = it))
+                    },
+                )
+                SettingsSwitch(
+                    title = "关闭后继续抑制",
+                    summary = "外部控制模式下关闭 VPN 后观察 8 秒，客户端自己又把 VPN 拉起来时再关一次",
+                    icon = MiuixIcons.Lock,
+                    checked = state.config.offGuard,
+                    onCheckedChange = { state.save(state.config.copy(offGuard = it)) },
+                )
+                SettingsSwitch(
+                    title = "关闭 VPN 后保留客户端进程",
+                    summary = "断开后让 VPN 客户端留在内存，下次打开目标应用无需冷启动，通常快 1 秒以上；" +
+                        "代价是客户端常驻后台，会多一些耗电。确实关不掉时仍会强制停止一次。",
+                    icon = MiuixIcons.Pin,
+                    checked = state.config.keepClientAlive,
+                    onCheckedChange = { state.save(state.config.copy(keepClientAlive = it)) },
+                )
+                SettingsSwitch(
+                    title = "关闭时恢复原有常驻 VPN 设置",
+                    summary = "关闭后会自动还原你原本的「始终开启的 VPN」配置",
+                    icon = MiuixIcons.Reset,
+                    checked = state.config.restoreOriginal,
+                    onCheckedChange = { state.save(state.config.copy(restoreOriginal = it)) },
+                )
+            }
+
+            SettingsGroup(
+                title = "兼容性",
+                summary = "客户端拉不起来、关不掉时才需要动",
+                expanded = searching || AppState.ADV_GROUP_COMPAT in state.advancedGroups,
+                collapsible = !searching,
+                onToggle = { state.toggleAdvancedGroup(AppState.ADV_GROUP_COMPAT) },
+            ) {
+                SettingsSwitch(
+                    title = "锁定模式（Lockdown）",
+                    summary = "VPN 断开时禁止一切网络访问，可能导致断网，通常无需开启",
+                    icon = MiuixIcons.Lock,
+                    checked = state.config.lockdown,
+                    onCheckedChange = { state.save(state.config.copy(lockdown = it)) },
+                )
+                SettingsSwitch(
+                    title = "允许短暂打开 VPN 客户端界面",
+                    summary = "默认全程在后台启动；只有客户端不支持后台拉起时才需要打开这个开关",
+                    icon = MiuixIcons.Show,
+                    checked = state.config.allowVpnUi,
+                    onCheckedChange = { state.save(state.config.copy(allowVpnUi = it)) },
+                )
+                SettingsSwitch(
+                    title = "断不开时强制停止 VPN 应用",
+                    summary = "清除设置后 VPN 仍连着（例如你手动连上的），直接结束 VPN 应用进程",
+                    icon = MiuixIcons.Delete,
+                    checked = state.config.forceStopVpn,
+                    onCheckedChange = { state.save(state.config.copy(forceStopVpn = it)) },
+                )
+            }
+
+            SettingsGroup(
+                title = "提示与通知",
+                summary = "屏幕提示与系统那条常驻通知",
+                expanded = searching || AppState.ADV_GROUP_HINTS in state.advancedGroups,
+                collapsible = !searching,
+                onToggle = { state.toggleAdvancedGroup(AppState.ADV_GROUP_HINTS) },
+            ) {
+                SettingsSwitch(
+                    title = "显示开关提示（Toast）",
+                    summary = "VPN 开启 / 关闭时在屏幕上弹出提示",
+                    icon = MiuixIcons.Messages,
+                    checked = state.config.toastEnabled,
+                    onCheckedChange = { state.save(state.config.copy(toastEnabled = it)) },
+                )
+                SettingsSwitch(
+                    title = "隐藏「始终开启的 VPN 已断开」通知",
+                    summary = "VPN 关闭时不再显示系统那条提示；需要诊断时可临时关掉",
+                    icon = MiuixIcons.Blocklist,
+                    checked = state.config.hideVpnNotification,
+                    onCheckedChange = { state.save(state.config.copy(hideVpnNotification = it)) },
+                )
+            }
         }
     }
 
@@ -1463,15 +1530,14 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
+    "1.46.0：设置页「高级」拆成三组，默认只展开常用的那组，点标题展开收起；" +
+        "状态诊断新增「开关耗时」，慢的时候能直接看出是客户端建隧道慢还是模块在重试；" +
+        "应用选择页改为按需加载图标，打开不再卡一下。\n" +
+    "1.45.1：修复 VPN 连上不到两秒就掉时被当成你手动关闭——之前要退出目标应用再打开才会重连，" +
+        "现在约 1 秒内自动补一次（最多两次），连不稳才放弃。\n" +
     "1.45.0：新增「划掉任意目标即断开」——多个目标都在后台时，划掉任意一个就断 VPN，" +
         "不必是刚才在用的那个（设置里可关）；修复手动点磁贴断开后又误弹「VPN 已开启」，" +
-        "并让断开保持住，不再被客户端自己重连拉回来。\n" +
-    "1.44.0：打开目标应用时更早开始连 VPN（点图标就动手，不等界面画完），" +
-        "没连上时重试间隔从 5 秒缩到 0.9 秒；关闭后默认保留 VPN 客户端进程，" +
-        "下次打开不用冷启动；划掉正在用的目标即断开，不再被后台其它目标拽住；" +
-        "应用页支持长按批量移除 / 移动。\n" +
-    "1.43.2：关于页版式不变，开发者 / 致谢 / 项目合成一张卡，" +
-        "项目主页和问题反馈挪到开发者下面；卡片换成半透明玻璃，环境光透到卡片和页面底部，滚动时不再整块暗掉。"
+        "并让断开保持住。"
 
 private const val ACK_TIPS =
     "本模块的实现离不开这些开源项目，在此致谢：\n\n" +

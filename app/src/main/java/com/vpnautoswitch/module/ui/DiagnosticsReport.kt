@@ -17,6 +17,9 @@ internal data class CheckItem(
 
 internal object DiagnosticsReport {
 
+    /** 开启超过这么久就认为偏慢，在诊断里标黄 */
+    private const val SLOW_ON_MS = 5_000L
+
     fun buildChecks(diagnostics: Diagnostics, config: Config): List<CheckItem> {
         val now = System.currentTimeMillis()
         val checks = mutableListOf<CheckItem>()
@@ -79,6 +82,7 @@ internal object DiagnosticsReport {
         )
 
         checks += vpnTunnelCheck(diagnostics)
+        checks += timingCheck(diagnostics, now)
 
         val needsAlwaysOn = diagnostics.activeRule == "target" || diagnostics.activeRule == "wifiOn"
         checks += CheckItem(
@@ -125,6 +129,17 @@ internal object DiagnosticsReport {
             appendLine("当前规则：${ruleLabel(diagnostics.activeRule)} · ${diagnostics.ruleDetail}")
             appendLine("规则更新时间：${if (diagnostics.ruleUpdatedAt > 0) fmt.format(Date(diagnostics.ruleUpdatedAt)) else "未上报"}")
             appendLine("最近失败：${failureLabel(diagnostics)}")
+            appendLine(
+                "最近耗时：开启 " + if (diagnostics.lastOnMs > 0L) {
+                    formatMs(diagnostics.lastOnMs)
+                } else {
+                    "未记录"
+                } + " · 关闭 " + if (diagnostics.lastOffMs > 0L) {
+                    formatMs(diagnostics.lastOffMs)
+                } else {
+                    "未记录"
+                }
+            )
             appendLine("目标应用：${config.targets.size} · 打开即关闭：${config.offTargets.size} · Wi-Fi 开/关：${config.wifiOn.size}/${config.wifiOff.size}")
             appendLine()
             appendLine("检查结果：")
@@ -195,6 +210,37 @@ internal object DiagnosticsReport {
             )
         }
     }
+
+    /**
+     * 最近一次开启 / 关闭的耗时。
+     *
+     * 「打开应用要等半天才有网」只能靠体感，看不出慢在客户端建隧道还是模块在重试；
+     * 模块每完成一次开关都会把耗时写进设置，这里直接摊开给用户看。
+     */
+    private fun timingCheck(diagnostics: Diagnostics, now: Long): CheckItem {
+        if (diagnostics.lastOnMs <= 0L && diagnostics.lastOffMs <= 0L) {
+            return CheckItem("开关耗时", CheckStatus.UNKNOWN, "还没有记录到完整的开关过程")
+        }
+        val slow = diagnostics.lastOnMs >= SLOW_ON_MS
+        return CheckItem(
+            "开关耗时",
+            if (slow) CheckStatus.WARN else CheckStatus.OK,
+            buildString {
+                append("上次开启 ")
+                append(if (diagnostics.lastOnMs <= 0L) "未记录" else
+                    "${formatMs(diagnostics.lastOnMs)}（${ago(diagnostics.lastOnAt, now)}）")
+                append(" · 上次关闭 ")
+                append(if (diagnostics.lastOffMs <= 0L) "未记录" else
+                    "${formatMs(diagnostics.lastOffMs)}（${ago(diagnostics.lastOffAt, now)}）")
+                if (slow) {
+                    append("\n开启偏慢：看运行日志里是客户端建隧道慢，还是模块在反复重试")
+                }
+            },
+        )
+    }
+
+    private fun formatMs(ms: Long): String =
+        if (ms < 1_000L) "$ms 毫秒" else String.format(Locale.CHINA, "%.1f 秒", ms / 1000.0)
 
     private fun failureCheck(diagnostics: Diagnostics, now: Long): CheckItem {
         if (diagnostics.lastFailureAt <= 0L) {

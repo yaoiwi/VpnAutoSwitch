@@ -118,6 +118,16 @@ internal object Engine {
     private const val OFF_FAST_MS = 500L
     private const val OFF_SLOW_MS = 1_500L
 
+    /**
+     * 刚连上就掉的补偿重试。
+     *
+     * 有的客户端先 establish 再因为「这次没连成」断开，隧道只活一秒左右。
+     * 以前这被当成用户手动关闭，直接挂上 userOff，得退出应用再打开才会重连。
+     * 现在自动补一次，最多 [MAX_FLAP_RETRIES] 次，且只等 [FLAP_RETRY_MS]。
+     */
+    private const val FLAP_RETRY_MS = 250L
+    private const val MAX_FLAP_RETRIES = 2
+
     /** 强制停止后隧道可能还要几秒才消失：分批复查，仍连着就再停一次 */
     private const val FORCE_STOP_RECHECK_MS = 2_000L
     private const val MAX_FORCE_STOP_ATTEMPTS = 3
@@ -207,6 +217,19 @@ internal object Engine {
     /** 本轮接管是否已经提示过「VPN 已开启」，避免设置写完但隧道没起来就误报 */
     private var connectedNotified = false
     private var wasConnected = false
+
+    /** 本轮第一次看到「已连接」的时刻，用来分辨「刚连上就掉」和「用了一会儿才掉」 */
+    private var connectedAt = 0L
+
+    /** 本轮开始动手连接的时刻；连上后算出「打开应用多久有网」写进诊断 */
+    private var connectStartedAt = 0L
+
+    /** 本轮开始关闭的时刻；确认隧道真的没了就算出「关闭花了多久」 */
+    private var offStartedAt = 0L
+
+    /** 刚连上就掉的补偿重试次数；稳定连上后清零 */
+    private var flapRetries = 0
+
     private var offToken = 0
     private var startToken = 0
 
@@ -1072,6 +1095,17 @@ internal object Engine {
         if (connected) {
             // 已经连上了，说明用户「保持关闭」的意图已经结束（例如他自己又手动连上了）
             userOff = false
+            val nowUp = SystemClock.elapsedRealtime()
+            if (connectedAt == 0L) connectedAt = nowUp
+            // 连稳了才清掉抖动重试的计数：否则「连上—掉—连上—掉」会一直重连下去
+            if (nowUp - connectedAt >= EnginePolicy.STARTUP_FLAP_MS) flapRetries = 0
+            // 从「开始动手」到「看到隧道」，就是用户感知的「打开应用多久有网」。
+            // 刚连上就掉的抖动这里也会记一次，随后的重连会覆盖成真实值。
+            if (connectStartedAt != 0L) {
+                val cost = nowUp - connectStartedAt
+                connectStartedAt = 0L
+                RuntimeDiagnostics.publishTiming(ctx, "on", cost)
+            }
             // 设置仍指向我们，说明这轮是模块接管的，看门狗可以负责关掉它
             if (active || settingPointsToUs) autoSession = true
             if (failureStreak > 0) log(ctx, "vpn connected (after $failureStreak failed attempts)")
@@ -1103,7 +1137,37 @@ internal object Engine {
         // 从「已连接」掉下来：可能是用户手动关了（磁贴 / 客户端里断开），也可能是系统掐断。
         // 按你的要求，这时不自动重连——保持断开，等他重新打开目标应用时再连。
         if (wasConnected) {
+            val now = SystemClock.elapsedRealtime()
+            val connectedFor = if (connectedAt == 0L) Long.MAX_VALUE else now - connectedAt
             wasConnected = false
+            connectedAt = 0L
+
+            // 刚连上就掉：先怀疑「这次没连成」，不要当成用户手动断开。
+            // 否则 userOff 一挂上，用户得退出应用再打开才会重连（日志里干等几十秒就是这个）。
+            if (autoSession && EnginePolicy.isStartupFlap(
+                    connectedForMs = connectedFor,
+                    retries = flapRetries,
+                    maxRetries = MAX_FLAP_RETRIES,
+                )
+            ) {
+                flapRetries++
+                externalAttempts = 0
+                // 补偿重试不走 6 秒的外部控制冷却：把上次动手时刻往前挪，几百毫秒后就能再试
+                lastApplyAt = EnginePolicy.rewindForRetry(
+                    now = now,
+                    lastApplyAt = lastApplyAt,
+                    cooldownMs = EXTERNAL_ONLY_GUARD_MS,
+                    retryMs = FLAP_RETRY_MS,
+                )
+                log(
+                    ctx,
+                    "vpn dropped after ${connectedFor}ms -> retry " +
+                        "($flapRetries/$MAX_FLAP_RETRIES)",
+                )
+                // 看门狗继续跑，下一拍就会重新发起连接
+                return
+            }
+
             externalAttempts = 0
             reapplyCount = 0
             connectedNotified = false
@@ -1111,7 +1175,8 @@ internal object Engine {
             userOff = true
             startToken++
             stopWatchdog()
-            lastOffAt = SystemClock.elapsedRealtime()
+            lastOffAt = now
+            connectStartedAt = 0L
             // 常驻设置还指着客户端时，系统/客户端往往几秒内就把它重新拉起来，
             // 用户手动点断开，看到的却是「断一下又连上」。这里按关闭时的同一套还原逻辑收尾。
             if (active || settingPointsToUs) {
@@ -1133,6 +1198,9 @@ internal object Engine {
         autoSession = true
 
         val now = SystemClock.elapsedRealtime()
+        // 计时的起点放在「模块决定动手」这一刻：前面被冷却挡住的那些调用不算，
+        // 否则「打开应用多久有网」会把这半秒的等待也算进去
+        if (connectStartedAt == 0L) connectStartedAt = now
 
         val externalMode = ExternalControl.modeOf(ctx, cfg.vpnPackage)
 
@@ -1311,7 +1379,11 @@ internal object Engine {
         externalAttempts = 0
         connectedNotified = false
         wasConnected = false
-        lastOffAt = SystemClock.elapsedRealtime()
+        connectedAt = 0L
+        connectStartedAt = 0L
+        flapRetries = 0
+        offStartedAt = SystemClock.elapsedRealtime()
+        lastOffAt = offStartedAt
         stopWatchdog()
         startToken++
         pendingExternalMode = null
@@ -1375,6 +1447,19 @@ internal object Engine {
     }
 
     /**
+     * 关闭链确认隧道已经消失时，把「从请求关闭到真的断开」的耗时写进诊断。
+     *
+     * 只记第一次确认：关后守卫发现客户端又把 VPN 拉起来时会再关一次，
+     * 那属于另一轮，不该把第一轮的耗时覆盖成很短的假数据。
+     */
+    private fun noteVpnDown(ctx: Context) {
+        val started = offStartedAt
+        if (started == 0L) return
+        offStartedAt = 0L
+        RuntimeDiagnostics.publishTiming(ctx, "off", SystemClock.elapsedRealtime() - started)
+    }
+
+    /**
      * 关闭后校验：如果隧道还在（典型场景：用户在 VPN 客户端里手动连上的，
      * 清 always-on 设置并不会断开它），就依次尝试「停止请求 → 快捷磁贴 → 强制停止」。
      */
@@ -1386,6 +1471,7 @@ internal object Engine {
     ) {
         if (!closeChainValid(ctx, expectedPackage, generation)) return
         if (!hasVpnTransport(ctx)) {
+            noteVpnDown(ctx)
             log(ctx, "verify: vpn is down")
             return
         }
@@ -1412,6 +1498,7 @@ internal object Engine {
                 EnginePolicy.broadcastWaitMs(isServiceMode),
             ) { down ->
                 if (down) {
+                    noteVpnDown(ctx)
                     log(ctx, "verify: vpn is down (client stopped)")
                 } else {
                     verifyOffStep(ctx, expectedPackage, generation, true, plan)
@@ -1516,6 +1603,7 @@ internal object Engine {
         if (!closeChainValid(ctx, expectedPackage, generation)) return
         val cfg = ConfigRepo.get(ctx)
         if (!hasVpnTransport(ctx)) {
+            noteVpnDown(ctx)
             log(ctx, "verify: vpn is down")
             return
         }
@@ -1527,6 +1615,7 @@ internal object Engine {
         ) {
             awaitDown(ctx, expectedPackage, generation, 2_500L) { down ->
                 if (down) {
+                    noteVpnDown(ctx)
                     log(ctx, "verify: vpn is down (client stop activity)")
                 } else {
                     verifyOffStep(ctx, expectedPackage, generation, false, plan)
@@ -1544,6 +1633,7 @@ internal object Engine {
         if (tile != null && QuickTiles.click(ctx, tile)) {
             awaitDown(ctx, expectedPackage, generation, 2_000L) { down ->
                 if (down) {
+                    noteVpnDown(ctx)
                     log(ctx, "verify: vpn is down (qs tile)")
                 } else {
                     finishVerifyOff(ctx, expectedPackage, generation, 0, plan)
@@ -1571,6 +1661,7 @@ internal object Engine {
         if (!closeChainValid(ctx, expectedPackage, generation)) return
         val cfg = ConfigRepo.get(ctx)
         if (!hasVpnTransport(ctx)) {
+            noteVpnDown(ctx)
             log(
                 ctx,
                 if (attempt == 0) "verify: vpn is down" else "verify: disconnected after force stop"

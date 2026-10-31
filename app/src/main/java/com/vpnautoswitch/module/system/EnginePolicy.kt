@@ -29,6 +29,34 @@ internal object EnginePolicy {
     fun isFreshOff(sinceOffMs: Long, windowMs: Long = 3_000L): Boolean =
         sinceOffMs >= 0 && sinceOffMs < windowMs
 
+    /** 连上后不到这么久就掉，算「客户端这次没连成」，而不是用户手动断开 */
+    const val STARTUP_FLAP_MS = 2_000L
+
+    /**
+     * 隧道刚连上就掉：这是客户端建隧道失败（有的客户端会先 establish 再断开），
+     * 不是用户点了关闭。
+     *
+     * 这种一次性的抖动以前会被当成手动断开，于是 `userOff` 一直挂着，
+     * 用户得退出再重新打开应用才会再连——日志里就是连上 1 秒后
+     * `vpn dropped -> stay off until a target app is reopened`，然后干等几十秒。
+     * 现在按「重试」处理，最多 [maxRetries] 次；真的连不稳才放弃。
+     */
+    fun isStartupFlap(
+        connectedForMs: Long,
+        retries: Int,
+        maxRetries: Int,
+        windowMs: Long = STARTUP_FLAP_MS,
+    ): Boolean = connectedForMs >= 0 && connectedForMs < windowMs && retries < maxRetries
+
+    /**
+     * 补偿重试要绕开正常冷却：把「上次动手时刻」往前挪到只剩 [retryMs] 冷却的位置。
+     *
+     * 外部控制模式的冷却有 6 秒，抖动一次就要再等 6 秒才轮到下一次尝试，
+     * 用户感知是「开了应用要等十几秒才有网」。抖动后的重试只等几百毫秒。
+     */
+    fun rewindForRetry(now: Long, lastApplyAt: Long, cooldownMs: Long, retryMs: Long): Long =
+        minOf(lastApplyAt, now - cooldownMs + retryMs)
+
     /** 模块版本变化（含首次安装）时清空旧日志，保证只看得到当前版本的记录。 */
     fun shouldClearLogsOnBoot(previousVersion: Int, currentVersion: Int): Boolean =
         previousVersion != currentVersion

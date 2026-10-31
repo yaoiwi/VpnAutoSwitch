@@ -28,10 +28,11 @@ internal object SettingsSearch {
             listOf(
                 "锁定", "lockdown", "划掉", "任务", "进程", "断开", "toast", "提示",
                 "通知", "界面", "强制", "停止", "常驻", "恢复", "always", "任意", "后台",
+                "兼容", "分组", "折叠",
             ),
         ),
         Section("备份与恢复", listOf("导出", "导入", "备份", "恢复", "配置", "json")),
-        Section("状态诊断", listOf("诊断", "自检", "心跳", "状态", "检查", "transport")),
+        Section("状态诊断", listOf("诊断", "自检", "心跳", "状态", "检查", "transport", "耗时", "快慢")),
         Section("运行日志", listOf("日志", "log", "刷新", "清空", "记录")),
     )
 

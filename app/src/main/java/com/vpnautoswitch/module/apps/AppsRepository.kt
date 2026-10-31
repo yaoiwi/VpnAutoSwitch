@@ -23,7 +23,6 @@ data class AppInfo(
     val label: String,
     val hasVpnService: Boolean,
     val activityName: String? = null,
-    val icon: ImageBitmap? = null,
     /** 预装应用。选择页里单独分一组，免得在几百个系统应用里翻自己的 App */
     val isSystem: Boolean = false
 )
@@ -86,36 +85,55 @@ object AppsRepository {
     }
 
     /**
-     * 把应用图标转成 Compose 可用的 ImageBitmap（在子线程调用）。
+     * 图标缓存。
+     *
+     * 以前进选择页时一次性把两百多个应用的图标全部解码，首帧要等一两秒；
+     * 现在列表只装名称，行滚到眼前才取图标。160 个够覆盖来回滚动的那几屏，
+     * 超出按最久未用淘汰（128×128 一张约 64KB，上限约 10MB）。
+     */
+    private const val ICON_CACHE_SIZE = 160
+    private val iconCache =
+        object : LinkedHashMap<String, ImageBitmap>(ICON_CACHE_SIZE, 0.75f, true) {
+            override fun removeEldestEntry(
+                eldest: MutableMap.MutableEntry<String, ImageBitmap>?,
+            ): Boolean = size > ICON_CACHE_SIZE
+        }
+
+    /** 已经在内存里的图标；没有就返回 null，调用方先用占位块顶上 */
+    fun cachedIcon(packageName: String): ImageBitmap? =
+        synchronized(iconCache) { iconCache[packageName] }
+
+    /**
+     * 按需取一个应用的图标（在子线程调用）。
      *
      * 依次尝试：启动 Activity 的图标 → 应用图标 → 文字占位图。
      * 部分 ROM / 图标包会让前两种抛异常，此时仍然给出一个可辨识的方块，列表不会出现空洞。
      */
-    fun loadIcons(context: Context, apps: List<AppInfo>): List<AppInfo> {
+    fun icon(context: Context, packageName: String, activityName: String? = null): ImageBitmap {
+        cachedIcon(packageName)?.let { return it }
+
         val pm = context.packageManager
-        return apps.map { app ->
-            val drawable = try {
-                app.activityName?.let {
-                    pm.getActivityIcon(ComponentName(app.packageName, it))
-                }
-            } catch (t: Throwable) {
-                null
-            } ?: try {
-                pm.getApplicationIcon(app.packageName)
+        val drawable = try {
+            activityName?.let { pm.getActivityIcon(ComponentName(packageName, it)) }
+        } catch (t: Throwable) {
+            null
+        } ?: try {
+            pm.getApplicationIcon(packageName)
+        } catch (t: Throwable) {
+            null
+        }
+
+        val bitmap = drawable?.let {
+            try {
+                toBitmap(it, ICON_SIZE)
             } catch (t: Throwable) {
                 null
             }
+        } ?: fallbackIcon(labelOf(context, packageName))
 
-            val bitmap = drawable?.let {
-                try {
-                    toBitmap(it, ICON_SIZE)
-                } catch (t: Throwable) {
-                    null
-                }
-            } ?: fallbackIcon(app.label)
-
-            app.copy(icon = bitmap.asImageBitmap())
-        }
+        val result = bitmap.asImageBitmap()
+        synchronized(iconCache) { iconCache[packageName] = result }
+        return result
     }
 
     private fun toBitmap(drawable: Drawable, size: Int): Bitmap {

@@ -222,13 +222,14 @@ private fun AppRow(
     showCheckbox: Boolean,
     onClick: () -> Unit,
 ) {
+    val icon = rememberAppIcon(app.packageName, app.activityName)
     BasicComponent(
         title = app.label,
         summary = if (app.hasVpnService) "${app.packageName} · 支持 VpnService" else app.packageName,
         startAction = {
-            if (app.icon != null) {
+            if (icon != null) {
                 Icon(
-                    bitmap = app.icon,
+                    bitmap = icon,
                     contentDescription = null,
                     tint = Color.Unspecified,
                     modifier = Modifier

@@ -13,8 +13,8 @@ fun signingValue(env: String, prop: String): String? =
         ?: signingProps.getProperty(prop)?.takeIf { it.isNotBlank() }
 
 // 版本只在这里维护；CI 通过 :app:printVersionName 读取，避免解析脚本
-val appVersionCode = 84
-val appVersionName = "1.45.0"
+val appVersionCode = 86
+val appVersionName = "1.46.0"
 
 val storePath = signingValue("KEYSTORE_FILE", "storeFile")
 val storePwd = signingValue("KEYSTORE_PASSWORD", "storePassword")
@@ -96,6 +96,51 @@ tasks.matching { it.name.startsWith("check") && it.name.endsWith("AarMetadata") 
 
 tasks.register("printVersionName") {
     doLast { println(appVersionName) }
+}
+
+// ---------------------------------------------------------------- 版本一致性校验
+// 版本号最容易改漏的不是 build.gradle.kts，而是 README 徽章、CHANGELOG 首条和应用内
+// 更新日志首条：漏一处，装上去就会看到「还是旧版本」，以为版本号根本没变。
+// 打 release 包前强校验，缺哪处就直说，别等发出去才发现。
+val checkVersionDocs = tasks.register("checkVersionDocs") {
+    val name = appVersionName
+    val code = appVersionCode
+    val readmeFile = rootProject.file("README.md")
+    val readmeEnFile = rootProject.file("README_EN.md")
+    val changelogFile = rootProject.file("CHANGELOG.md")
+    val mainScreenFile = file("src/main/java/com/vpnautoswitch/module/ui/MainScreen.kt")
+    inputs.property("versionName", name)
+    inputs.property("versionCode", code)
+    doLast {
+        val problems = mutableListOf<String>()
+        fun text(f: File) = if (f.exists()) f.readText() else ""
+
+        listOf(readmeFile, readmeEnFile).forEach { f ->
+            val s = text(f)
+            if ("Release-$name" !in s) problems += "${f.name} 的版本徽章不是 Release-$name"
+            if ("VpnAutoSwitch-$name.apk" !in s) problems += "${f.name} 里的下载文件名不是 VpnAutoSwitch-$name.apk"
+        }
+        val changelogTop = text(changelogFile).lineSequence().firstOrNull { it.startsWith("## ") }
+        if (changelogTop == null || !changelogTop.startsWith("## $name")) {
+            problems += "CHANGELOG.md 首条是「${changelogTop ?: "（没有小节）"}」，应为 ## $name — 日期"
+        }
+        if ("\"$name：" !in text(mainScreenFile)) {
+            problems += "MainScreen.kt 的 CHANGELOG_TIPS 首条不是 \"$name：…\""
+        }
+
+        if (problems.isNotEmpty()) {
+            throw GradleException(
+                buildString {
+                    appendLine("版本 ${name}（$code）的文档没同步，先跑 ./bump-version.sh：")
+                    problems.forEach { appendLine("  · $it") }
+                }
+            )
+        }
+    }
+}
+
+tasks.matching { it.name == "assembleRelease" }.configureEach {
+    dependsOn(checkVersionDocs)
 }
 
 dependencies {

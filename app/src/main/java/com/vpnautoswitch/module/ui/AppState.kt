@@ -66,6 +66,11 @@ data class Diagnostics(
     val lastFailureStage: String = "",
     val lastFailurePackage: String = "",
     val lastFailureStreak: Int = 0,
+    /** 最近一次成功开启 / 关闭花了多久（毫秒），0 表示还没记录到 */
+    val lastOnMs: Long = 0L,
+    val lastOnAt: Long = 0L,
+    val lastOffMs: Long = 0L,
+    val lastOffAt: Long = 0L,
     val heartbeatFresh: Boolean = false,
     val moduleState: DiagnosticsPolicy.ModuleState = DiagnosticsPolicy.ModuleState.NEVER,
     /** 快捷磁贴暂停了自动联动 */
@@ -87,6 +92,7 @@ data class Diagnostics(
             }
             val runtime = readJson(cr, RuntimeDiagnostics.RUNTIME_KEY)
             val failure = readJson(cr, RuntimeDiagnostics.FAILURE_KEY)
+            val timing = readJson(cr, RuntimeDiagnostics.TIMING_KEY)
             val inspection = AppsRepository.inspectVpn(context, config.vpnPackage)
             return Diagnostics(
                 heartbeat = heartbeat,
@@ -121,6 +127,10 @@ data class Diagnostics(
                 lastFailureStage = failure?.optString("stage").orEmpty(),
                 lastFailurePackage = failure?.optString("vpnPackage").orEmpty(),
                 lastFailureStreak = failure?.optInt("failureStreak", 0) ?: 0,
+                lastOnMs = timing?.optLong("onMs", 0L) ?: 0L,
+                lastOnAt = timing?.optLong("onAt", 0L) ?: 0L,
+                lastOffMs = timing?.optLong("offMs", 0L) ?: 0L,
+                lastOffAt = timing?.optLong("offAt", 0L) ?: 0L,
                 heartbeatFresh = DiagnosticsPolicy.isHeartbeatFresh(heartbeat, now),
                 moduleState = DiagnosticsPolicy.moduleState(
                     heartbeat,
@@ -191,6 +201,13 @@ class AppState(private val context: Context) {
 
     var screen by mutableStateOf<Screen>(Screen.Main)
     var config by mutableStateOf(Config.load(context))
+        private set
+
+    /**
+     * 高级设置里三个折叠分组，默认只展开最常用的「关闭与断开」。
+     * 只影响界面，不写进配置——下次打开应用恢复成默认展开状态。
+     */
+    var advancedGroups by mutableStateOf(setOf(ADV_GROUP_CLOSE))
         private set
 
     var apps by mutableStateOf(emptyList<AppInfo>())
@@ -327,14 +344,19 @@ class AppState(private val context: Context) {
         mainHandler.postDelayed({ refreshDiagnostics() }, 500L)
     }
 
+    fun toggleAdvancedGroup(id: String) {
+        advancedGroups = if (id in advancedGroups) advancedGroups - id else advancedGroups + id
+    }
+
     fun loadApps(force: Boolean = false) {
         if (appsLoading) return
         if (apps.isNotEmpty() && !force) return
         appsLoading = true
         executor.execute {
-            val withIcons = AppsRepository.loadIcons(context, AppsRepository.loadLaunchable(context))
+            // 只装名称和包名：图标改成每行滚到眼前再取，几百个应用同时解码会把首帧拖慢
+            val list = AppsRepository.loadLaunchable(context)
             mainHandler.post {
-                apps = withIcons
+                apps = list
                 appsLoading = false
             }
         }
@@ -447,5 +469,10 @@ class AppState(private val context: Context) {
 
         /** 选择「打开时关闭 VPN」的应用 */
         const val MODE_OFF = 2
+
+        /** 高级设置三个折叠分组的 id，界面和默认展开状态都用它 */
+        const val ADV_GROUP_CLOSE = "close"
+        const val ADV_GROUP_COMPAT = "compat"
+        const val ADV_GROUP_HINTS = "hints"
     }
 }

@@ -15,6 +15,9 @@ internal object RuntimeDiagnostics {
     const val FAILURE_KEY = "vpn_autoswitch_last_failure"
     const val CLIENT_TEST_KEY = "vpn_autoswitch_client_test"
 
+    /** 最近一次开启 / 关闭花了多久，用来回答「为什么这次这么慢」 */
+    const val TIMING_KEY = "vpn_autoswitch_timing"
+
     private const val SCHEMA = 1
     private const val TAG = "VpnAutoSwitch"
 
@@ -50,6 +53,30 @@ internal object RuntimeDiagnostics {
             Settings.Secure.putString(ctx.contentResolver, FAILURE_KEY, json.toString())
         } catch (t: Throwable) {
             XposedBridge.log("[$TAG] failure snapshot failed: $t")
+        }
+    }
+
+    /**
+     * 记录最近一次「开启」或「关闭」的耗时。
+     *
+     * [kind] 取 "on" / "off"，读改写同一个 JSON，两个方向互不覆盖——
+     * 状态诊断里就能直接看到「上次开启 1.2 秒 / 上次关闭 0.7 秒」，
+     * 慢的时候不用再靠猜是客户端建隧道慢还是模块在重试。
+     */
+    fun publishTiming(ctx: Context, kind: String, costMs: Long) {
+        try {
+            val prev = try {
+                Settings.Secure.getString(ctx.contentResolver, TIMING_KEY)
+                    ?.let { JSONObject(it) }
+            } catch (t: Throwable) {
+                null
+            }
+            val json = prev ?: JSONObject().put("schema", SCHEMA)
+            json.put("${kind}Ms", costMs.coerceAtLeast(0L))
+            json.put("${kind}At", System.currentTimeMillis())
+            Settings.Secure.putString(ctx.contentResolver, TIMING_KEY, json.toString())
+        } catch (t: Throwable) {
+            XposedBridge.log("[$TAG] timing snapshot failed: $t")
         }
     }
 
