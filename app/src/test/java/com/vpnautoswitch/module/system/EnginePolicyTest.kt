@@ -590,4 +590,16 @@ class EnginePolicyTest {
         )
     }
 
+    @Test
+    fun `task removal for the app still in front is stale`() {
+        // 浏览器开新窗口时旧任务被清理：包名对，但应用还在前台
+        assertTrue(EnginePolicy.isStaleTaskRemoval("mark.via", "mark.via"))
+    }
+
+    @Test
+    fun `task removal after the launcher took over is real`() {
+        // 真划掉：桌面的 resume 事件已经到了，它不再是前台
+        assertFalse(EnginePolicy.isStaleTaskRemoval("mark.via", "com.android.launcher"))
+        assertFalse(EnginePolicy.isStaleTaskRemoval("mark.via", null))
+    }
 }

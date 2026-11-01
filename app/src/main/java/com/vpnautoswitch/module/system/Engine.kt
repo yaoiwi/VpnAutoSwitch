@@ -2,6 +2,7 @@ package com.vpnautoswitch.module.system
 
 import android.app.ActivityManager
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -221,6 +222,14 @@ internal object Engine {
     private const val DEATH_STALE_WINDOW_MS = 3_000L
 
     /**
+     * 「任务被移除」被判定成残留之后，隔多久复查一次。
+     *
+     * 用户真的划掉应用时，桌面的 resume 事件一般紧跟着 removeTask 回调，
+     * 这两秒足够它翻面；复查时它已经不在前台，就按正常退出处理。
+     */
+    private const val TASK_RECHECK_MS = 2_000L
+
+    /**
      * 刚连上就掉的补偿重试。
      *
      * 有的客户端先 establish 再因为「这次没连成」断开，隧道只活一秒左右。
@@ -438,6 +447,9 @@ internal object Engine {
 
     /** 最后一次强制停止客户端的时刻：刚停完不能立刻预热，否则等于把它拉回来 */
     private var lastForceStopAt = 0L
+
+    /** 刚被强停、还没在下一次连接时清掉 stopped 标记的包（只用于那条日志） */
+    private var lastForceStopPkg: String? = null
     private var reapplyCount = 0
     private var externalAttempts = 0
     private var clientTestToken = 0
@@ -469,6 +481,9 @@ internal object Engine {
 
     private var offToken = 0
     private var startToken = 0
+
+    /** 「任务被移除」判定成残留后排队的那次复查；换一个就作废上一个 */
+    private var taskRecheckToken = 0
 
     /**
      * 上一次「断开」发生的时刻（模块主动关，或检测到用户手动断开）。
@@ -568,7 +583,7 @@ internal object Engine {
         lastPrewarmAt = now
 
         log(ctx, "$pkg launching -> prewarm")
-        ensureVpn(ctx, cfg)
+        ensureVpn(ctx, cfg, pkg)
         // 点了又立刻退出时没人收尾，交给看门狗发现「没有目标存活」后再关
         startWatchdog()
     }
@@ -708,6 +723,13 @@ internal object Engine {
      * 彻底拿不到——这决定了「打开目标应用不动」到底是配置问题还是别的。
      */
     private fun warmupConfig(ctx: Context, attempt: Int) {
+        // 配置只能从 App 暴露的 provider 读，而 provider 通不通取决于 App 进程在不在。
+        // 开机那一刻它一定没起，系统会不会替我们去起它，各家 ROM 规矩不一样（自启动管理、
+        // 后台限制），最终表现就是「重启后必须先打开一次模块界面」。
+        // 与其干等，不如自己动手：调用方是 system_server，既不受后台启动限制，
+        // 也能启动非 exported 组件。
+        if (attempt == 0 || attempt == 3) kickAppProcess(ctx)
+
         val cfg = ConfigRepo.getOrNull(ctx)
         if (cfg != null) {
             when {
@@ -728,6 +750,33 @@ internal object Engine {
             return
         }
         handler.postDelayed({ warmupConfig(ctx, attempt + 1) }, CONFIG_WARMUP_INTERVAL_MS)
+    }
+
+    /**
+     * 主动把模块 App 的进程拉起来（只为一个空服务，不显示任何界面）。
+     *
+     * 拉起来之后 provider 就能查了，配置随即可用；同时 [ConfigRepo] 会把配置镜像写进
+     * Secure 设置，下次开机就算系统还不让起进程，也能直接用镜像。
+     */
+    private fun kickAppProcess(ctx: Context) {
+        val pkg = BuildConfig.APPLICATION_ID
+        try {
+            // 被强停过的包（stopped）连 startService 都会被拒，先清标记
+            Packages.unstop(pkg)
+            // 组件名要用类的全名（com.vpnautoswitch.module.*），不是 applicationId
+            val started = ctx.startService(
+                Intent().setComponent(
+                    ComponentName(pkg, com.vpnautoswitch.module.ConfigSyncService::class.java.name),
+                ),
+            )
+            log(
+                ctx,
+                if (started != null) "config: module app process requested"
+                else "config: 模块 App 的同步服务没找到，继续等 provider",
+            )
+        } catch (t: Throwable) {
+            log(ctx, "config: 拉不起模块 App 进程（$t），继续等 provider")
+        }
     }
 
     /**
@@ -1340,7 +1389,7 @@ internal object Engine {
 
         logForeground(ctx, pkg, freshOpen)
         if (isNetworkAllowed(cfg)) {
-            ensureVpn(ctx, cfg)
+            ensureVpn(ctx, cfg, pkg)
         } else {
             log(ctx, "network type disabled, skip enabling")
         }
@@ -1439,13 +1488,51 @@ internal object Engine {
             )
         ) return
 
+        // 任务刚被移除，可引擎里它还是前台应用 —— 移除的只能是同一应用的**另一条**任务记录：
+        // 浏览器每开一个窗口都会新建 task，旧的那条被系统清掉时同样回调 removeTask，
+        // 包名完全正确。照单全收的结果就是日志里那种「打开 → 两秒后 task removed → 关 VPN」
+        // 的循环，用户正在浏览，VPN 却一次次掉。
+        //
+        // 真划掉时桌面的 resume 事件一般紧跟着这个回调，所以这里先挂一笔，两秒后再看：
+        // 那时它已经不在前台，就按正常退出处理，整体只是晚了 2 秒。
+        if (EnginePolicy.isStaleTaskRemoval(pkg, lastForeground)) {
+            log(ctx, "$pkg -> task removed ignored（仍是前台应用，判定为残留任务记录）")
+            scheduleTaskRecheck(ctx, cfg, pkg)
+            return
+        }
+        log(ctx, "$pkg -> task removed")
+        applyTaskRemoval(ctx, cfg, pkg)
+    }
+
+    /** 残留任务记录的复查：两秒后该包仍不在前台，才按划掉处理 */
+    private fun scheduleTaskRecheck(ctx: Context, cfg: Config, pkg: String) {
+        val token = ++taskRecheckToken
+        handler.postDelayed({
+            if (token != taskRecheckToken) return@postDelayed
+            // 两秒过去它还在前台：确实是同一应用的另一条任务记录被清掉，什么都不做
+            if (lastForeground == pkg) return@postDelayed
+            if (!EnginePolicy.shouldHandleTaskRemoval(
+                    enabled = cfg.enabled,
+                    featureEnabled = cfg.disconnectOnTaskRemoved,
+                    paused = automationPaused,
+                    offAppForeground = offAppForeground != null,
+                    wifiSuppressed = wifiSuppressed,
+                    target = cfg.targets.contains(pkg),
+                    aliveTarget = aliveTargets.contains(pkg),
+                )
+            ) return@postDelayed
+            log(ctx, "$pkg -> task removed（复查确认已离开前台）")
+            applyTaskRemoval(ctx, ConfigRepo.get(ctx), pkg)
+        }, TASK_RECHECK_MS)
+    }
+
+    private fun applyTaskRemoval(ctx: Context, cfg: Config, pkg: String) {
         val wasForeground = lastForegroundTarget == pkg
         // 另一目标正停在前台时保留会话，避免把用户还在用的那个一起断掉
         val anotherInFront = EnginePolicy.anotherTargetInForeground(lastForeground, pkg, aliveTargets)
         aliveTargets.remove(pkg)
         if (lastForeground == pkg) lastForeground = null
         if (wasForeground) lastForegroundTarget = null
-        log(ctx, "$pkg -> task removed")
         // 划掉的正好是刚在用的那个，或者开着「划掉任意目标即断开」：其它目标只是挂在后台的进程，
         // 算这次会话结束。否则它们的存活会让 VPN 一直被拽住，划掉当前应用也不断开。
         if (EnginePolicy.shouldEndSessionOnLeave(
@@ -1563,7 +1650,12 @@ internal object Engine {
 
     // ---------------------------------------------------------------- VPN 控制
 
-    private fun ensureVpn(ctx: Context, cfg: Config) {
+    /**
+     * @param origin 触发这次开启意图的包名。只用于「关闭被取消」那条日志：
+     *   以前取 lastForeground，从桌面点开应用时那里记的是桌面，日志会写成
+     *   「off cancelled: com.android.launcher 回到前台」，看起来像被桌面打断了。
+     */
+    private fun ensureVpn(ctx: Context, cfg: Config, origin: String? = null) {
         // 有开启意图就说明现在要用了：先撤掉强停后那段「不许客户端自启」的窗口，
         // 否则下面重新启动 VpnService 会被自己的闸门挡掉
         ClientStartGuard.release()
@@ -1581,7 +1673,7 @@ internal object Engine {
             pendingPrewarm = null
             log(
                 ctx,
-                "off cancelled: ${lastForegroundTarget ?: lastForeground ?: "目标应用"} 回到前台，" +
+                "off cancelled: ${origin ?: lastForegroundTarget ?: lastForeground ?: "目标应用"} 回到前台，" +
                     "本轮不做关闭",
             )
         }
@@ -1743,7 +1835,16 @@ internal object Engine {
 
         // 已经确认这个客户端不响应 always-on：不再写常驻 VPN 设置（避免 unbind 干扰）
         if (externalMode != null) {
-            if (cfg.forceStopVpn) Packages.unstop(cfg.vpnPackage)
+            // 上一次关闭只要走过强停，这个包就处在 stopped 状态，系统会拒绝为它启动
+            // 任何组件——startForegroundService 直接返回 null（日志 start VPN service
+            // rejected）。以前只在开了「直接强制停止」时才清标记，于是普通用户这边
+            // 要等十几秒的延迟预热才恢复：日志 00:48:25 强停，00:48:38 才有隧道。
+            // 清标记本身是幂等的（Packages 内部有集合缓存），每次连接都做一次没有代价。
+            val unstopped = Packages.unstop(cfg.vpnPackage)
+            if (unstopped && lastForceStopPkg == cfg.vpnPackage) {
+                lastForceStopPkg = null
+                log(ctx, "cleared stopped state for ${cfg.vpnPackage} (after force stop)")
+            }
 
             if (!EnginePolicy.cooldownReady(now, lastApplyAt, EXTERNAL_ONLY_GUARD_MS)) return
             if (externalAttempts >= MAX_EXTERNAL_ATTEMPTS &&
@@ -1809,7 +1910,8 @@ internal object Engine {
         if (active && settingPointsToUs) {
             // 上一次关闭时如果强制停止过客户端，它会被系统标记成 stopped，
             // 之后 always-on 再怎么设置也不会 bind，先把这个标记清掉。
-            if (cfg.forceStopVpn && reapplyCount == 0) {
+            // 不看「直接强制停止」那个开关：verify 链走到最后一步一样会强停。
+            if (reapplyCount == 0) {
                 if (Packages.unstop(cfg.vpnPackage)) {
                     log(ctx, "cleared force-stop state for ${cfg.vpnPackage}")
                 }
@@ -1832,7 +1934,7 @@ internal object Engine {
         }
 
         // 全新接管前同样清一次 stopped 标记，否则可能写了设置也拉不起来
-        if (cfg.forceStopVpn) Packages.unstop(cfg.vpnPackage)
+        Packages.unstop(cfg.vpnPackage)
 
         val ok = VpnSwitcher.enable(ctx, cfg.vpnPackage, cfg.lockdown)
         lastApplyAt = now
@@ -2562,6 +2664,7 @@ internal object Engine {
             return
         }
         lastForceStopAt = SystemClock.elapsedRealtime()
+        lastForceStopPkg = expectedPackage
         // 这里**不要**立刻 unstop：stopped 标记会阻止系统再次 bind 它的 VpnService，
         // 正是我们想要的「关掉就真的关掉」。下次需要启动时 ensureVpn 会再清除。
         Packages.forget(expectedPackage)

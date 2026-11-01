@@ -119,6 +119,19 @@ internal object EnginePolicy {
     }
 
     /**
+     * 这条「任务被移除」是不是同一应用另一条任务记录的残留回调。
+     *
+     * 一条任务被移除之后，它不可能还停在前台。引擎里这个包仍是 lastForeground，
+     * 就说明被移除的是另一条 task：浏览器每开一个窗口都会新建 task，旧的那条被系统
+     * 清掉时同样回调 `removeTask(..., "remove-task")`，包名一点没错。
+     *
+     * 以前这种回调被当成「用户划掉了应用」，日志里就是「打开 → 两秒后 task removed
+     * → 关 VPN」反复循环。真划掉时桌面会紧接着 resume，所以调用方还会再做一次
+     * 延时复查，确认它确实离开了前台才真正处理。
+     */
+    fun isStaleTaskRemoval(pkg: String, lastForeground: String?): Boolean = lastForeground == pkg
+
+    /**
      * 离开的是不是「刚在用的那个」，并且还有别的目标挂在后台。
      *
      * 这种情况要结束整段会话：否则后台残留的进程会让 VPN 一直连着，

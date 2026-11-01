@@ -104,7 +104,11 @@ internal object ConfigRepo {
                 payload.toString(),
             )
             mirrored = json
+            // 这一行是「重启后必须打开一次模块」唯一的判断依据：
+            // 镜像写成功过，下次开机就该直接用它；没写成功，开机必然读不到配置。
+            ModuleLog.append(ctx, "config mirror saved (${json.length} chars)")
         } catch (t: Throwable) {
+            ModuleLog.append(ctx, "config mirror write failed: $t")
             XposedBridge.log("[$TAG] config mirror write failed: $t")
         }
     }
@@ -120,12 +124,20 @@ internal object ConfigRepo {
             val payload = JSONObject(raw)
             val savedAt = payload.optLong("at", 0L)
             if (!ConfigCachePolicy.isFresh(savedAt, System.currentTimeMillis())) {
+                ModuleLog.append(ctx, "config mirror expired, ignored")
                 XposedBridge.log("[$TAG] config mirror expired, ignored")
                 return null
             }
             val config = Config.parse(payload.optJSONObject("config")?.toString())
-            if (!ConfigCachePolicy.isUsable(config)) return null
+            if (!ConfigCachePolicy.isUsable(config)) {
+                ModuleLog.append(ctx, "config mirror unusable, ignored")
+                return null
+            }
             mirrored = config?.toJson()
+            ModuleLog.append(
+                ctx,
+                "config from mirror（写入于 ${(System.currentTimeMillis() - savedAt) / 60_000} 分钟前）",
+            )
             config
         } catch (t: Throwable) {
             XposedBridge.log("[$TAG] config mirror read failed: $t")

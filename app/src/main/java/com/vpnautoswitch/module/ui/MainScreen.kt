@@ -1680,6 +1680,10 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
+    "1.50.5：修「重启后必须先打开一次模块界面」——开机时模块会主动把 App 进程拉起来读配置，" +
+        "不再干等系统替我们起。顺带补了两个让「打开应用十几秒没网」的洞：强停客户端后没清 " +
+        "stopped 标记，系统一路拒绝启动；浏览器开新窗口时旧任务被清理，被当成「用户划掉了」。" +
+        "\n" +
     "1.50.4：修「用某个目标应用时，VPN 刚连上就被关掉」——系统处理进程死亡时还会顺手清理" +
         "上一轮的残留记录，这个回调带着正确的包名，被当成「应用刚打开就退出了」。Chrome 这类" +
         "多进程应用每次从被杀状态拉起都会命中，日志里表现为「打开」和「进程结束」挤在同一秒。" +

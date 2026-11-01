@@ -84,5 +84,13 @@
             android:authorities="${applicationId}.config"
             android:exported="true"
             android:grantUriPermissions="false" />
+
+        <!--
+            空服务：模块在开机时 startService 它，把本进程拉起来，好让上面的 provider 可查。
+            不导出，只有 system_server（同一进程发起的组件启动）能调。
+        -->
+        <service
+            android:name=".ConfigSyncService"
+            android:exported="false" />
     </application>
 </manifest>
