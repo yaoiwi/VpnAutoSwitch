@@ -36,10 +36,17 @@ class ModuleEntry : IXposedHookLoadPackage {
             "com.android.server.am.ActivityManagerService",
             "com.android.server.am.ProcessList",
         )
+        /**
+         * 只挂「进程真的死了」这两个入口。
+         *
+         * 以前还挂了 `cleanUpApplicationRecordLocked`，但它是 AMS 清理残留进程记录时
+         * 调用的内部方法：应用从被杀状态重新拉起、旧 ProcessRecord 被移除时也会走，
+         * 包名完全正确，看上去就像「应用刚打开就退出了」。Chrome 这类多进程应用每次
+         * 启动都会命中，导致 VPN 连上立刻被关（issue #6）。
+         */
         val DEATH_METHODS = arrayOf(
             "handleAppDiedLocked",
             "appDiedLocked",
-            "cleanUpApplicationRecordLocked",
         )
     }
 
@@ -149,7 +156,7 @@ class ModuleEntry : IXposedHookLoadPackage {
         val callback = object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 try {
-                    handleDeathArgs(param.args)
+                    handleDeathArgs(param.args, param.method?.name)
                 } catch (t: Throwable) {
                     XposedBridge.log(t)
                 }
@@ -167,7 +174,7 @@ class ModuleEntry : IXposedHookLoadPackage {
         return total
     }
 
-    private fun handleDeathArgs(args: Array<Any?>?) {
+    private fun handleDeathArgs(args: Array<Any?>?, methodName: String? = null) {
         if (args == null) return
         val record = args.firstOrNull {
             it != null && it.javaClass.name == "com.android.server.am.ProcessRecord"
@@ -176,7 +183,10 @@ class ModuleEntry : IXposedHookLoadPackage {
         val procName = ProcessRecords.processNameOf(record) ?: pkg
         // 只有主进程结束才算「应用被划掉」，避免 :push / :remote 子进程退出误判
         if (procName == pkg) {
-            Engine.onProcessDied(pkg)
+            // 带上方法与 pid：下次再出现「刚打开就报死亡」时，能直接看出是哪个回调、
+            // 死的是不是新进程，不用再靠时间戳反推
+            val detail = "${methodName ?: "unknown"}, pid=${ProcessRecords.pidOf(record)}"
+            Engine.onProcessDied(pkg, detail)
         }
     }
 

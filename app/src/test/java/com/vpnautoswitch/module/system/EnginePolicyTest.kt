@@ -533,4 +533,61 @@ class EnginePolicyTest {
             )
         )
     }
+    @Test
+    fun `process death right after foreground is treated as stale`() {
+        // Chrome 从被杀状态重新拉起时，AMS 会先清理上一轮残留记录，回调紧跟在 launch 之后
+        assertTrue(
+            EnginePolicy.isStaleProcessDeath(
+                pkg = "com.android.chrome",
+                lastForeground = "com.android.chrome",
+                lastForegroundAtMs = 10_000L,
+                now = 10_000L,
+                windowMs = 3_000L,
+            )
+        )
+        assertTrue(
+            EnginePolicy.isStaleProcessDeath(
+                pkg = "com.android.chrome",
+                lastForeground = "com.android.chrome",
+                lastForegroundAtMs = 10_000L,
+                now = 12_900L,
+                windowMs = 3_000L,
+            )
+        )
+    }
+
+    @Test
+    fun `process death long after foreground still counts`() {
+        // 用了半分钟再退出：这是真的离开，必须照常关闭
+        assertFalse(
+            EnginePolicy.isStaleProcessDeath(
+                pkg = "com.android.chrome",
+                lastForeground = "com.android.chrome",
+                lastForegroundAtMs = 10_000L,
+                now = 40_000L,
+                windowMs = 3_000L,
+            )
+        )
+        // 死的是别的包，不受这个窗口影响
+        assertFalse(
+            EnginePolicy.isStaleProcessDeath(
+                pkg = "com.android.chrome",
+                lastForeground = "com.twitter.android",
+                lastForegroundAtMs = 10_000L,
+                now = 10_500L,
+                windowMs = 3_000L,
+            )
+        )
+        // 还没见过前台事件
+        assertFalse(
+            EnginePolicy.isStaleProcessDeath(
+                pkg = "com.android.chrome",
+                lastForeground = "com.android.chrome",
+                lastForegroundAtMs = 0L,
+                now = 10_000L,
+                windowMs = 3_000L,
+            )
+        )
+    }
+
 }

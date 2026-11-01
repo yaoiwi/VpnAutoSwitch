@@ -61,4 +61,33 @@ internal object ProcessRecords {
             null
         }
     }
+
+    /**
+     * 进程 pid。只用于日志——判断“这是不是新进程”时，光看包名不够，得看 pid。
+     * 字段名在不同版本上叫 `pid` 或 `mPid`，两个都试。
+     */
+    fun pidOf(processRecord: Any): Int {
+        resolve()
+        for (name in PID_FIELDS) {
+            val field = pidFields[name] ?: try {
+                Class.forName("com.android.server.am.ProcessRecord", false, loader)
+                    .getDeclaredField(name)
+                    .apply { isAccessible = true }
+                    .also { pidFields[name] = it }
+            } catch (t: Throwable) {
+                null
+            }
+            if (field == null) continue
+            val pid = try {
+                field.get(processRecord) as? Int
+            } catch (t: Throwable) {
+                null
+            }
+            if (pid != null) return pid
+        }
+        return -1
+    }
+
+    private val PID_FIELDS = arrayOf("pid", "mPid")
+    private val pidFields = HashMap<String, Field>()
 }

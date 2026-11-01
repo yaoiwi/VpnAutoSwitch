@@ -97,6 +97,28 @@ internal object EnginePolicy {
     ): Boolean = foreground != null && foreground != leavingPackage && aliveTargets.contains(foreground)
 
     /**
+     * 这条「进程死亡」是不是上一轮进程的残留回调。
+     *
+     * AMS 处理死掉的进程时会先清理它的 ProcessRecord，应用重新启动时也可能再清一次；
+     * 这些回调都带着正确的包名，单看包名分不出「用户退了」和「旧记录被清掉」。
+     * 唯一可靠的区分是时间：刚 resume 过的应用，进程一定还活着。
+     *
+     * [lastForegroundAtMs] 为 0（本轮还没见过前台事件）时不作判断。
+     */
+    fun isStaleProcessDeath(
+        pkg: String,
+        lastForeground: String?,
+        lastForegroundAtMs: Long,
+        now: Long,
+        windowMs: Long,
+    ): Boolean {
+        if (lastForeground != pkg || lastForegroundAtMs <= 0L) return false
+        val since = now - lastForegroundAtMs
+        // since < 0 说明时钟被重置过（重启后 elapsedRealtime 变小），保守起见不拦
+        return since in 0..windowMs
+    }
+
+    /**
      * 离开的是不是「刚在用的那个」，并且还有别的目标挂在后台。
      *
      * 这种情况要结束整段会话：否则后台残留的进程会让 VPN 一直连着，

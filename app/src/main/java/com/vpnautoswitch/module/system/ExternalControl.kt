@@ -286,7 +286,9 @@ internal object ExternalControl {
         }
         if (resolved == null) {
             if (unsupported.add(pkg)) {
-                ModuleLog.append(ctx, "$pkg 没有 $suffix 入口，继续使用 always-on")
+                // 以前这里写的是「继续使用 always-on」，实际接下来走的是停 VpnService + 强停，
+                // 跟常驻设置没关系，排查时会被这句话带到错误方向上。
+                ModuleLog.append(ctx, "$pkg 没有 $suffix 入口，改用后面的手段关闭")
             }
             return false
         }

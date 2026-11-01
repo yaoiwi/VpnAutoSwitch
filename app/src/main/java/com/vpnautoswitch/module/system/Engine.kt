@@ -212,6 +212,15 @@ internal object Engine {
     private const val OFF_SLOW_MS = 1_500L
 
     /**
+     * 「刚回到前台」的保护窗口：这段时间内收到该包的进程死亡，一律当成上一轮进程的
+     * 残留回调，不关 VPN。
+     *
+     * 3 秒是按实测定的——真正的退出（划掉 / 按返回后进程被回收）不会在回到前台 3 秒内
+     * 发生；而 AMS 清理残留记录恰好紧跟在 startProcessLocked 之后，也就是 launch 那一刻。
+     */
+    private const val DEATH_STALE_WINDOW_MS = 3_000L
+
+    /**
      * 刚连上就掉的补偿重试。
      *
      * 有的客户端先 establish 再因为「这次没连成」断开，隧道只活一秒左右。
@@ -400,6 +409,15 @@ internal object Engine {
 
     /** 最近出现在前台的包：用来区分「重新打开应用」和「应用内部 resume」 */
     private var lastForeground: String? = null
+
+    /**
+     * 最近一次看到目标应用回到前台的时刻（elapsedRealtime）。
+     *
+     * 专门用来识别「滞后到达的进程死亡」：AMS 清理上一轮残留 ProcessRecord 时也会回调，
+     * 而这个回调带着正确的包名，很容易被当成「用户刚把应用退了」。Chrome 这种多进程应用
+     * 每次从被杀状态拉起都会走一遍，日志里表现为 launching 与 process died 同一秒。
+     */
+    private var lastForegroundSeenAt = 0L
     private var watchdogRunning = false
 
     /** 连接窗口里已经快轮询了几拍，连上就清零 */
@@ -474,7 +492,7 @@ internal object Engine {
     /** 初始化还没完成时按顺序缓存事件，避免先操作 VPN、随后又被 boot 清理掉 */
     private sealed interface PendingEvent {
         data class Foreground(val packageName: String) : PendingEvent
-        data class Died(val packageName: String) : PendingEvent
+        data class Died(val packageName: String, val detail: String? = null) : PendingEvent
         data class TaskRemoved(val packageName: String) : PendingEvent
     }
 
@@ -555,8 +573,12 @@ internal object Engine {
         startWatchdog()
     }
 
-    fun onProcessDied(packageName: String) {
-        handler.post { dispatchProcessDied(packageName) }
+    /**
+     * @param detail 触发这次回调的 AMS 方法与进程 pid，只写进日志，用来区分
+     *   「真的退出了」和「AMS 清理残留记录」。null 表示调用方没提供。
+     */
+    fun onProcessDied(packageName: String, detail: String? = null) {
+        handler.post { dispatchProcessDied(packageName, detail) }
     }
 
     fun onTaskRemoved(packageName: String) {
@@ -572,12 +594,12 @@ internal object Engine {
         publishRuntime(context())
     }
 
-    private fun dispatchProcessDied(packageName: String) {
+    private fun dispatchProcessDied(packageName: String, detail: String? = null) {
         if (!booted) {
-            enqueue(PendingEvent.Died(packageName))
+            enqueue(PendingEvent.Died(packageName, detail))
             return
         }
-        handleProcessDied(packageName)
+        handleProcessDied(packageName, detail)
         publishRuntime(context())
     }
 
@@ -599,7 +621,7 @@ internal object Engine {
         while (pendingEvents.isNotEmpty()) {
             when (val event = pendingEvents.removeFirst()) {
                 is PendingEvent.Foreground -> handleForeground(event.packageName)
-                is PendingEvent.Died -> handleProcessDied(event.packageName)
+                is PendingEvent.Died -> handleProcessDied(event.packageName, event.detail)
                 is PendingEvent.TaskRemoved -> handleTaskRemoved(event.packageName)
             }
         }
@@ -1299,6 +1321,9 @@ internal object Engine {
         offToken++
         aliveTargets.add(pkg)
         lastForegroundTarget = pkg
+        // 必须和 lastForegroundTarget 一起更新：切到桌面再回来时 lastForeground 会变成桌面，
+        // 若用它的时间戳，会把「用了很久后真的退出」误判成刚打开
+        lastForegroundSeenAt = SystemClock.elapsedRealtime()
 
         if (userOff) {
             if (!EnginePolicy.shouldResumeAfterUserOff(freshOpen)) {
@@ -1338,11 +1363,31 @@ internal object Engine {
         log(ctx, "$pkg -> foreground")
     }
 
-    private fun handleProcessDied(pkg: String) {
+    private fun handleProcessDied(pkg: String, detail: String? = null) {
         if (automationPaused) return
         if (pkg == offAppForeground) {
             offAppForeground = null
             log(context(), "$pkg (off trigger) exited")
+        }
+        // 刚回到前台的进程不可能已经退出。AMS 清理上一轮残留 ProcessRecord 时也会回调
+        // 这个入口，包名完全正确，只是死的是上一次的进程；Chrome 这类多进程应用每次
+        // 从被杀状态拉起都会走一遍，日志里就是 launching 和 process died 挤在同一秒。
+        // 以前直接把这种事件当成「用户退了」，VPN 刚连上就被关掉。
+        val ctx0 = context()
+        val now = SystemClock.elapsedRealtime()
+        if (EnginePolicy.isStaleProcessDeath(
+                pkg = pkg,
+                lastForeground = lastForegroundTarget,
+                lastForegroundAtMs = lastForegroundSeenAt,
+                now = now,
+                windowMs = DEATH_STALE_WINDOW_MS,
+            )
+        ) {
+            val since = (now - lastForegroundSeenAt).coerceAtLeast(0)
+            val extra = detail?.let { " / $it" } ?: ""
+            log(ctx0, "$pkg -> process died ignored（${since}ms 前刚回到前台，判定为残留记录$extra）")
+            // 不把它当成退出：进程还在，存活集合也不能动
+            return
         }
         val wasForeground = lastForegroundTarget == pkg
         // 别的目标还停在前台时不能收会话，否则正在用的那个会被一起断掉
@@ -1350,7 +1395,7 @@ internal object Engine {
         val removed = aliveTargets.remove(pkg)
         if (!removed) return
         val ctx = context()
-        log(ctx, "$pkg -> process died")
+        log(ctx, "$pkg -> process died${detail?.let { " ($it)" } ?: ""}")
         if (lastForeground == pkg) lastForeground = null
         if (wasForeground) lastForegroundTarget = null
         // 死的是刚才在用的那个，或者开着「划掉任意目标即断开」：其它目标只是挂在后台的残留进程，
