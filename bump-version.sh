@@ -5,6 +5,10 @@
 #   ./bump-version.sh --minor --note "新增：……"    加功能
 #   ./bump-version.sh --major                       不兼容的大改
 #   ./bump-version.sh --code                        版本名不变，只把 versionCode +1
+#   ./bump-version.sh --set 1.6.0 --note "……"       直接指定版本名（仅用于归位）
+#
+# 版本号规则：三段十进制，每段只能是 0-9，满 9 进位。
+#   1.6.9 --patch--> 1.7.0      1.6.9 --minor--> 1.7.0      1.9.9 --> 2.0.0
 #
 # 每次都会做的事：
 #   1. app/build.gradle.kts 的 appVersionCode +1（必做，LSPosed 靠它判断有没有新版本）
@@ -21,6 +25,7 @@ cd "$(dirname "$0")"
 
 PART=""
 NOTE=""
+SET_NAME=""
 NEW_SECTION=1
 
 while [[ $# -gt 0 ]]; do
@@ -29,6 +34,7 @@ while [[ $# -gt 0 ]]; do
         --minor) PART="minor" ;;
         --major) PART="major" ;;
         --code)  PART="code"; NEW_SECTION=0 ;;
+        --set)   PART="set"; SET_NAME="${2:-}"; shift ;;
         --note)  NOTE="${2:-}"; shift ;;
         -h|--help)
             sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
@@ -41,7 +47,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$PART" ]]; then
-    echo "请指定 --patch / --minor / --major / --code 之一" >&2
+    echo "请指定 --patch / --minor / --major / --code / --set 之一" >&2
     exit 1
 fi
 
@@ -51,11 +57,31 @@ NAME=$(grep -oP 'val appVersionName = "\K[0-9.]+' app/build.gradle.kts)
 IFS='.' read -r MAJOR MINOR PATCH <<< "$NAME"
 NEW_CODE=$((CODE + 1))
 
+# 每段只允许 0-9，满 9 就往前一位进位
 case "$PART" in
     code)  NEW_NAME="$NAME" ;;
-    patch) NEW_NAME="$MAJOR.$MINOR.$((PATCH + 1))" ;;
-    minor) NEW_NAME="$MAJOR.$((MINOR + 1)).0" ;;
-    major) NEW_NAME="$((MAJOR + 1)).0.0" ;;
+    patch)
+        P=$((PATCH + 1)); M=$MINOR; J=$MAJOR
+        if (( P > 9 )); then P=0; M=$((M + 1)); fi
+        if (( M > 9 )); then M=0; J=$((J + 1)); fi
+        NEW_NAME="$J.$M.$P" ;;
+    minor)
+        M=$((MINOR + 1)); P=0; J=$MAJOR
+        if (( M > 9 )); then M=0; J=$((J + 1)); fi
+        NEW_NAME="$J.$M.$P" ;;
+    major)
+        NEW_NAME="$((MAJOR + 1)).0.0" ;;
+    set)
+        if [[ ! "$SET_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "版本号格式应为 x.y.z：$SET_NAME" >&2
+            exit 1
+        fi
+        IFS='.' read -r SJ SM SP <<< "$SET_NAME"
+        if (( SJ > 9 || SM > 9 || SP > 9 )); then
+            echo "每段只能是 0-9：$SET_NAME（满 9 要进位）" >&2
+            exit 1
+        fi
+        NEW_NAME="$SET_NAME" ;;
 esac
 
 if [[ "$NEW_NAME" == "$NAME" && "$PART" == "code" ]]; then

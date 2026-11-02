@@ -78,7 +78,7 @@ object DiagnosticsPolicy {
         else -> rule
     }
 
-    /** 日志最后一条非空行，已经自带 HH:mm:ss 前缀 */
+    /** 日志最后一条非空行，已经自带 MM-dd HH:mm:ss 前缀 */
     fun lastEvent(log: String): String =
         log.lineSequence().lastOrNull { it.isNotBlank() }?.trim().orEmpty()
 

@@ -262,6 +262,17 @@ internal object EnginePolicy {
     fun broadcastWaitMs(isServiceMode: Boolean): Long = if (isServiceMode) 700L else 1_200L
 
     /**
+     * 连续这么多次发 STOP 广播都没反应，就别再等了。
+     *
+     * 等待窗口是 700~1200 毫秒，专门留给「会响应广播」的客户端。FlClash 改版这类只认
+     * VpnService 的客户端从来不响应，每次关闭都白等满一个窗口。跳过之后还有
+     * stopService / 磁贴 / 强停兜底，最坏情况只是多走一步，不会关不掉。
+     *
+     * 只统计「连着没反应」：中间成功过一次就清零（客户端可能升级了新行为）。
+     */
+    fun shouldSkipBroadcast(failures: Int, threshold: Int = 2): Boolean = failures >= threshold
+
+    /**
      * 是否处理“从最近任务划掉”。
      *
      * 只有目标应用、功能开启、没有暂停/关闭规则压制，并且这个包确实在存活集合里时才处理，

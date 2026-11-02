@@ -602,4 +602,19 @@ class EnginePolicyTest {
         assertFalse(EnginePolicy.isStaleTaskRemoval("mark.via", "com.android.launcher"))
         assertFalse(EnginePolicy.isStaleTaskRemoval("mark.via", null))
     }
+
+    @Test
+    fun `broadcast is retried once before it is skipped`() {
+        // 第一次失败仍要再试：偶发失败（客户端刚启动、recevier 还没注册好）不能当成永久无效
+        assertFalse(EnginePolicy.shouldSkipBroadcast(0))
+        assertFalse(EnginePolicy.shouldSkipBroadcast(1))
+        assertTrue(EnginePolicy.shouldSkipBroadcast(2))
+        assertTrue(EnginePolicy.shouldSkipBroadcast(9))
+    }
+
+    @Test
+    fun `broadcast skip threshold is configurable`() {
+        assertFalse(EnginePolicy.shouldSkipBroadcast(1, threshold = 3))
+        assertTrue(EnginePolicy.shouldSkipBroadcast(3, threshold = 3))
+    }
 }

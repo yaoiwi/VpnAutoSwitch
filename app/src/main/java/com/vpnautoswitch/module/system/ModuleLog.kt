@@ -19,10 +19,11 @@ internal object ModuleLog {
 
     const val KEY = "vpn_autoswitch_log"
 
-    private const val MAX_LINES = 300
+    private const val MAX_LINES = 500
     private const val FLUSH_DELAY_MS = 300L
 
-    private val format = SimpleDateFormat("HH:mm:ss", Locale.US)
+    // 带日期：跨天排障时只有 HH:mm:ss 无法对齐（用户贴日志常常跨了零点）
+    private val format = SimpleDateFormat("MM-dd HH:mm:ss", Locale.US)
     private val buffer = ArrayList<String>(MAX_LINES)
     private var loaded = false
     private var scheduled = false
