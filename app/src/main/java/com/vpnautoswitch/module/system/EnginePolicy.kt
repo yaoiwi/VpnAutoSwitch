@@ -132,6 +132,18 @@ internal object EnginePolicy {
     fun isStaleTaskRemoval(pkg: String, lastForeground: String?): Boolean = lastForeground == pkg
 
     /**
+     * 这条「任务被移除」是不是我们自己把客户端界面拉到前台造成的。
+     *
+     * [isStaleTaskRemoval] 只在「被移除的包仍是 lastForeground」时生效；而打开客户端界面后
+     * lastForeground 已经变成客户端包名，目标应用这条回调就一路畅通、直接把 VPN 关掉——
+     * 拉起客户端的动作反而成了断线原因。
+     *
+     * [uiShownAt] 是最近一次打开界面的时刻，0 表示这次会话里没打开过。
+     */
+    fun isUiInducedTaskRemoval(now: Long, uiShownAt: Long, windowMs: Long): Boolean =
+        uiShownAt != 0L && now - uiShownAt in 0..windowMs
+
+    /**
      * 离开的是不是「刚在用的那个」，并且还有别的目标挂在后台。
      *
      * 这种情况要结束整段会话：否则后台残留的进程会让 VPN 一直连着，

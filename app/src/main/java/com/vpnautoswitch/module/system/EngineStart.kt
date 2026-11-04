@@ -257,6 +257,8 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
         if (externalMode == "activity" && cfg.allowVpnUi &&
             ExternalControl.startWithUi(ctx, cfg.vpnPackage)
         ) {
+            uiShownAt = SystemClock.elapsedRealtime()
+            lastStartAt = now
             pendingExternalMode = "activity"
             log(ctx, "external-only: start via external control (remembered)")
         } else if (externalMode == "service" || externalAttempts <= 2) {
@@ -264,6 +266,8 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
             scheduleDelayedServiceStart(ctx, cfg)
         } else if (cfg.allowVpnUi && ExternalControl.startWithUi(ctx, cfg.vpnPackage)) {
             // 没有外部控制入口的客户端只能把界面拉到前台（FlClash 改版就属于这类）
+            uiShownAt = SystemClock.elapsedRealtime()
+            lastStartAt = now
             pendingExternalMode = "activity"
             log(ctx, "external-only: start via client UI (allowed in settings)")
         } else {
@@ -324,11 +328,16 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
     // 之前确认过这个客户端不响应 always-on → 直接按记住的方式启动
     if (ok) {
         when (ExternalControl.modeOf(ctx, cfg.vpnPackage)) {
-            "activity" -> if (ExternalControl.start(ctx, cfg.vpnPackage)) {
+            // activity 模式 = 这个客户端只能靠「把界面拉到前台」来触发连接（FlClash 改版）。
+            // 这里以前调的是 start()，它只会试 START_CLASH 再退到 startVpnService ——
+            // 界面一次都不会出现，日志里就只剩一串 attempt，客户端永远连不上。
+            "activity" -> if (ExternalControl.startWithUi(ctx, cfg.vpnPackage)) {
+                uiShownAt = SystemClock.elapsedRealtime()
+                lastStartAt = now
                 pendingExternalMode = "activity"
                 externalAttempts++
                 lastExternalAt = now
-                log(ctx, "known client: start via external control")
+                log(ctx, "known client: bring client UI forward")
             }
             "service" -> {
                 pendingExternalMode = "service"

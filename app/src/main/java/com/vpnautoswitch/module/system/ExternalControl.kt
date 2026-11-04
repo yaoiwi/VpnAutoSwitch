@@ -38,6 +38,12 @@ internal object ExternalControl {
     /** 查不到 VpnService 的包 → 探测失败的时刻（[SERVICE_PROBE_TTL_MS] 后重试） */
     private val noVpnService = HashMap<String, Long>()
 
+    /** 包 → 上次把它的界面拉到前台的时刻（节流用，[UI_REOPEN_GUARD_MS] 内不重拉） */
+    private val uiShownAt = HashMap<String, Long>()
+
+    /** 同一个客户端的界面在这个窗口内最多被拉一次 */
+    private const val UI_REOPEN_GUARD_MS = 20_000L
+
     /** 探测失败结果的保留时长：客户端升级 / 刚装好时 PackageManager 会短暂查不到 */
     private const val SERVICE_PROBE_TTL_MS = 60_000L
     private var cachedKnown: MutableSet<String>? = null
@@ -266,6 +272,11 @@ internal object ExternalControl {
      */
     fun openUi(ctx: Context, pkg: String): Boolean {
         if (pkg.isEmpty()) return false
+        // 重连是一轮一轮来的，每轮都把界面顶到最前面，用户会觉得这个应用被劫持了。
+        // 刚拉过一次就认为「已经在这条路上」，直接返回成功，让上层别再退回去启动服务。
+        val now = SystemClock.elapsedRealtime()
+        val shownAt = uiShownAt[pkg] ?: 0L
+        if (shownAt != 0L && now - shownAt < UI_REOPEN_GUARD_MS) return true
         val intent = try {
             ctx.packageManager.getLaunchIntentForPackage(pkg)
         } catch (t: Throwable) {
@@ -277,6 +288,8 @@ internal object ExternalControl {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
         return try {
             ctx.startActivity(intent)
+            uiShownAt[pkg] = now
+            ModuleLog.append(ctx, "brought $pkg UI to front")
             true
         } catch (t: Throwable) {
             ModuleLog.append(ctx, "open $pkg UI failed: $t")

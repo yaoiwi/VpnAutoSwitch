@@ -614,6 +614,17 @@ class EnginePolicyTest {
     }
 
     @Test
+    fun `task removal right after we opened the client UI is not the user leaving`() {
+        // 拉起 FlClash 界面把目标应用挤下去：包名对、也确实不在前台，但用户没走
+        assertTrue(EnginePolicy.isUiInducedTaskRemoval(now = 10_000, uiShownAt = 9_500, windowMs = 6_000))
+        // 窗口边界：刚好 6 秒还算，超过就不算了
+        assertTrue(EnginePolicy.isUiInducedTaskRemoval(now = 15_500, uiShownAt = 9_500, windowMs = 6_000))
+        assertFalse(EnginePolicy.isUiInducedTaskRemoval(now = 15_501, uiShownAt = 9_500, windowMs = 6_000))
+        // 这一轮从没打开过界面（uiShownAt=0）：行为和以前完全一致
+        assertFalse(EnginePolicy.isUiInducedTaskRemoval(now = 10_000, uiShownAt = 0L, windowMs = 6_000))
+    }
+
+    @Test
     fun `broadcast is retried once before it is skipped`() {
         // 第一次失败仍要再试：偶发失败（客户端刚启动、recevier 还没注册好）不能当成永久无效
         assertFalse(EnginePolicy.shouldSkipBroadcast(0))

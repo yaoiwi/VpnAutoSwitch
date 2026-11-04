@@ -227,6 +227,19 @@ internal object Engine {
     internal const val TASK_RECHECK_MS = 2_000L
 
     /**
+     * 「刚才那个 task removed 是我们自己造成的」的保护窗口。
+     *
+     * 没有外部控制入口的客户端（FlClash 改版）只能靠把界面拉到前台来触发它连接。
+     * 界面一起来，正在用的目标应用就被挤到后台，系统紧接着回调 removeTask ——
+     * 包名完全正确、也确实离开了前台，但用户根本没走。照单全收的结果就是
+     * 「VPN 连上 1 秒就被自己关掉」（日志 02:50:48 启动 → 02:50:49 task removed → 02:50:50 vpn OFF）。
+     *
+     * 6 秒覆盖「界面冷启动 + 用户看清楚再切回去」，而真人在这段时间里划掉目标应用的概率可以忽略；
+     * 真被误判也只是这一次不关，下次回到前台会重新拉起。
+     */
+    internal const val UI_TASK_REMOVAL_GUARD_MS = 6_000L
+
+    /**
      * 刚连上就掉的补偿重试。
      *
      * 有的客户端先 establish 再因为「这次没连成」断开，隧道只活一秒左右。
@@ -287,6 +300,14 @@ internal object Engine {
      * 结果变成每 900ms 重发一次、把客户端反复推倒。
      */
     internal var lastStartAt = 0L
+
+    /**
+     * 最近一次「我们自己把客户端界面拉到前台」的时刻（0 表示没做过）。
+     *
+     * 只给 [EnginePolicy.isUiInducedTaskRemoval] 用：界面顶掉目标应用之后那条
+     * removeTask 回调不能当成用户离开，否则拉起客户端的动作本身就会关掉 VPN。
+     */
+    internal var uiShownAt = 0L
 
     /**
      * 本轮关闭是否已经试过「让客户端自己停 VpnService」。

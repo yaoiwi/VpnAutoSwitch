@@ -219,6 +219,17 @@ internal fun Engine.handleTaskRemoved(pkg: String) {
         scheduleTaskRecheck(ctx, cfg, pkg)
         return
     }
+    // 刚把客户端界面拉到前台：目标应用是被我们挤下去的，不是用户离开。
+    // 这里不复查——界面会停在前面几秒，复查只会得到「它确实不在前台」而照样关掉。
+    if (EnginePolicy.isUiInducedTaskRemoval(
+            now = SystemClock.elapsedRealtime(),
+            uiShownAt = uiShownAt,
+            windowMs = UI_TASK_REMOVAL_GUARD_MS,
+        )
+    ) {
+        log(ctx, "$pkg -> task removed ignored（刚打开客户端界面，判定为被挤到后台）")
+        return
+    }
     log(ctx, "$pkg -> task removed")
     applyTaskRemoval(ctx, cfg, pkg)
 }
