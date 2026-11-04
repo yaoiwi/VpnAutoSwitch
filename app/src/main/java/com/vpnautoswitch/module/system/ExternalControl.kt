@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 
 /**
@@ -33,7 +34,12 @@ internal object ExternalControl {
 
     private val unsupportedStart = HashSet<String>()
     private val unsupportedStop = HashSet<String>()
-    private val noVpnService = HashSet<String>()
+
+    /** 查不到 VpnService 的包 → 探测失败的时刻（[SERVICE_PROBE_TTL_MS] 后重试） */
+    private val noVpnService = HashMap<String, Long>()
+
+    /** 探测失败结果的保留时长：客户端升级 / 刚装好时 PackageManager 会短暂查不到 */
+    private const val SERVICE_PROBE_TTL_MS = 60_000L
     private var cachedKnown: MutableSet<String>? = null
 
     /**
@@ -107,9 +113,23 @@ internal object ExternalControl {
      */
     /** 只启动它的 VpnService（完全没有界面） */
     fun startVpnService(ctx: Context, pkg: String): Boolean {
-        if (pkg.isEmpty() || pkg in noVpnService) return false
-        val service = findVpnService(ctx, pkg) ?: run {
-            noVpnService.add(pkg)
+        if (pkg.isEmpty()) return false
+        val now = SystemClock.elapsedRealtime()
+        // 探测失败的结果只保留一分钟：PackageManager 在客户端升级 / 刚装完时会短暂
+        // 查不到服务，缓存到进程死亡为止的话，之后就永远「启动」不起来了。
+        val probedAt = noVpnService[pkg]
+        if (probedAt != null && now - probedAt < SERVICE_PROBE_TTL_MS) return false
+        noVpnService.remove(pkg)
+
+        val service = findVpnService(ctx, pkg)
+        if (service == null) {
+            noVpnService[pkg] = now
+            // 必须留一条：否则日志里只有一串「restart VPN service (attempt N)」，
+            // 却没有任何 started，看不出启动请求根本没发出去
+            ModuleLog.append(
+                ctx,
+                "no VpnService in $pkg -> ${SERVICE_PROBE_TTL_MS / 1000} 秒内不再启动它",
+            )
             return false
         }
         return try {
@@ -125,7 +145,8 @@ internal object ExternalControl {
                 true
             }
         } catch (t: Throwable) {
-            noVpnService.add(pkg)
+            // 这里不写进 noVpnService：抛异常是这一次调用的问题（服务已在启动中、
+            // 权限瞬时不可用），不代表这个包里没有 VpnService，下次照样要试
             ModuleLog.append(ctx, "start VPN service failed: $t")
             false
         }

@@ -52,7 +52,6 @@ internal fun Engine.turnOff(reason: String) {
     connectedAt = 0L
     connectStartedAt = 0L
     flapRetries = 0
-    fastRetryDone = false
     initWaitLogged = false
     lastStartAt = 0L
     stopServiceTried = false

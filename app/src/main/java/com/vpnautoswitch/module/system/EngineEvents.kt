@@ -312,6 +312,9 @@ internal fun Engine.scheduleDelayedServiceStart(ctx: Context, cfg: Config) {
     handler.postDelayed({
         val current = ConfigRepo.get(ctx)
         val wifiOnActive = current.enabled && isWifiOnActive(current)
+        // 排队的这 250ms 里隧道可能已经通了（客户端自己恢复连接、或上一次启动终于生效）。
+        // 这时再发一次启动，v2rayNG 会把刚建好的核心推倒重建，表现就是「连上五秒又掉」。
+        val tunnelUp = hasVpnTransport(ctx)
         val allowed = EnginePolicy.shouldRunDelayedStart(
             token = token,
             currentToken = startToken,
@@ -324,46 +327,21 @@ internal fun Engine.scheduleDelayedServiceStart(ctx: Context, cfg: Config) {
             networkAllowed = isNetworkAllowed(current),
             hasAliveTarget = aliveTargets.isNotEmpty(),
             wifiOnActive = wifiOnActive,
+            hasTunnel = tunnelUp,
         )
         if (!allowed) {
-            log(ctx, "delayed service start cancelled (state changed)")
+            log(
+                ctx,
+                if (tunnelUp) {
+                    "delayed service start skipped: tunnel is already up"
+                } else {
+                    "delayed service start cancelled (state changed)"
+                },
+            )
             return@postDelayed
         }
         ExternalControl.startVpnService(ctx, scheduledPackage)
         // 原来等 600ms 是为了让 stopService 先落地；250ms 足够，用户感知上是半秒差距
     }, 250L)
-}
-
-/**
- * 启动后 [FAST_RETRY_MS] 还没有隧道，就再发一次启动请求。
- *
- * 日志里三次都是「第一次白启动、第二次才成」，而两次之间被 6 秒冷却隔开。
- * 这里绕过冷却补发一次：走不 stop 的 startVpnService，onStartCommand 幂等，
- * 不会打断已经在建的那条隧道；只补一次，避免和客户端互相拉扯。
- */
-internal fun Engine.scheduleFastRetry(ctx: Context, cfg: Config) {
-    if (fastRetryDone || cfg.vpnPackage.isEmpty()) return
-    fastRetryDone = true
-    val pkg = cfg.vpnPackage
-    handler.postDelayed({
-        val current = ConfigRepo.get(ctx)
-        // 期间状态变了就别补：用户关了模块、换了客户端、切到了「打开即关闭」的应用、
-        // 或者自己手动关了 VPN，都不该再把它拉起来
-        if (!current.enabled || current.vpnPackage != pkg) return@postDelayed
-        if (automationPaused || userOff || wifiSuppressed || offAppForeground != null) {
-            return@postDelayed
-        }
-        if (aliveTargets.isEmpty()) return@postDelayed
-        if (hasVpnTransport(ctx)) return@postDelayed
-        // 进程已经起来了就说明启动请求生效了，只是客户端还在建隧道（v2rayNG 要十秒左右）。
-        // 这时候再 startService 一次，客户端会当成第二次「连接」请求，隧道建起来又断。
-        if (isProcessAlive(ctx, pkg)) {
-            log(ctx, "fast retry skipped: client process is alive, still initializing")
-            return@postDelayed
-        }
-        ExternalControl.startVpnService(ctx, pkg)
-        lastApplyAt = SystemClock.elapsedRealtime()
-        log(ctx, "fast retry: no tunnel after ${FAST_RETRY_MS}ms, start service again")
-    }, FAST_RETRY_MS)
 }
 

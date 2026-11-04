@@ -61,6 +61,45 @@ internal object VpnSwitcher {
     }
 
     /**
+     * 接管一条已经建立、但不是模块拉起的隧道。
+     *
+     * 客户端自己恢复连接时（FlClash 改包版进程一起来就连、v2rayNG 开着「自动连接」），
+     * 系统里隧道是通的，模块的 `vpn_autoswitch_active` 却还是 0。后果有两个：
+     * 看门狗每 5 秒判一次「没接管」（日志里那一长串 reconcile），关闭时还会
+     * `disable skipped: not in takeover state`，`always_on_vpn_app` 留在原地，
+     * 停完 service 又被系统按常驻设置拉回来。
+     *
+     * 只补标记和原始设置，**不动 always-on**：这条隧道不是我们写设置建立的，
+     * 改设置反而会把它打断。
+     *
+     * @return 这次是否真的补了标记（已经接管过返回 false）
+     */
+    fun adopt(ctx: Context): Boolean {
+        val cr = ctx.contentResolver
+        if (isActive(cr)) return false
+        return try {
+            Settings.Secure.putString(
+                cr, KEY_ORIGINAL_APP,
+                Settings.Secure.getString(cr, KEY_ALWAYS_ON_APP)
+            )
+            Settings.Secure.putInt(
+                cr, KEY_ORIGINAL_LOCKDOWN,
+                Settings.Secure.getInt(cr, KEY_ALWAYS_ON_LOCKDOWN, 0)
+            )
+            Settings.Secure.putInt(cr, KEY_ACTIVE, 1)
+            ModuleLog.append(
+                ctx,
+                "takeover adopted an existing tunnel, original always_on=" +
+                    "${Settings.Secure.getString(cr, KEY_ORIGINAL_APP)}"
+            )
+            true
+        } catch (t: Throwable) {
+            ModuleLog.append(ctx, "takeover adopt failed: $t")
+            false
+        }
+    }
+
+    /**
      * 打开 VPN：把常驻 VPN 应用设为 [vpnPackage]。
      * @return 是否成功
      */

@@ -362,6 +362,7 @@ internal object EnginePolicy {
         networkAllowed: Boolean,
         hasAliveTarget: Boolean,
         wifiOnActive: Boolean,
+        hasTunnel: Boolean = false,
     ): Boolean =
         token == currentToken &&
             enabled &&
@@ -371,7 +372,10 @@ internal object EnginePolicy {
             !userOff &&
             !wifiSuppressed &&
             networkAllowed &&
-            (hasAliveTarget || wifiOnActive)
+            (hasAliveTarget || wifiOnActive) &&
+            // 排队的这几百毫秒里隧道可能已经通了：这时再发一次启动，客户端会把刚建好的
+            // 隧道推倒重建（日志 02:00:31 连上、02:00:36 掉就是这么来的）
+            !hasTunnel
 
     fun shouldRunDelayedOff(
         token: Int,

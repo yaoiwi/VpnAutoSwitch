@@ -257,6 +257,14 @@ class EnginePolicyTest {
     }
 
     @Test
+    fun `delayed start is dropped once the tunnel is already up`() {
+        // 排队的 250ms 里隧道通了：再发一次启动会让客户端把刚建好的隧道推倒重建
+        assertFalse(delayedStart(hasTunnel = true))
+        // 隧道没通、其它条件都正常，照旧放行
+        assertTrue(delayedStart(hasTunnel = false))
+    }
+
+    @Test
     fun `delayed off is cancelled by token target or wifi on`() {
         assertTrue(EnginePolicy.shouldRunDelayedOff(1, 1, false, false))
         assertFalse(EnginePolicy.shouldRunDelayedOff(1, 2, false, false))
@@ -284,6 +292,7 @@ class EnginePolicyTest {
         networkAllowed: Boolean = true,
         hasAliveTarget: Boolean = true,
         wifiOnActive: Boolean = false,
+        hasTunnel: Boolean = false,
     ): Boolean = EnginePolicy.shouldRunDelayedStart(
         token = token,
         currentToken = currentToken,
@@ -296,6 +305,7 @@ class EnginePolicyTest {
         networkAllowed = networkAllowed,
         hasAliveTarget = hasAliveTarget,
         wifiOnActive = wifiOnActive,
+        hasTunnel = hasTunnel,
     )
 
     @Test

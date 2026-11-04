@@ -152,6 +152,12 @@ internal object Engine {
      * [EXTERNAL_INIT_GRACE_MS] 管：进程活着就一直等，进程没了才重发。
      * 冷却再压 6 秒就是重复保护，白白把重发往后推（日志里 15:14:41 冷却到点
      * 却因为宽限还在，又干等 4 秒）。3 秒足够防止抖动，也不和宽限打架。
+     *
+     * 这 3 秒同时是**唯一**的重发节奏。以前另有一个 1.8 秒的独立补发定时器，它比
+     * 客户端进程本身的启动还早：`isProcessAlive` 那时必然读到「还没起来」，于是每次
+     * 都判定「启动没生效」再补一刀。日志 02:00:37 → 02:00:39 → 02:00:43 六秒里发了
+     * 三次启动，而 v2rayNG 每次 onStartCommand 都会把正在建的隧道推倒重建，
+     * 表现就是「连上五秒又掉」。那条补发链已经删掉，重发只走这里。
      */
     internal const val EXTERNAL_ONLY_GUARD_MS = 3_000L
 
@@ -169,15 +175,6 @@ internal object Engine {
      * 4 秒：给正常慢启动留 2 秒余量，又不让白等拖住重发。
      */
     internal const val EXTERNAL_INIT_GRACE_MS = 4_000L
-
-    /**
-     * 首次启动后多久还没看到隧道就补发一次启动。
-     *
-     * 6 秒的外部控制冷却是为了「别把慢启动的客户端打断」，但第一次明明没成也要干等满 6 秒，
-     * 用户感知就是「点开应用要等七八秒才有网」。1.8 秒补发一次（只补一次，走不 stop 的
-     * startVpnService，onStartCommand 幂等），冷却仍然留给真正没反应的情况。
-     */
-    internal const val FAST_RETRY_MS = 1_800L
 
     /** 同一个应用的 foreground 日志在这个窗口内最多记一条：应用内部换页会刷出一堆没信息量的行 */
     internal const val FOREGROUND_LOG_MS = 30_000L
@@ -278,9 +275,6 @@ internal object Engine {
         // 日志合并写入跟着工作线程走，不额外起线程
         ModuleLog.attach(handler)
     }
-
-    /** 这一轮连接是否已经补发过一次启动 */
-    internal var fastRetryDone = false
 
     /** 「客户端还在初始化，先不重复启动」这一轮是否已经记过日志（看门狗 900ms 一拍，别刷屏） */
     internal var initWaitLogged = false

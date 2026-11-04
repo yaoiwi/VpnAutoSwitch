@@ -67,6 +67,10 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
     val connected = hasVpnTransport(ctx)
 
     if (connected) {
+        // 隧道通了，但不是模块这一轮写的设置（客户端自恢复、用户手动连上）。
+        // 不补接管标记的话，看门狗会一直判「没接管」，关闭时还会跳过 disable，
+        // 把 always_on_vpn_app 留在原地，下次停完 service 又被系统拉回来。
+        val adopted = VpnSwitcher.adopt(ctx)
         // 已经连上了，说明用户「保持关闭」的意图已经结束（例如他自己又手动连上了）
         userOff = false
         val nowUp = SystemClock.elapsedRealtime()
@@ -82,7 +86,7 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
             RuntimeDiagnostics.publishTiming(ctx, "on", cost)
         }
         // 设置仍指向我们，说明这轮是模块接管的，看门狗可以负责关掉它
-        if (active || settingPointsToUs) autoSession = true
+        if (active || settingPointsToUs || adopted) autoSession = true
         if (failureStreak > 0) log(ctx, "vpn connected (after $failureStreak failed attempts)")
         // 只有「确实靠外部手段连上」才记录，always-on 能连上的客户端不该被误判
         pendingExternalMode?.let { mode ->
@@ -110,7 +114,6 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
         tileAttempts = 0
         reapplyCount = 0
         externalAttempts = 0
-        fastRetryDone = false
         initWaitLogged = false
         lastStartAt = 0L
         wasConnected = true
@@ -201,8 +204,7 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
     // 否则「打开应用多久有网」会把这半秒的等待也算进去
     if (connectStartedAt == 0L) {
         connectStartedAt = now
-        // 新的一轮连接，补发资格重置
-        fastRetryDone = false
+        // 新的一轮连接：启动宽限和「已提示过等待」的节流都从这一刻重新算
         initWaitLogged = false
         lastStartAt = 0L
     }
@@ -260,7 +262,6 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
         } else if (externalMode == "service" || externalAttempts <= 2) {
             log(ctx, "external-only: restart VPN service without UI (attempt $externalAttempts)")
             scheduleDelayedServiceStart(ctx, cfg)
-            scheduleFastRetry(ctx, cfg)
         } else if (cfg.allowVpnUi && ExternalControl.start(ctx, cfg.vpnPackage)) {
             pendingExternalMode = "activity"
             log(ctx, "external-only: start via client UI (allowed in settings)")
@@ -332,6 +333,10 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
                 pendingExternalMode = "service"
                 externalAttempts++
                 lastExternalAt = now
+                // 宽限期按「这次启动」算：不盖这个戳，下一拍进外部控制分支时
+                // sinceStart 会拿 0 去减，宽限直接失效，900ms 后就再发一次启动，
+                // 把刚开始建的隧道推倒（和 02:00:37→02:00:43 那轮是同一个病）
+                lastStartAt = now
                 log(ctx, "known client: start VPN service (no ui)")
                 scheduleDelayedServiceStart(ctx, cfg)
             }

@@ -117,7 +117,9 @@ internal fun Engine.watchdogTick() {
         scheduleOff(ctx, "watchdog")
         watchdogRunning = false
     } else {
-        if (!active && !ExternalControl.isKnown(ctx, cfg.vpnPackage)) {
+        // 只有「隧道确实没通、也没接管」才值得记一行：接管标记还没补上的那一两拍里，
+        // 隧道其实已经通了，写成「vpn is off」会把人带偏（一口气刷三十条也是这么来的）
+        if (!active && !ExternalControl.isKnown(ctx, cfg.vpnPackage) && !hasVpnTransport(ctx)) {
             log(ctx, "reconcile: vpn is off but target alive -> enable")
         }
         ensureVpn(ctx, cfg)
