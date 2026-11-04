@@ -2,6 +2,17 @@
 
 应用内「关于 → 更新日志」只显示最近 3 条，完整历史留在这里。
 
+## 1.6.3 — 2026-11-05
+
+修 FlClash 被误记成 `activity` 模式，以及「打开应用要等 50 秒才有网」。
+
+日志 03:11:35 打开 Twitter，03:12:28 才连通，中间 43 秒全在等冷却：13 秒（`REAPPLY_GUARD_MS=12s`）+ 15 秒 + 15 秒（`EXTERNAL_COOLDOWN_MS=20s`）。
+
+- **模式不再记错**：`tryExternalStart` 以前一律写 `pendingExternalMode = "activity"`，但 `start()` 在 `START_CLASH` 失败后会退回启动 VpnService。日志 03:12:23 只启动了服务、03:12:28 却记下 `external mode 'activity' works`，于是下一轮跑去弹它界面。新增 `ExternalControl.startMode()` 回报实际走通的方式，`service` 就记 `service`。
+- **`activity` 模式先试不弹界面的路**：先 `START_CLASH`，再 `VpnService`，都失败才打开界面。以前一进这个分支就 `startWithUi`，等于每轮都把客户端顶到前台。
+- **重连阶梯缩短**：`REAPPLY_GUARD_MS` 12→6 秒、`EXTERNAL_COOLDOWN_MS` 20→8 秒、`TILE_COOLDOWN_MS` 30→12 秒。重复打断客户端这件事现在由 4 秒的进程宽限负责，冷却只需要防止无意义重复。
+- **文案修正**：`没有 action.START_CLASH 入口，改用后面的手段关闭` 在**启动**路径上也会出现，改成「改用备用方式」。
+
 ## 1.6.2 — 2026-11-05
 
 修复 FlClash 这类「没有外部控制入口」的客户端连不上，以及拉起界面之后 VPN 反被自己关掉。

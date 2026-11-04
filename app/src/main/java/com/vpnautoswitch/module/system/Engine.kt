@@ -110,12 +110,16 @@ internal object Engine {
      * 重写 always-on 设置会先清空再写回，等于让系统 unbind + rebind 一次 VpnService。
      * 客户端（尤其 Clash 系）建立隧道要好几秒，写得太频繁会一直打断它，
      * 表现就是「connected 永远 false，偶尔才成功」——所以这里给足冷却时间。
+     *
+     * 12 秒是按「写完只能干等」定的；现在每次启动之后都有 [EXTERNAL_INIT_GRACE_MS]
+     * 的进程宽限挡着，重复打断已经由宽限负责，冷却再压 12 秒就只是白等。
+     * 日志 03:11:40 → 03:11:53 那 13 秒空窗就是它。
      */
-    internal const val REAPPLY_GUARD_MS = 12_000L
+    internal const val REAPPLY_GUARD_MS = 6_000L
     internal const val REAPPLY_SLOW_MS = 60_000L
     internal const val MAX_FAST_REAPPLY = 4
     internal const val TILE_AFTER_REAPPLY = 1
-    internal const val TILE_COOLDOWN_MS = 30_000L
+    internal const val TILE_COOLDOWN_MS = 12_000L
     internal const val MAX_TILE_ATTEMPTS = 3
 
     /**
@@ -141,8 +145,15 @@ internal object Engine {
      */
     internal const val PREWARM_CHECK_MS = 7_000L
 
-    /** 客户端不响应 always-on 时，改用它的外部控制入口（START_CLASH / STOP_CLASH） */
-    internal const val EXTERNAL_COOLDOWN_MS = 20_000L
+    /**
+     * 客户端不响应 always-on 时，改用它的外部控制入口（START_CLASH / STOP_CLASH）。
+     *
+     * 20 秒的来历是「给客户端留足建隧道的时间」，但这段时间现在由进程宽限
+     * （[EXTERNAL_INIT_GRACE_MS]：进程活着就一直等、进程没了才重发）精确控制，
+     * 冷却只需要防止无意义的重复请求。日志 03:11:53 → 03:12:08 → 03:12:23
+     * 两次 15 秒的空等就是这么来的。
+     */
+    internal const val EXTERNAL_COOLDOWN_MS = 8_000L
     internal const val MAX_EXTERNAL_ATTEMPTS = 3
 
     /**

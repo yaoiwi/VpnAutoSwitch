@@ -306,6 +306,21 @@ internal object ExternalControl {
         return openUi(ctx, pkg)
     }
 
+    /**
+     * 同 [start]，但回报**实际走通的那条路**。
+     *
+     * 以前调用方一律把成功记成 "activity"，可 [start] 在 `START_CLASH` 失败后会退回
+     * 直接启动 VpnService —— 那和界面没有任何关系。FlClash 就是这么被记错的：
+     * 日志 03:12:23 只启动了服务、03:12:28 却写下 `external mode 'activity' works`，
+     * 下一次进到 activity 分支就跑去弹它的界面。
+     *
+     * @return "activity"（客户端导出的外部控制入口）/ "service"（直接启动 VpnService）/ null
+     */
+    fun startMode(ctx: Context, pkg: String): String? {
+        if (launch(ctx, pkg, "action.START_CLASH", unsupportedStart)) return "activity"
+        return if (startVpnService(ctx, pkg)) "service" else null
+    }
+
     /** 找出包里声明了 BIND_VPN_SERVICE 的服务（VpnService 实现） */
     private fun findVpnService(ctx: Context, pkg: String): String? = try {
         val info = ctx.packageManager.getPackageInfo(pkg, PackageManager.GET_SERVICES)
@@ -356,9 +371,9 @@ internal object ExternalControl {
         }
         if (resolved == null) {
             if (unsupported.add(pkg)) {
-                // 以前这里写的是「继续使用 always-on」，实际接下来走的是停 VpnService + 强停，
-                // 跟常驻设置没关系，排查时会被这句话带到错误方向上。
-                ModuleLog.append(ctx, "$pkg 没有 $suffix 入口，改用后面的手段关闭")
+                // 同一个入口 start / stop 都会查，所以文案不能写死「关闭」——
+                // 启动路径上出现「改用后面的手段关闭」会把人带到反方向。
+                ModuleLog.append(ctx, "$pkg 没有 $suffix 入口，改用备用方式")
             }
             return false
         }

@@ -208,17 +208,18 @@ class EnginePolicyTest {
 
     @Test
     fun `reapply switches to slow interval at configured count`() {
-        assertEquals(12_000L, EnginePolicy.reapplyInterval(0))
-        assertEquals(12_000L, EnginePolicy.reapplyInterval(3))
+        assertEquals(6_000L, EnginePolicy.reapplyInterval(0))
+        assertEquals(6_000L, EnginePolicy.reapplyInterval(3))
         assertEquals(60_000L, EnginePolicy.reapplyInterval(4))
     }
 
     @Test
-    fun `first reapply only waits for the client to build the tunnel`() {
-        assertEquals(6_000L, EnginePolicy.reapplyInterval(0, firstMs = 6_000L))
-        assertEquals(12_000L, EnginePolicy.reapplyInterval(1, firstMs = 6_000L))
-        assertEquals(12_000L, EnginePolicy.reapplyInterval(3, firstMs = 6_000L))
-        assertEquals(60_000L, EnginePolicy.reapplyInterval(4, firstMs = 6_000L))
+    fun `first reapply uses its own interval, later ones the fast one`() {
+        // 首次重写要等客户端把隧道建起来；之后再重写只需防止无意义重复
+        assertEquals(4_000L, EnginePolicy.reapplyInterval(0, fastMs = 6_000L, firstMs = 4_000L))
+        assertEquals(6_000L, EnginePolicy.reapplyInterval(1, fastMs = 6_000L, firstMs = 4_000L))
+        assertEquals(6_000L, EnginePolicy.reapplyInterval(3, fastMs = 6_000L, firstMs = 4_000L))
+        assertEquals(60_000L, EnginePolicy.reapplyInterval(4, fastMs = 6_000L, firstMs = 4_000L))
     }
 
     @Test

@@ -320,7 +320,7 @@ internal object EnginePolicy {
     fun reapplyInterval(
         reapplyCount: Int,
         maxFastReapply: Int = 4,
-        fastMs: Long = 12_000L,
+        fastMs: Long = 6_000L,
         slowMs: Long = 60_000L,
         firstMs: Long = fastMs,
     ): Long = when {

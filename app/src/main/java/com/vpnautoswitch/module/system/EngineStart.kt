@@ -328,16 +328,25 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
     // 之前确认过这个客户端不响应 always-on → 直接按记住的方式启动
     if (ok) {
         when (ExternalControl.modeOf(ctx, cfg.vpnPackage)) {
-            // activity 模式 = 这个客户端只能靠「把界面拉到前台」来触发连接（FlClash 改版）。
-            // 这里以前调的是 start()，它只会试 START_CLASH 再退到 startVpnService ——
-            // 界面一次都不会出现，日志里就只剩一串 attempt，客户端永远连不上。
-            "activity" -> if (ExternalControl.startWithUi(ctx, cfg.vpnPackage)) {
-                uiShownAt = SystemClock.elapsedRealtime()
-                lastStartAt = now
-                pendingExternalMode = "activity"
-                externalAttempts++
-                lastExternalAt = now
-                log(ctx, "known client: bring client UI forward")
+            // 记住的方式（START_CLASH 或直接启动服务）先试一遍，都不成才拉界面。
+            // 这里以前直接 startWithUi：日志 03:12:23 明明只是服务启动成功的，
+            // 却被记成 activity，于是每轮重连都去弹一次客户端界面。
+            "activity" -> {
+                val mode = ExternalControl.startMode(ctx, cfg.vpnPackage)
+                if (mode != null) {
+                    pendingExternalMode = mode
+                    externalAttempts++
+                    lastExternalAt = now
+                    lastStartAt = now
+                    log(ctx, "known client: start via $mode")
+                } else if (cfg.allowVpnUi && ExternalControl.openUi(ctx, cfg.vpnPackage)) {
+                    uiShownAt = SystemClock.elapsedRealtime()
+                    lastStartAt = now
+                    pendingExternalMode = "activity"
+                    externalAttempts++
+                    lastExternalAt = now
+                    log(ctx, "known client: bring client UI forward")
+                }
             }
             "service" -> {
                 pendingExternalMode = "service"
@@ -366,14 +375,18 @@ internal fun Engine.tryExternalStart(ctx: Context, cfg: Config, now: Long): Bool
     // 先给 always-on 一次机会，别一上来就拉 Activity
     if (reapplyCount < 1) return false
 
-    if (!ExternalControl.start(ctx, cfg.vpnPackage)) {
+    // 记「实际走通的方式」而不是一律 activity：FlClash 没有 START_CLASH，
+    // 这条路径实际只是启动了 VpnService（日志 03:12:23 → 03:12:28 就是这么连上的），
+    // 记错之后下一轮会去弹它的界面。
+    val mode = ExternalControl.startMode(ctx, cfg.vpnPackage)
+    if (mode == null) {
         externalAttempts = MAX_EXTERNAL_ATTEMPTS
         return false
     }
     externalAttempts++
     lastExternalAt = now
-    pendingExternalMode = "activity"
-    log(ctx, "always-on did not connect -> external control START")
+    pendingExternalMode = mode
+    log(ctx, "always-on did not connect -> external control START (via $mode)")
     return true
 }
 
