@@ -255,14 +255,15 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
         externalAttempts++
 
         if (externalMode == "activity" && cfg.allowVpnUi &&
-            ExternalControl.start(ctx, cfg.vpnPackage)
+            ExternalControl.startWithUi(ctx, cfg.vpnPackage)
         ) {
             pendingExternalMode = "activity"
             log(ctx, "external-only: start via external control (remembered)")
         } else if (externalMode == "service" || externalAttempts <= 2) {
             log(ctx, "external-only: restart VPN service without UI (attempt $externalAttempts)")
             scheduleDelayedServiceStart(ctx, cfg)
-        } else if (cfg.allowVpnUi && ExternalControl.start(ctx, cfg.vpnPackage)) {
+        } else if (cfg.allowVpnUi && ExternalControl.startWithUi(ctx, cfg.vpnPackage)) {
+            // 没有外部控制入口的客户端只能把界面拉到前台（FlClash 改版就属于这类）
             pendingExternalMode = "activity"
             log(ctx, "external-only: start via client UI (allowed in settings)")
         } else {

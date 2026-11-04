@@ -257,6 +257,42 @@ internal object ExternalControl {
         return startVpnService(ctx, pkg)
     }
 
+    /**
+     * 把客户端界面拉到前台，让它自己连。
+     *
+     * 这是「允许短暂打开 VPN 客户端界面」真正的兜底。以前那条路径调的还是 [start]：
+     * 没有 START_CLASH 入口的客户端（FlClash 改版这类）会被当成「再启动一次服务」，
+     * 界面一次都没出来过，最后只留一句「无法在后台拉起」。日志看着像试过了，其实没有。
+     */
+    fun openUi(ctx: Context, pkg: String): Boolean {
+        if (pkg.isEmpty()) return false
+        val intent = try {
+            ctx.packageManager.getLaunchIntentForPackage(pkg)
+        } catch (t: Throwable) {
+            null
+        } ?: run {
+            ModuleLog.append(ctx, "$pkg 没有可启动的界面")
+            return false
+        }
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        return try {
+            ctx.startActivity(intent)
+            true
+        } catch (t: Throwable) {
+            ModuleLog.append(ctx, "open $pkg UI failed: $t")
+            false
+        }
+    }
+
+    /**
+     * 用「看得见」的方式拉起客户端：先试官方外部控制入口（不弹界面），
+     * 没有再打开应用界面。只在用户允许短暂打开界面时才该走这条路。
+     */
+    fun startWithUi(ctx: Context, pkg: String): Boolean {
+        if (launch(ctx, pkg, "action.START_CLASH", unsupportedStart)) return true
+        return openUi(ctx, pkg)
+    }
+
     /** 找出包里声明了 BIND_VPN_SERVICE 的服务（VpnService 实现） */
     private fun findVpnService(ctx: Context, pkg: String): String? = try {
         val info = ctx.packageManager.getPackageInfo(pkg, PackageManager.GET_SERVICES)
