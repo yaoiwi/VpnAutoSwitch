@@ -79,7 +79,12 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
         if (firstUp) connectedAt = nowUp
         // 连稳了才清掉抖动重试的计数：否则「连上—掉—连上—掉」会一直重连下去。
         // 「稳」的门槛要比抖动窗口长，否则窗口内的掉落永远算不完次数。
-        if (nowUp - connectedAt >= EnginePolicy.STABLE_CONNECTION_MS) flapRetries = 0
+        if (nowUp - connectedAt >= EnginePolicy.STABLE_CONNECTION_MS) {
+            flapRetries = 0
+            // 掉线补偿计数同理：只有「稳稳连了一段」才认为客户端是正常的，
+            // 否则「连上—掉—连上—掉」会被反复救，变成耗电循环
+            clientDropRetries = 0
+        }
         // 从「开始动手」到「看到隧道」，就是用户感知的「打开应用多久有网」。
         // 刚连上就掉的抖动这里也会记一次，随后的重连会覆盖成真实值。
         if (connectStartedAt != 0L) {
@@ -98,6 +103,13 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
         // 只有「确实靠外部手段连上」才记录，always-on 能连上的客户端不该被误判
         pendingExternalMode?.let { mode ->
             ExternalControl.remember(ctx, cfg.vpnPackage, mode)
+            // 靠界面才连上，说明这一轮的静默启动白试了。连续两轮都这样就不再浪费那几秒
+            // 初始化宽限，下一轮直接开界面；改用静默又连上了的，把计数清掉。
+            if (mode == "activity") {
+                ExternalControl.noteSilentFail(ctx, cfg.vpnPackage)
+            } else {
+                ExternalControl.clearSilentFails(ctx, cfg.vpnPackage)
+            }
             log(ctx, "external mode '$mode' works for ${cfg.vpnPackage}, remembered")
         }
         pendingExternalMode = null
@@ -170,6 +182,39 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
                     "($flapRetries/$MAX_FLAP_RETRIES)",
             )
             // 看门狗继续跑，下一拍就会重新发起连接
+            return
+        }
+
+        // 用了一会儿才掉，而且目标应用正开着、客户端进程也还活着：这更像客户端自己断流或
+        // 后台重连失败，不是用户要关。以前一律按「用户断开」处理，用户正看着视频呢，
+        // 得退出应用再重进才有网。这里自动补两次，补不上再认账。
+        val clientAlive = isProcessAlive(ctx, cfg.vpnPackage)
+        if (
+            EnginePolicy.isClientDrop(
+                clientAlive = clientAlive,
+                // 用户在客户端里点断开的那一刻，前台是客户端而不是目标应用，
+                // 所以这条判据不会把他刚关掉的又拉回来
+                targetForeground = lastForeground in aliveTargets,
+                connectedForMs = connectedFor,
+                retries = clientDropRetries,
+                maxRetries = MAX_CLIENT_DROP_RETRIES,
+            )
+        ) {
+            clientDropRetries++
+            externalAttempts = 0
+            // 和抖动重试一样绕开 6 秒冷却，几百毫秒后就能重新发起
+            lastApplyAt = EnginePolicy.rewindForRetry(
+                now = now,
+                lastApplyAt = lastApplyAt,
+                cooldownMs = EXTERNAL_ONLY_GUARD_MS,
+                retryMs = FLAP_RETRY_MS,
+            )
+            log(
+                ctx,
+                "vpn dropped after ${connectedFor}ms but ${cfg.vpnPackage} is still alive " +
+                    "and the target is in front -> reconnect " +
+                    "($clientDropRetries/$MAX_CLIENT_DROP_RETRIES)",
+            )
             return
         }
 
@@ -268,7 +313,12 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
         // 这么中招的：它的 startVpnService 一启动就能连（03:28:40 → 03:28:44），
         // 界面根本不需要——用户看到的却是「点了下磁贴，FlClash 自己跳出来了」，
         // 界面还会停在前台，把正在用的应用挤到后台。
-        if (externalMode == "service" || externalAttempts <= 2) {
+        // 这个客户端连着两轮都只能靠界面连上：静默那两次注定白等（每次 4 秒初始化宽限），
+        // 直接开界面。关掉「允许短暂打开客户端界面」时仍归静默，这里不能替用户做决定。
+        val skipSilent =
+            cfg.allowVpnUi &&
+                ExternalControl.silentFails(ctx, cfg.vpnPackage) >= ExternalControl.SILENT_FAIL_LIMIT
+        if (externalMode == "service" || (!skipSilent && externalAttempts <= SILENT_START_ATTEMPTS)) {
             pendingExternalMode = "service"
             log(ctx, "external-only: restart VPN service without UI (attempt $externalAttempts)")
             scheduleDelayedServiceStart(ctx, cfg)
@@ -276,6 +326,13 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
             // 两次静默都没连上，才按「外部控制入口 → 服务 → 界面」的顺序兜底。
             // 回来的值决定记什么：只有真的开了界面才记 activity，否则下一轮
             // 又会因为这条错误记录去弹界面。
+            if (skipSilent) {
+                log(
+                    ctx,
+                    "external-only: 连续 ${ExternalControl.SILENT_FAIL_LIMIT} 轮只能靠界面，" +
+                        "跳过静默直接开界面",
+                )
+            }
             val scheme = ExternalControl.startModeWithUi(ctx, cfg.vpnPackage)
             if (scheme == null) {
                 log(ctx, "external-only: 无法在后台拉起 ${cfg.vpnPackage}，请在客户端里手动连接一次")

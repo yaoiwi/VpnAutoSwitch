@@ -84,8 +84,81 @@ class EnginePolicyTest {
     }
 
     @Test
-    fun `flap retry skips the long cooldown`() {
-        val now = 100_000L
+    fun `a client that dies while the target is in front is reconnected, not treated as user off`() {
+        // 用了几分钟才掉，客户端进程还在，目标应用就在前台：
+        // 用户不可能正在看视频时跑去客户端点断开，这就是客户端自己断流
+        assertTrue(
+            EnginePolicy.isClientDrop(
+                clientAlive = true,
+                targetForeground = true,
+                connectedForMs = 180_000,
+                retries = 0,
+                maxRetries = 2,
+            )
+        )
+        assertTrue(
+            EnginePolicy.isClientDrop(
+                clientAlive = true,
+                targetForeground = true,
+                connectedForMs = 6_000,
+                retries = 1,
+                maxRetries = 2,
+            )
+        )
+        // 用户在客户端里点断开的那一刻，前台是客户端而不是目标应用 —— 不能把他的关闭又拉回来
+        assertFalse(
+            EnginePolicy.isClientDrop(
+                clientAlive = true,
+                targetForeground = false,
+                connectedForMs = 180_000,
+                retries = 0,
+                maxRetries = 2,
+            )
+        )
+        // 客户端进程没了：更像是用户强杀或崩溃，维持「保持关闭」
+        assertFalse(
+            EnginePolicy.isClientDrop(
+                clientAlive = false,
+                targetForeground = true,
+                connectedForMs = 180_000,
+                retries = 0,
+                maxRetries = 2,
+            )
+        )
+        // 抖动窗口内的掉落归 isStartupFlap 管，这里不接管
+        assertFalse(
+            EnginePolicy.isClientDrop(
+                clientAlive = true,
+                targetForeground = true,
+                connectedForMs = 1_000,
+                retries = 0,
+                maxRetries = 2,
+            )
+        )
+        // 已经救过两次：再拉就是耗电循环
+        assertFalse(
+            EnginePolicy.isClientDrop(
+                clientAlive = true,
+                targetForeground = true,
+                connectedForMs = 180_000,
+                retries = 2,
+                maxRetries = 2,
+            )
+        )
+        // 不知道这轮连了多久（connectedAt 丢过）：保守起见不当作客户端掉线
+        assertFalse(
+            EnginePolicy.isClientDrop(
+                clientAlive = true,
+                targetForeground = true,
+                connectedForMs = Long.MAX_VALUE,
+                retries = 0,
+                maxRetries = 2,
+            )
+        )
+    }
+
+    @Test
+    fun `flap retry skips the long cooldown`() {        val now = 100_000L
         // 刚动过手：正常要等满 6 秒冷却，补偿重试只需 250ms
         val rewound = EnginePolicy.rewindForRetry(now, now, 6_000L, 250L)
         assertFalse(EnginePolicy.cooldownReady(now, rewound, 6_000L))

@@ -261,6 +261,23 @@ internal object Engine {
     internal const val MAX_FLAP_RETRIES = 2
 
     /**
+     * 客户端自己掉线（进程还活着、目标应用还在前台）时的自动恢复次数。
+     *
+     * 只救两次：真断了两次还没稳住，多半是网络本身有问题，继续拉只会变成
+     * 「一直重连、一直掉」的耗电循环，还给用户一种模块在跟他抢控制权的感觉。
+     */
+    internal const val MAX_CLIENT_DROP_RETRIES = 2
+
+    /**
+     * 走界面兜底之前，先给静默启动几次机会。
+     *
+     * FlClash 这类客户端的 VpnService 一启就能连（03:28:40 → 03:28:44），
+     * 界面根本不需要；而只能靠界面的客户端，静默每次都要白等一个初始化宽限。
+     * 所以次数由 [ExternalControl.silentFails] 记的历史动态决定，这里是上限。
+     */
+    internal const val SILENT_START_ATTEMPTS = 2
+
+    /**
      * 强制停止后隧道可能还要一会儿才消失：分批复查，仍连着就再停一次。
      *
      * 以前是 2s、4s、6s（乘 attempt），一次没关干净就要 10 秒以上，用户体感就是
@@ -498,6 +515,9 @@ internal object Engine {
 
     /** 刚连上就掉的补偿重试次数；稳定连上后清零 */
     internal var flapRetries = 0
+
+    /** 客户端自己掉线后的自动恢复次数；连上后清零，见 [MAX_CLIENT_DROP_RETRIES] */
+    internal var clientDropRetries = 0
 
     internal var offToken = 0
     internal var startToken = 0
@@ -909,6 +929,9 @@ internal object Engine {
             if (mode == "activity") "正在请求客户端外部控制…" else "正在启动 VpnService…",
         )
         ExternalControl.resetProbe(pkg)
+        // 用户手动测过一次，之前的「静默起不来」记录可能已经过时（换了节点、升级了客户端），
+        // 清掉让下一轮重新从静默开始试
+        ExternalControl.clearSilentFails(ctx, pkg)
         log(ctx, "client test start: $pkg / $mode")
 
         val started = if (mode == "activity") {

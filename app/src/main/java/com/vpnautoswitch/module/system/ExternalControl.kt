@@ -88,6 +88,63 @@ internal object ExternalControl {
         noVpnService.remove(pkg)
     }
 
+    /**
+     * 连续「静默启动没救回来、只能靠界面」的轮数。
+     *
+     * 1.6.5 起每次连接都先给静默两次机会，对服务起不来的客户端等于每轮白等
+     * 两次初始化宽限（约 6~9 秒才看到界面）。连着两轮都只能靠界面，说明它的
+     * VpnService 就是不会自己建隧道，下一轮直接开界面。
+     */
+    private const val SILENT_FAIL_KEY = "vpn_autoswitch_silent_fails"
+
+    /** 连续这么多轮只能靠界面，就不再先试静默 */
+    const val SILENT_FAIL_LIMIT = 2
+
+    fun silentFails(ctx: Context, pkg: String): Int {
+        if (pkg.isEmpty()) return 0
+        return readSilentFails(ctx)[pkg] ?: 0
+    }
+
+    fun noteSilentFail(ctx: Context, pkg: String) {
+        if (pkg.isEmpty()) return
+        val map = readSilentFails(ctx)
+        map[pkg] = (map[pkg] ?: 0) + 1
+        saveSilentFails(ctx, map)
+    }
+
+    /** 有一次静默就把它连上了，说明之前的记录已经过时（客户端升级、换了节点等） */
+    fun clearSilentFails(ctx: Context, pkg: String) {
+        if (pkg.isEmpty()) return
+        val map = readSilentFails(ctx)
+        if (map.remove(pkg) == null) return
+        saveSilentFails(ctx, map)
+    }
+
+    private fun readSilentFails(ctx: Context): MutableMap<String, Int> {
+        val map = HashMap<String, Int>()
+        try {
+            Settings.Secure.getString(ctx.contentResolver, SILENT_FAIL_KEY)
+                ?.split(',')
+                ?.forEach { entry ->
+                    val pkg = entry.substringBefore('=', "").trim()
+                    val count = entry.substringAfter('=', "").trim().toIntOrNull()
+                    if (pkg.isNotEmpty() && count != null && count > 0) map[pkg] = count
+                }
+        } catch (t: Throwable) {
+            // 读不到就当没记过：最多再多等一轮
+        }
+        return map
+    }
+
+    private fun saveSilentFails(ctx: Context, map: Map<String, Int>) {
+        try {
+            val text = map.entries.joinToString(",") { "${it.key}=${it.value}" }
+            Settings.Secure.putString(ctx.contentResolver, SILENT_FAIL_KEY, text)
+        } catch (t: Throwable) {
+            // 同上：只影响下一轮是否要重试静默
+        }
+    }
+
     private fun saveKnown(ctx: Context, set: MutableSet<String>) {
         try {
             Settings.Secure.putString(ctx.contentResolver, KEY, set.joinToString(","))

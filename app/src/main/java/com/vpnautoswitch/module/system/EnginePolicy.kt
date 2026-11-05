@@ -62,6 +62,33 @@ internal object EnginePolicy {
     ): Boolean = connectedForMs >= 0 && connectedForMs < windowMs && retries < maxRetries
 
     /**
+     * 隧道断掉时，判断这更像「客户端自己掉线」还是「用户要关闭」。
+     *
+     * 原来只看「连了多久」：超过抖动窗口就一律当成用户手动断开，`userOff` 一挂上就不再重连，
+     * 用户明明正开着目标应用，却要退出去再重进才有网。
+     *
+     * 这里的判据只取最保守的一条：**目标应用此刻就在前台**，客户端进程也还活着。
+     * 用户要手动关，得先切到 VPN 客户端去点断开，那一刻前台是客户端、不是目标应用，
+     * 所以不会误判成「客户端掉线」而把他刚关掉的又拉回来。
+     *
+     * @param connectedForMs 这一轮隧道活了多久；[Long.MAX_VALUE] 表示不知道何时连上的
+     */
+    fun isClientDrop(
+        clientAlive: Boolean,
+        targetForeground: Boolean,
+        connectedForMs: Long,
+        retries: Int,
+        maxRetries: Int,
+        windowMs: Long = TARGET_FLAP_MS,
+    ): Boolean =
+        clientAlive &&
+            targetForeground &&
+            // 抖动窗口内的掉落归 [isStartupFlap] 管，这里只接「用了一会儿才掉」
+            connectedForMs >= windowMs &&
+            connectedForMs != Long.MAX_VALUE &&
+            retries < maxRetries
+
+    /**
      * 补偿重试要绕开正常冷却：把「上次动手时刻」往前挪到只剩 [retryMs] 冷却的位置。
      *
      * 外部控制模式的冷却有 6 秒，抖动一次就要再等 6 秒才轮到下一次尝试，
