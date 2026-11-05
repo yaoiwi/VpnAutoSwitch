@@ -261,22 +261,30 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
         lastStartAt = now
         externalAttempts++
 
-        if (externalMode == "activity" && cfg.allowVpnUi &&
-            ExternalControl.startWithUi(ctx, cfg.vpnPackage)
-        ) {
-            uiShownAt = SystemClock.elapsedRealtime()
-            lastStartAt = now
-            pendingExternalMode = "activity"
-            log(ctx, "external-only: start via external control (remembered)")
-        } else if (externalMode == "service" || externalAttempts <= 2) {
+        // 顺序很关键：先静默启动两次，静默确实起不来才考虑把界面拉到前台。
+        //
+        // 以前 externalMode == "activity" 排在最前面，于是被记成「要开界面」的客户端
+        // 每一次恢复自动化（包括点快捷磁贴恢复）都会立刻弹一次界面。FlClash 就是
+        // 这么中招的：它的 startVpnService 一启动就能连（03:28:40 → 03:28:44），
+        // 界面根本不需要——用户看到的却是「点了下磁贴，FlClash 自己跳出来了」，
+        // 界面还会停在前台，把正在用的应用挤到后台。
+        if (externalMode == "service" || externalAttempts <= 2) {
+            pendingExternalMode = "service"
             log(ctx, "external-only: restart VPN service without UI (attempt $externalAttempts)")
             scheduleDelayedServiceStart(ctx, cfg)
-        } else if (cfg.allowVpnUi && ExternalControl.startWithUi(ctx, cfg.vpnPackage)) {
-            // 没有外部控制入口的客户端只能把界面拉到前台（FlClash 改版就属于这类）
-            uiShownAt = SystemClock.elapsedRealtime()
-            lastStartAt = now
-            pendingExternalMode = "activity"
-            log(ctx, "external-only: start via client UI (allowed in settings)")
+        } else if (cfg.allowVpnUi) {
+            // 两次静默都没连上，才按「外部控制入口 → 服务 → 界面」的顺序兜底。
+            // 回来的值决定记什么：只有真的开了界面才记 activity，否则下一轮
+            // 又会因为这条错误记录去弹界面。
+            val scheme = ExternalControl.startModeWithUi(ctx, cfg.vpnPackage)
+            if (scheme == null) {
+                log(ctx, "external-only: 无法在后台拉起 ${cfg.vpnPackage}，请在客户端里手动连接一次")
+            } else {
+                if (scheme == "ui") uiShownAt = SystemClock.elapsedRealtime()
+                lastStartAt = now
+                pendingExternalMode = if (scheme == "ui") "activity" else scheme
+                log(ctx, "external-only: start via $scheme (silent attempts used up)")
+            }
         } else {
             log(
                 ctx,

@@ -299,11 +299,24 @@ internal object ExternalControl {
 
     /**
      * 用「看得见」的方式拉起客户端：先试官方外部控制入口（不弹界面），
-     * 没有再打开应用界面。只在用户允许短暂打开界面时才该走这条路。
+     * 再试直接启动 VpnService，都起不来才打开应用界面。
+     * 只在用户允许短暂打开界面时才该走这条路。
      */
-    fun startWithUi(ctx: Context, pkg: String): Boolean {
-        if (launch(ctx, pkg, "action.START_CLASH", unsupportedStart)) return true
-        return openUi(ctx, pkg)
+    fun startWithUi(ctx: Context, pkg: String): Boolean = startModeWithUi(ctx, pkg) != null
+
+    /**
+     * 同 [startWithUi]，但回报**实际走通的那条路**。
+     *
+     * 以前这里是「START_CLASH 失败就开界面」，中间那一步 `startVpnService` 被跳过了。
+     * FlClash 改版没有 START_CLASH，服务却一启动就能连上（日志 03:28:40 启动、
+     * 03:28:44 隧道通），于是每次都被当成「只能靠界面」，把它的界面一次一次拉到前台。
+     *
+     * @return "activity"（外部控制入口）/ "service"（VpnService）/ "ui"（界面）/ null
+     */
+    fun startModeWithUi(ctx: Context, pkg: String): String? {
+        if (launch(ctx, pkg, "action.START_CLASH", unsupportedStart)) return "activity"
+        if (startVpnService(ctx, pkg)) return "service"
+        return if (openUi(ctx, pkg)) "ui" else null
     }
 
     /**
