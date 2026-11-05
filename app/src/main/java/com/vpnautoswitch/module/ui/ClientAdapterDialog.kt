@@ -15,7 +15,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,8 +74,15 @@ internal fun ClientAdapterDialog(state: AppState, onDismiss: () -> Unit) {
     val pkg = state.config.vpnPackage
     val inspection = remember(pkg) { AppsRepository.inspectVpn(context, pkg) }
     val test = state.clientTest?.takeIf { it.packageName == pkg }
-    val remembered = remember(pkg, test?.at) {
+    // 清除记忆后要立刻刷新显示：固定值存在 Settings.Secure 里，不重建 remember 就还是旧值
+    var refreshKey by remember { mutableStateOf(0) }
+    val remembered = remember(pkg, test?.at, refreshKey) {
         if (pkg.isEmpty()) null else ExternalControl.modeOfFresh(context, pkg)
+    }
+    // 手动测过的那次会固定下来，自动连接不再改写；界面上要说清楚，否则
+    // 用户会以为「记住的方式」还会自己变
+    val pinned = remember(pkg, test?.at, refreshKey) {
+        if (pkg.isEmpty()) null else ExternalControl.pinnedMode(context, pkg)
     }
 
     LaunchedEffect(Unit) { state.refreshClientTest() }
@@ -137,7 +147,7 @@ internal fun ClientAdapterDialog(state: AppState, onDismiss: () -> Unit) {
                         inspection?.hasQuickTile,
                     )
                     InfoRow(
-                        "当前记忆方式",
+                        if (pinned != null) "当前方式（手动固定）" else "当前记忆方式",
                         remembered?.let { modeLabel(it) } ?: "未记忆",
                     )
                     Spacer(modifier = Modifier.height(8.dp))
@@ -195,7 +205,10 @@ internal fun ClientAdapterDialog(state: AppState, onDismiss: () -> Unit) {
             ) {
                 TextButton(
                     text = "清除记忆",
-                    onClick = { state.forgetClientMode() },
+                    onClick = {
+                        state.forgetClientMode()
+                        refreshKey++
+                    },
                 )
                 TextButton(text = "关闭", onClick = onDismiss)
             }
@@ -209,7 +222,8 @@ internal fun ClientAdapterDialog(state: AppState, onDismiss: () -> Unit) {
             }
             if (hasService || hasExternal) {
                 Text(
-                    text = "提示：测试成功后会记住该方式，实际连接优先使用它；always-on 不在这里测试，避免改写当前常驻 VPN。",
+                    text = "提示：测试成功后会把该方式固定下来，自动连接不再改写；" +
+                        "想重新跟随自动判断，点「清除记忆」。always-on 不在这里测试，避免改写当前常驻 VPN。",
                     fontSize = 11.sp,
                     lineHeight = 15.sp,
                     color = colors.onSurfaceVariantSummary,

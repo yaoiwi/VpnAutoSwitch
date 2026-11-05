@@ -264,7 +264,33 @@ internal object VpnSwitcher {
      * @param packageName null 表示清空（断开）
      */
     private fun applyAlwaysOn(ctx: Context, packageName: String?, lockdown: Boolean): Boolean {
-        // 1) 系统 API：和「设置 → VPN → 始终开启的 VPN」完全相同的调用
+        // 0) Android 11+ 的正主：VpnManager.setAlwaysOnVpnPackageForUser。
+        //    ConnectivityManager 上那个同名方法从 API 30 起就不再是入口了，反射会
+        //    一路失败落到「直接写 Settings.Secure」——那条路在新系统上只是把键写进去，
+        //    VpnManagerService 不会真的去 bind，表现就是 enable 返回 true、VPN 却没连。
+        run {
+            try {
+                val vm = ctx.getSystemService("vpn_management")
+                if (vm != null) {
+                    val method = vm.javaClass.getMethod(
+                        "setAlwaysOnVpnPackageForUser",
+                        Int::class.javaPrimitiveType,
+                        String::class.java,
+                        Boolean::class.javaPrimitiveType,
+                        List::class.java
+                    )
+                    val result = method.invoke(
+                        vm, currentUserId(), packageName, lockdown, emptyList<String>()
+                    )
+                    if (result is Boolean && result) return true
+                    XposedBridge.log("[$TAG] VpnManager.setAlwaysOnVpnPackageForUser returned $result")
+                }
+            } catch (t: Throwable) {
+                XposedBridge.log("[$TAG] VpnManager api unavailable: $t")
+            }
+        }
+
+        // 1) 旧系统：和「设置 → VPN → 始终开启的 VPN」完全相同的调用
         try {
             val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE)
             val method = cm.javaClass.getMethod(

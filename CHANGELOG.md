@@ -30,6 +30,30 @@ attempt 2。原因是取消条件里的 `hasAliveTarget`：launching 那几百�
   前台了，不该因为拿不到进程号就取消。`userOff`、`wifiSuppressed`、隧道已通这些真正的终止
   条件照旧生效。
 
+### 开机后第一次打不开 VPN
+
+`force-stop` 之后包处于 stopped 状态，`startForegroundService` 照样返回一个 ComponentName，
+系统却不会真的把服务拉起来。清标记原来只写在「写 always-on」那条路上，比静默启动晚十几秒：
+开机后第一次打开目标应用，三次 `started VPN service` 全是空炮，一直要等客户端被手动打开一次。
+
+- **启动服务前先 `Packages.unstop`**（`startVpnService` / `prewarm` 各一次）。被 stopped
+  拒绝的 `bindService` 同理，预热也一起修了。
+- **always-on 改用 `VpnManager.setAlwaysOnVpnPackageForUser`**。原来反射的是
+  `ConnectivityManager` 上的同名方法，API 30 起那个入口就废弃了，一路失败落到「直接写
+  Settings.Secure」——键写进去了，`VpnManagerService` 不会去 bind，于是 `enable` 返回 true、
+  `pointsToUs` / `connected` 还是 false。现在 Android 11+ 走正主，旧系统才退回原路径。
+
+### 客户端适配：手动测试过的方式不再被改写
+
+自动记忆每次连上都会覆盖：这轮靠外部控制连上记 `activity`，下一轮靠服务连上就变成 `service`，
+用户测试出来的选择活不过一次重启。
+
+- **测试成功即固定**（`ExternalControl.pin`，存 `vpn_autoswitch_pinned_modes`）。固定后
+  `remember` 不再覆盖，`modeOf` 直接返回固定值。
+- **固定的是实际走通的那条路**。测试「外部控制」时如果客户端没有 START_CLASH、退回
+  VpnService 连上了，固定的是 `service`，不是名义上的 `activity`。
+- **「清除记忆」同时解除固定**，界面显示「当前方式（手动固定）」，点完立刻刷新。
+
 ## 1.6.6 — 2026-11-05
 
 修两处「明明能用，却要多等一会儿」。
