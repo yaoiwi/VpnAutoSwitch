@@ -185,6 +185,7 @@ internal fun ClientAdapterDialog(state: AppState, onDismiss: () -> Unit) {
             }
 
             Spacer(modifier = Modifier.height(8.dp))
+            // 和「状态诊断」统一：两行两列等宽，避免长文案按钮挤在一起
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -192,16 +193,17 @@ internal fun ClientAdapterDialog(state: AppState, onDismiss: () -> Unit) {
                 TextButton(
                     text = "测试外部控制",
                     onClick = { state.testClient("activity") },
+                    modifier = Modifier.weight(1f),
                 )
                 TextButton(
                     text = "测试 VpnService",
                     onClick = { state.testClient("service") },
+                    modifier = Modifier.weight(1f),
                 )
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 TextButton(
                     text = "清除记忆",
@@ -209,8 +211,13 @@ internal fun ClientAdapterDialog(state: AppState, onDismiss: () -> Unit) {
                         state.forgetClientMode()
                         refreshKey++
                     },
+                    modifier = Modifier.weight(1f),
                 )
-                TextButton(text = "关闭", onClick = onDismiss)
+                TextButton(
+                    text = "关闭",
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                )
             }
             if (hasExternal && !state.config.allowVpnUi) {
                 Text(

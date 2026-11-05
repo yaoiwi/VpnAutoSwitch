@@ -156,6 +156,8 @@ internal fun SelfCheckDialog(state: AppState, onDismiss: () -> Unit) {
             }
 
             Spacer(modifier = Modifier.height(8.dp))
+            // 四个按钮排成两行两列，每列等宽。以前第一行左对齐、第二行右对齐，
+            // 「打开 LSPosed」和「关闭」两个宽度不同的按钮挤在右边，看着又乱又窄。
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -166,6 +168,7 @@ internal fun SelfCheckDialog(state: AppState, onDismiss: () -> Unit) {
                         state.refreshDiagnostics()
                         Toast.makeText(context, "已重新检测", Toast.LENGTH_SHORT).show()
                     },
+                    modifier = Modifier.weight(1f),
                 )
                 TextButton(
                     text = "复制报告",
@@ -179,11 +182,12 @@ internal fun SelfCheckDialog(state: AppState, onDismiss: () -> Unit) {
                         )
                         Toast.makeText(context, "报告已复制", Toast.LENGTH_SHORT).show()
                     },
+                    modifier = Modifier.weight(1f),
                 )
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 TextButton(
                     text = "打开 LSPosed",
@@ -192,8 +196,13 @@ internal fun SelfCheckDialog(state: AppState, onDismiss: () -> Unit) {
                             Toast.makeText(context, "没有找到 LSPosed 管理器", Toast.LENGTH_SHORT).show()
                         }
                     },
+                    modifier = Modifier.weight(1f),
                 )
-                TextButton(text = "关闭", onClick = onDismiss)
+                TextButton(
+                    text = "关闭",
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                )
             }
         }
     }
