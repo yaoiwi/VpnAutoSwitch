@@ -29,6 +29,15 @@ internal object ExternalControl {
     /** 记住哪些客户端需要走外部控制，下次打开应用直接走这条路径，不用再等 always-on 超时 */
     private const val KEY = "vpn_autoswitch_external_pkgs"
 
+    /**
+     * 用户在「客户端适配」里手动测过、并确认要用的方式。
+     *
+     * 和上面的自动记忆分开存：自动记忆每次连上都会改写（这轮靠服务连上就记 service，
+     * 下轮靠界面就连记 activity），用户测试出来的选择活不过一次重启。固定之后
+     * [remember] 不再覆盖，只有「清除记忆」或再测一次才会改。
+     */
+    private const val PIN_KEY = "vpn_autoswitch_pinned_modes"
+
     /** 预热时等 onServiceConnected 的上限：客户端可能是冷启动，给足 6 秒 */
     private const val PREWARM_TIMEOUT_MS = 6_000L
 
@@ -54,7 +63,9 @@ internal object ExternalControl {
      */
     fun modeOf(ctx: Context, pkg: String): String? {
         if (pkg.isEmpty()) return null
-        return known(ctx).firstOrNull { it.startsWith("$pkg|") }?.substringAfter('|')
+        // 用户固定过就用固定的：自动记忆可能被下一轮的成功路径改写
+        return pinnedMode(ctx, pkg)
+            ?: known(ctx).firstOrNull { it.startsWith("$pkg|") }?.substringAfter('|')
     }
 
     fun isKnown(ctx: Context, pkg: String): Boolean = modeOf(ctx, pkg) != null
@@ -67,10 +78,53 @@ internal object ExternalControl {
 
     fun remember(ctx: Context, pkg: String, mode: String) {
         if (pkg.isEmpty()) return
+        // 用户固定过就不再改写，否则「测试外部控制」记下的 activity 会被某一次
+        // 靠服务连上的成功覆盖掉，界面上看起来就是「选项自己变了」
+        if (pinnedMode(ctx, pkg) != null) return
         val set = known(ctx)
         set.removeAll { it.startsWith("$pkg|") }
         set.add("$pkg|$mode")
         saveKnown(ctx, set)
+    }
+
+    /** 用户手动确认过的启动方式；null 表示跟随自动记忆 */
+    fun pinnedMode(ctx: Context, pkg: String): String? {
+        if (pkg.isEmpty()) return null
+        return readPinned(ctx).firstOrNull { it.startsWith("$pkg|") }?.substringAfter('|')
+    }
+
+    fun pin(ctx: Context, pkg: String, mode: String) {
+        if (pkg.isEmpty() || mode.isEmpty()) return
+        val set = readPinned(ctx).toMutableSet()
+        set.removeAll { it.startsWith("$pkg|") }
+        set.add("$pkg|$mode")
+        try {
+            Settings.Secure.putString(ctx.contentResolver, PIN_KEY, set.joinToString(","))
+        } catch (t: Throwable) {
+            // 写不进去只影响下次是否还会被自动记忆覆盖
+        }
+    }
+
+    fun unpin(ctx: Context, pkg: String) {
+        if (pkg.isEmpty()) return
+        val set = readPinned(ctx).toMutableSet()
+        if (!set.removeAll { it.startsWith("$pkg|") }) return
+        try {
+            Settings.Secure.putString(ctx.contentResolver, PIN_KEY, set.joinToString(","))
+        } catch (t: Throwable) {
+            // 忽略
+        }
+    }
+
+    private fun readPinned(ctx: Context): Set<String> = try {
+        Settings.Secure.getString(ctx.contentResolver, PIN_KEY)
+            ?.split(',')
+            ?.map { it.trim() }
+            ?.filter { it.contains('|') }
+            ?.toSet()
+            ?: emptySet()
+    } catch (t: Throwable) {
+        emptySet()
     }
 
     fun forget(ctx: Context, pkg: String) {
@@ -177,6 +231,11 @@ internal object ExternalControl {
     /** 只启动它的 VpnService（完全没有界面） */
     fun startVpnService(ctx: Context, pkg: String): Boolean {
         if (pkg.isEmpty()) return false
+        // 被强停过的包处于 stopped 状态，startForegroundService 会「成功」返回，
+        // 但系统不会真的把它拉起来 —— 日志里就是「started VPN service」连着打三次、
+        // 却一直没有隧道。以前清标记放在写 always-on 的那条路径里，比这里晚十秒，
+        // 开机后第一次打开目标应用必然踩空。启动之前先清，代价只是一次反射。
+        Packages.unstop(pkg)
         val now = SystemClock.elapsedRealtime()
         // 探测失败的结果只保留一分钟：PackageManager 在客户端升级 / 刚装完时会短暂
         // 查不到服务，缓存到进程死亡为止的话，之后就永远「启动」不起来了。
@@ -236,6 +295,8 @@ internal object ExternalControl {
      */
     fun prewarm(ctx: Context, pkg: String, handler: Handler? = null): Boolean {
         if (pkg.isEmpty()) return false
+        // bindService 同样会被 stopped 拒绝，预热等于白做
+        Packages.unstop(pkg)
         val service = findVpnService(ctx, pkg)
         if (service == null) {
             ModuleLog.append(ctx, "prewarm: 没找到 $pkg 的 VpnService，跳过")

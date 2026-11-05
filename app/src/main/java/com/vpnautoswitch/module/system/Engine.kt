@@ -960,12 +960,15 @@ internal object Engine {
         ExternalControl.clearSilentFails(ctx, pkg)
         log(ctx, "client test start: $pkg / $mode")
 
-        val started = if (mode == "activity") {
-            ExternalControl.start(ctx, pkg)
+        // startMode 会回报**实际走通**的那条路：测试「外部控制」时如果客户端没有
+        // START_CLASH、退回 VpnService 连上了，固定的就该是 service，否则下一轮
+        // 又按 activity 去试一遍（多绕一步，日志也会误导）
+        val actualMode = if (mode == "activity") {
+            ExternalControl.startMode(ctx, pkg)
         } else {
-            ExternalControl.startVpnService(ctx, pkg)
+            if (ExternalControl.startVpnService(ctx, pkg)) "service" else null
         }
-        if (!started) {
+        if (actualMode == null) {
             val detail = if (mode == "activity") {
                 "客户端没有可用的外部控制入口"
             } else {
@@ -976,7 +979,7 @@ internal object Engine {
             return
         }
 
-        pollClientTest(ctx, pkg, mode, token, 0)
+        pollClientTest(ctx, pkg, actualMode, token, 0)
     }
 
     internal fun pollClientTest(
@@ -988,12 +991,15 @@ internal object Engine {
     ) {
         if (token != clientTestToken) return
         if (hasVpnTransport(ctx)) {
+            // 手动测试成功就是用户明确选了这个方式，顺手固定住：
+            // 不然下一次靠另一条路径连上，remember 就把这里改掉了
             ExternalControl.remember(ctx, pkg, mode)
+            ExternalControl.pin(ctx, pkg, mode)
             RuntimeDiagnostics.publishClientTest(
                 ctx, pkg, mode, "success",
-                if (mode == "activity") "外部控制成功，已记住该方式" else "VpnService 启动成功，已记住该方式",
+                if (mode == "activity") "外部控制成功，已固定该方式" else "VpnService 启动成功，已固定该方式",
             )
-            log(ctx, "client test success: $pkg / $mode")
+            log(ctx, "client test success: $pkg / $mode (pinned)")
             return
         }
         if (attempt >= 30) {
@@ -1011,6 +1017,8 @@ internal object Engine {
     internal fun forgetClientMode(ctx: Context, pkg: String) {
         if (pkg.isEmpty()) return
         ExternalControl.forget(ctx, pkg)
+        // 「清除记忆」要连固定一起清，否则界面上显示「未记忆」，实际却还在按固定方式跑
+        ExternalControl.unpin(ctx, pkg)
         if (ModuleState.prewarmUnsupported(ctx) == pkg) ModuleState.setPrewarmUnsupported(ctx, null)
         RuntimeDiagnostics.publishClientTest(ctx, pkg, "", "idle", "已清除记住的启动方式")
         log(ctx, "client mode forgotten: $pkg")
