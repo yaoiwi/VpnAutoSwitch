@@ -2,6 +2,34 @@
 
 应用内「关于 → 更新日志」只显示最近 3 条，完整历史留在这里。
 
+## 1.6.7 — 2026-11-05
+
+修「开机后十几秒里配置读不到，日志还刷屏」与「刚点开应用时第一次启动被误取消」
+
+日志 17:43:05 开机，到 17:43:45 配置才可用。中间这 16 秒里 `config mirror unusable, ignored`
+出现五十多次——镜像读失败时既不记冷却、也不更新缓存时间，于是每一次心跳、每一次前台变化都
+重新读一遍 `Settings.Secure` 再打一行，把 `reboot receiver`、`module ready` 这些真正有用的
+行全埋了。
+
+- **镜像读坏后静默 30 秒**（`MIRROR_BAD_MS`）。镜像要等 App 进程起来重写才会变，隔两秒重读
+  没有任何意义。provider 一旦查通立刻清零，不会拖慢恢复。
+- **兼容「配置存成字符串」的镜像**。`config` 以前只按嵌套对象解析，遇到字符串直接返回 null，
+  表现成「镜像明明有内容却一直判 unusable」。现在两种都认。
+- **`unusable` 那行补了现场**：原始长度、能不能取出 `config`、解析出几个目标、vpn 包名长度。
+  下次再出现不用猜是格式不对还是内容为空。
+- **`startService` 返回 null 时打印原因线索**：service 是否存在、包是否还处于 stopped、组件
+  是否 enabled。17:43:07 那句「同步服务没找到」其实只代表系统没接这次启动，三种原因处理方式
+  完全不同，以前只能靠猜。
+
+另一处：17:47:32 点开 Telegram，`-> prewarm` 后立刻排了一次启动，但 17:47:33 就被
+`delayed service start cancelled (state changed)` 取消，attempt 1 根本没发出去，白白等到
+attempt 2。原因是取消条件里的 `hasAliveTarget`：launching 那几百毫秒里目标进程还没建，
+`aliveTargets` 是空的。
+
+- **目标在前台就放行**（`shouldRunDelayedStart` 新增 `scheduledInFront`）。用户都已经把它切到
+  前台了，不该因为拿不到进程号就取消。`userOff`、`wifiSuppressed`、隧道已通这些真正的终止
+  条件照旧生效。
+
 ## 1.6.6 — 2026-11-05
 
 修两处「明明能用，却要多等一会儿」。

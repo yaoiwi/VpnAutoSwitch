@@ -809,11 +809,37 @@ internal object Engine {
                     ComponentName(pkg, com.vpnautoswitch.module.ConfigSyncService::class.java.name),
                 ),
             )
-            log(
-                ctx,
-                if (started != null) "config: module app process requested"
-                else "config: 模块 App 的同步服务没找到，继续等 provider",
-            )
+            if (started != null) {
+                log(ctx, "config: module app process requested")
+            } else {
+                // 返回 null 表示系统没接这次启动，原因可能是包还在 stopped、用户还没解锁、
+                // 或者 ROM 拦了后台启动。这三者处理方式完全不同，所以把现场一起打出来。
+                val serviceFound = try {
+                    ctx.packageManager.getServiceInfo(
+                        ComponentName(pkg, com.vpnautoswitch.module.ConfigSyncService::class.java.name),
+                        0,
+                    )
+                    true
+                } catch (t: Throwable) {
+                    false
+                }
+                val stopped = try {
+                    (ctx.packageManager.getApplicationInfo(pkg, 0).flags and
+                        android.content.pm.ApplicationInfo.FLAG_STOPPED) != 0
+                } catch (t: Throwable) {
+                    null
+                }
+                val enabled = try {
+                    ctx.packageManager.getApplicationInfo(pkg, 0).enabled
+                } catch (t: Throwable) {
+                    null
+                }
+                log(
+                    ctx,
+                    "config: 模块 App 的同步服务起不来" +
+                        "（service=$serviceFound, stopped=$stopped, enabled=$enabled），继续等 provider",
+                )
+            }
         } catch (t: Throwable) {
             log(ctx, "config: 拉不起模块 App 进程（$t），继续等 provider")
         }

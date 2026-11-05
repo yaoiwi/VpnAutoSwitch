@@ -402,6 +402,7 @@ internal object EnginePolicy {
         hasAliveTarget: Boolean,
         wifiOnActive: Boolean,
         hasTunnel: Boolean = false,
+        scheduledInFront: Boolean = false,
     ): Boolean =
         token == currentToken &&
             enabled &&
@@ -411,7 +412,11 @@ internal object EnginePolicy {
             !userOff &&
             !wifiSuppressed &&
             networkAllowed &&
-            (hasAliveTarget || wifiOnActive) &&
+            // 目标进程刚起来的那几百毫秒里 aliveTargets 还是空的（launching 阶段
+            // 只知道包名、拿不到进程），这时候取消排队启动，等于把「打开应用」最该
+            // 抓的那一拍丢掉，白等下一个 4 秒宽限。日志 17:47:32 启动、17:47:33
+            // 就被这条判掉，attempt 1 根本没发出去。
+            (hasAliveTarget || wifiOnActive || scheduledInFront) &&
             // 排队的这几百毫秒里隧道可能已经通了：这时再发一次启动，客户端会把刚建好的
             // 隧道推倒重建（日志 02:00:31 连上、02:00:36 掉就是这么来的）
             !hasTunnel

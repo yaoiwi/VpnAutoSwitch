@@ -24,6 +24,16 @@ internal object ConfigRepo {
     /** provider 打不开时，隔这么久再试一次，别一直用镜像 */
     private const val MIRROR_RETRY_MS = 2_000L
 
+    /**
+     * 镜像读坏了（格式对不上、内容为空）之后，这么久不再去读它。
+     *
+     * 原来读失败只是 return null，`cachedAt` 也不动，于是每一次心跳、每一次前台变化
+     * 都会重新读一遍 Settings.Secure 再打一行「mirror unusable」——开机那 16 秒里
+     * 刷了五十多行，把真正有用的日志全埋了。镜像要等 App 进程起来写新的才会变，
+     * 隔几秒重读没有意义。
+     */
+    private const val MIRROR_BAD_MS = 30_000L
+
     @Volatile
     private var cached: Config? = null
 
@@ -33,6 +43,10 @@ internal object ConfigRepo {
     /** 上一次写进 Secure 的镜像原文，避免每次心跳都重复写 */
     @Volatile
     private var mirrored: String? = null
+
+    /** 镜像读坏之后，在这个时刻（elapsedRealtime）之前不再重读 */
+    @Volatile
+    private var mirrorBadUntil = 0L
 
     /** 最近一次配置是从哪来的：provider / mirror / none，只用于日志与诊断 */
     @Volatile
@@ -59,6 +73,8 @@ internal object ConfigRepo {
             cached = fresh
             cachedAt = now
             source = "provider"
+            // 新的镜像马上就会写下去，之前判的「读坏了」到此为止
+            mirrorBadUntil = 0L
             mirror(ctx, fresh)
             return fresh
         }
@@ -115,22 +131,39 @@ internal object ConfigRepo {
 
     private fun readMirror(ctx: Context?): Config? {
         if (ctx == null) return null
+        if (SystemClock.elapsedRealtime() < mirrorBadUntil) return null
         return try {
             val raw = Settings.Secure.getString(
                 ctx.contentResolver,
                 ConfigCachePolicy.MIRROR_KEY,
             )
-            if (raw.isNullOrEmpty()) return null
+            if (raw.isNullOrEmpty()) {
+                // 从来没写过镜像。同样要冷却，否则开机那十几秒每次心跳都会来读一遍。
+                mirrorBadUntil = SystemClock.elapsedRealtime() + MIRROR_BAD_MS
+                return null
+            }
             val payload = JSONObject(raw)
             val savedAt = payload.optLong("at", 0L)
             if (!ConfigCachePolicy.isFresh(savedAt, System.currentTimeMillis())) {
+                mirrorBadUntil = SystemClock.elapsedRealtime() + MIRROR_BAD_MS
                 ModuleLog.append(ctx, "config mirror expired, ignored")
                 XposedBridge.log("[$TAG] config mirror expired, ignored")
                 return null
             }
-            val config = Config.parse(payload.optJSONObject("config")?.toString())
+            // 老版本可能把配置存成字符串而不是嵌套对象，两种都要认；
+            // 只认嵌套对象的话，这种镜像会永远被判成「读坏了」。
+            val json = ConfigCachePolicy.unwrap(raw)
+            val config = Config.parse(json)
             if (!ConfigCachePolicy.isUsable(config)) {
-                ModuleLog.append(ctx, "config mirror unusable, ignored")
+                mirrorBadUntil = SystemClock.elapsedRealtime() + MIRROR_BAD_MS
+                // 这一行是排查「重启后配置读不到」唯一的现场：长度、能不能取出 config、
+                // 解析出来几个目标。少了它只能猜是格式不对还是内容为空。
+                ModuleLog.append(
+                    ctx,
+                    "config mirror unusable, ignored (" +
+                        "${raw.length} chars, unwrapped=${json != null}, " +
+                        "targets=${config?.targets?.size ?: -1}, vpn=${config?.vpnPackage?.length ?: -1})",
+                )
                 return null
             }
             mirrored = config?.toJson()
@@ -140,6 +173,7 @@ internal object ConfigRepo {
             )
             config
         } catch (t: Throwable) {
+            mirrorBadUntil = SystemClock.elapsedRealtime() + MIRROR_BAD_MS
             XposedBridge.log("[$TAG] config mirror read failed: $t")
             null
         }
