@@ -35,6 +35,13 @@ class VpnTileService : TileService() {
                 false,
                 pauseObserver,
             )
+            // 接管标记变化（VPN 开 / 关）也要重画：用户划掉应用后 VPN 关了，
+            // 磁贴得跟着灭，不能只在拉下面板时才纠正
+            contentResolver.registerContentObserver(
+                Settings.Secure.getUriFor(ModuleContract.ACTIVE_KEY),
+                false,
+                pauseObserver,
+            )
             observing = true
         }
         updateTile()
@@ -63,16 +70,27 @@ class VpnTileService : TileService() {
         val tile = qsTile ?: return
         val running = moduleRunning()
         val paused = isPaused()
+        val vpnOn = isVpnOn()
         tile.icon = Icon.createWithResource(this, R.drawable.ic_tile_vpn)
-        tile.state = if (running && !paused) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
+        // 亮不亮看「VPN 是否真的开着」，不看心跳：模块一直在跑，心跳永远是新鲜的，
+        // 用它当状态的话，划掉目标应用、VPN 已经断开，磁贴还会一直亮着。
+        tile.state = if (running && vpnOn && !paused) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             tile.subtitle = when {
                 !running -> getString(R.string.tile_unavailable)
                 paused -> getString(R.string.tile_paused)
-                else -> getString(R.string.tile_running)
+                vpnOn -> getString(R.string.tile_running)
+                // 模块在跑、自动化也开着，只是当前没有目标应用在用 → VPN 故意关着
+                else -> getString(R.string.tile_idle)
             }
         }
         tile.updateTile()
+    }
+
+    private fun isVpnOn(): Boolean = try {
+        Settings.Secure.getInt(contentResolver, ModuleContract.ACTIVE_KEY, 0) == 1
+    } catch (t: Throwable) {
+        false
     }
 
     private fun isPaused(): Boolean = try {

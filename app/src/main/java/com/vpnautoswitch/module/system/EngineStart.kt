@@ -74,7 +74,9 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
         // 已经连上了，说明用户「保持关闭」的意图已经结束（例如他自己又手动连上了）
         userOff = false
         val nowUp = SystemClock.elapsedRealtime()
-        if (connectedAt == 0L) connectedAt = nowUp
+        // 这一次是不是「从断开变为连通」，用来决定要不要留一条记录
+        val firstUp = connectedAt == 0L
+        if (firstUp) connectedAt = nowUp
         // 连稳了才清掉抖动重试的计数：否则「连上—掉—连上—掉」会一直重连下去。
         // 「稳」的门槛要比抖动窗口长，否则窗口内的掉落永远算不完次数。
         if (nowUp - connectedAt >= EnginePolicy.STABLE_CONNECTION_MS) flapRetries = 0
@@ -87,7 +89,12 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
         }
         // 设置仍指向我们，说明这轮是模块接管的，看门狗可以负责关掉它
         if (active || settingPointsToUs || adopted) autoSession = true
-        if (failureStreak > 0) log(ctx, "vpn connected (after $failureStreak failed attempts)")
+        // 以前只在「重试过」时才记这一行，第一次就成功的话日志里没有任何「已连接」的证据，
+        // 只剩一句 external mode works，排障时容易误判成「只启动了服务、没连上」。
+        when {
+            failureStreak > 0 -> log(ctx, "vpn connected (after $failureStreak failed attempts)")
+            firstUp -> log(ctx, "vpn connected")
+        }
         // 只有「确实靠外部手段连上」才记录，always-on 能连上的客户端不该被误判
         pendingExternalMode?.let { mode ->
             ExternalControl.remember(ctx, cfg.vpnPackage, mode)

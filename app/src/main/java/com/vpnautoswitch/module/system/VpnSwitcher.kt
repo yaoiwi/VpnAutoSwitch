@@ -1,8 +1,10 @@
 package com.vpnautoswitch.module.system
 
+import android.content.ComponentName
 import android.content.ContentResolver
 import android.content.Context
 import android.provider.Settings
+import android.service.quicksettings.TileService
 import de.robv.android.xposed.XposedBridge
 
 /**
@@ -28,7 +30,28 @@ internal object VpnSwitcher {
     /** 模块自己的辅助键，用于崩溃/重启后恢复用户原有设置 */
     private const val KEY_ORIGINAL_APP = "vpn_autoswitch_original_app"
     private const val KEY_ORIGINAL_LOCKDOWN = "vpn_autoswitch_original_lockdown"
-    private const val KEY_ACTIVE = "vpn_autoswitch_active"
+    private const val KEY_ACTIVE = com.vpnautoswitch.module.ModuleContract.ACTIVE_KEY
+
+    /**
+     * 让快捷磁贴立刻重画。
+     *
+     * 磁贴只在用户拉下面板（onStartListening）时重读状态，中间一直显示上一次的样子。
+     * 以前磁贴看的是心跳，模块一直在跑，所以「划掉应用、VPN 已经关了」磁贴还亮着；
+     * 现在磁贴看 [KEY_ACTIVE]，这里负责在状态变化的那一刻通知它。
+     *
+     * 调用者是 system_server（uid 1000），系统可能因为「不是磁贴所属应用」而拒绝，
+     * 拒绝也无所谓：磁贴自己监听这个键，拉下面板就会纠正。
+     */
+    private fun refreshTile(ctx: Context) {
+        try {
+            TileService.requestListeningState(
+                ctx,
+                ComponentName("com.vpnautoswitch", "com.vpnautoswitch.module.VpnTileService"),
+            )
+        } catch (t: Throwable) {
+            XposedBridge.log("$TAG refresh tile failed: $t")
+        }
+    }
 
     fun isActive(cr: ContentResolver): Boolean = try {
         Settings.Secure.getInt(cr, KEY_ACTIVE, 0) == 1
@@ -87,6 +110,7 @@ internal object VpnSwitcher {
                 Settings.Secure.getInt(cr, KEY_ALWAYS_ON_LOCKDOWN, 0)
             )
             Settings.Secure.putInt(cr, KEY_ACTIVE, 1)
+            refreshTile(ctx)
             ModuleLog.append(
                 ctx,
                 "takeover adopted an existing tunnel, original always_on=" +
@@ -118,6 +142,7 @@ internal object VpnSwitcher {
                     Settings.Secure.getInt(cr, KEY_ALWAYS_ON_LOCKDOWN, 0)
                 )
                 Settings.Secure.putInt(cr, KEY_ACTIVE, 1)
+                refreshTile(ctx)
                 ModuleLog.append(
                     ctx,
                     "takeover start, original always_on=${Settings.Secure.getString(cr, KEY_ORIGINAL_APP)}"
@@ -160,6 +185,7 @@ internal object VpnSwitcher {
             }
 
             Settings.Secure.putInt(cr, KEY_ACTIVE, 0)
+            refreshTile(ctx)
             ModuleLog.append(
                 ctx,
                 "disable done, always_on now=${Settings.Secure.getString(cr, KEY_ALWAYS_ON_APP)}"
@@ -192,6 +218,7 @@ internal object VpnSwitcher {
                     cr.delete(Settings.Secure.getUriFor(KEY_ALWAYS_ON_APP), null, null)
                 }
                 Settings.Secure.putInt(cr, KEY_ACTIVE, 0)
+                refreshTile(ctx)
                 ModuleLog.append(ctx, "cleared stale always_on for $pkg")
                 true
             }

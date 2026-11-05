@@ -17,4 +17,12 @@ object ModuleContract {
 
     /** 暂停标记，由 system_server 写入，App 与磁贴只读 */
     const val PAUSED_KEY = "vpn_autoswitch_paused"
+
+    /**
+     * 模块是否正接管着 VPN（1 = 已接管且隧道应当在）。
+     *
+     * 磁贴靠它判断亮不亮。以前磁贴看的是 [com.vpnautoswitch.module.system.Engine.HEARTBEAT_KEY]，
+     * 那只是「模块进程还在跑」——模块一直跑，所以划掉应用、VPN 已经关了，磁贴却始终亮着。
+     */
+    const val ACTIVE_KEY = "vpn_autoswitch_active"
 }
