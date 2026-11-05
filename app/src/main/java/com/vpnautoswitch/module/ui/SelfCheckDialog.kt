@@ -185,6 +185,8 @@ internal fun SelfCheckDialog(state: AppState, onDismiss: () -> Unit) {
                     modifier = Modifier.weight(1f),
                 )
             }
+            // 两行之间要留空：miuix 的按钮自带高度，紧贴着排会连成一整块
+            Spacer(modifier = Modifier.height(8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),

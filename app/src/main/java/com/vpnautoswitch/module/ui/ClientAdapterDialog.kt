@@ -201,6 +201,8 @@ internal fun ClientAdapterDialog(state: AppState, onDismiss: () -> Unit) {
                     modifier = Modifier.weight(1f),
                 )
             }
+            // 两行之间留空，否则上下两排按钮会贴成一整块
+            Spacer(modifier = Modifier.height(8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),

@@ -499,6 +499,7 @@ private fun HeroStatusCard(state: AppState) {
                 )
             }
             if (state.diagnostics.paused) {
+                Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
