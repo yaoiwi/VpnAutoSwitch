@@ -339,6 +339,17 @@ class EnginePolicyTest {
     }
 
     @Test
+    fun `delayed start survives the launch window when the target is in front`() {
+        // 刚点开应用那几百毫秒，目标进程还没起来，aliveTargets 是空的。
+        // 这时把排队启动判掉，第一次静默启动就白丢了（17:47:32 那一轮）。
+        assertFalse(delayedStart(hasAliveTarget = false, wifiOnActive = false, scheduledInFront = false))
+        assertTrue(delayedStart(hasAliveTarget = false, wifiOnActive = false, scheduledInFront = true))
+        // 该拦的照旧拦：用户手动断开时，目标在前台也不能自己连回来
+        assertFalse(delayedStart(hasAliveTarget = false, scheduledInFront = true, userOff = true))
+        assertFalse(delayedStart(hasAliveTarget = false, scheduledInFront = true, wifiSuppressed = true))
+    }
+
+    @Test
     fun `delayed off is cancelled by token target or wifi on`() {
         assertTrue(EnginePolicy.shouldRunDelayedOff(1, 1, false, false))
         assertFalse(EnginePolicy.shouldRunDelayedOff(1, 2, false, false))
@@ -367,6 +378,7 @@ class EnginePolicyTest {
         hasAliveTarget: Boolean = true,
         wifiOnActive: Boolean = false,
         hasTunnel: Boolean = false,
+        scheduledInFront: Boolean = false,
     ): Boolean = EnginePolicy.shouldRunDelayedStart(
         token = token,
         currentToken = currentToken,
@@ -380,6 +392,7 @@ class EnginePolicyTest {
         hasAliveTarget = hasAliveTarget,
         wifiOnActive = wifiOnActive,
         hasTunnel = hasTunnel,
+        scheduledInFront = scheduledInFront,
     )
 
     @Test

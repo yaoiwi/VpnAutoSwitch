@@ -1,6 +1,7 @@
 package com.vpnautoswitch.module.system
 
 import com.vpnautoswitch.module.Config
+import org.json.JSONObject
 
 /**
  * 配置镜像的判定规则。
@@ -37,4 +38,25 @@ internal object ConfigCachePolicy {
     /** 镜像内容是否可以拿来当配置用：至少要能看出「用户配过」 */
     fun isUsable(config: Config?): Boolean =
         config != null && (config.vpnPackage.isNotEmpty() || config.targets.isNotEmpty())
+
+    /**
+     * 从镜像原文里取出配置 JSON。
+     *
+     * 镜像外层是 `{"at":写入时刻,"config":...}`。`config` 正常情况下是嵌套对象，
+     * 但早期版本、或者别的地方手写进来的值可能是**字符串**。以前只认嵌套对象，
+     * 遇到字符串就返回 null，最后表现成「镜像明明有内容却一直判 unusable」。
+     * 两种都认，解析失败就返回 null，由调用方当作「读不到」处理。
+     */
+    fun unwrap(raw: String?): String? {
+        if (raw.isNullOrEmpty()) return null
+        return try {
+            when (val node = JSONObject(raw).opt("config")) {
+                is JSONObject -> node.toString()
+                is String -> node
+                else -> null
+            }
+        } catch (t: Throwable) {
+            null
+        }
+    }
 }

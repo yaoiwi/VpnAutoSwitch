@@ -339,6 +339,10 @@ internal fun Engine.scheduleDelayedServiceStart(ctx: Context, cfg: Config) {
             hasAliveTarget = aliveTargets.isNotEmpty(),
             wifiOnActive = wifiOnActive,
             hasTunnel = tunnelUp,
+            // 「目标刚启动」这一段里 aliveTargets 还是空的：只要它已经是当前前台，
+            // 就说明用户确实要用它，不该因为拿不到进程而取消这次启动
+            scheduledInFront = lastForeground == scheduledPackage ||
+                lastForegroundTarget == scheduledPackage,
         )
         if (!allowed) {
             log(
