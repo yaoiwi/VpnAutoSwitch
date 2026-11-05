@@ -480,11 +480,34 @@ private fun HeroStatusCard(state: AppState) {
                 color = colors.onSurfaceVariantSummary,
             )
             Spacer(modifier = Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(text = "打开 LSPosed", onClick = { state.openLsposed() })
-                TextButton(text = "刷新", onClick = { state.refreshDiagnostics() })
-                if (state.diagnostics.paused) {
-                    TextButton(text = "恢复联动", onClick = { state.togglePause() })
+            // 三个按钮挤在一行时，「打开 LSPosed」比其它按钮宽出一截，Row 又没占满宽度，
+            // 结果最后两个直接叠在一起（截图里「刷新」压在了「打开 LSPosed」上）。
+            // 改成两行等宽：打开 LSPosed / 刷新 一行，「恢复联动」单独一行。
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                TextButton(
+                    text = "打开 LSPosed",
+                    onClick = { state.openLsposed() },
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    text = "刷新",
+                    onClick = { state.refreshDiagnostics() },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            if (state.diagnostics.paused) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    TextButton(
+                        text = "恢复联动",
+                        onClick = { state.togglePause() },
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
         }
@@ -1415,15 +1438,29 @@ private fun LogBody(
             .padding(horizontal = 12.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        TextButton(text = "复制", onClick = copyLog)
-        TextButton(text = "导出", onClick = { exportLauncher.launch("vpn-autoswitch-log.txt") })
-        TextButton(text = "刷新", onClick = onRefresh)
+        // 四个等宽按钮，宽度一致才不会在窄屏上互相挤压
+        TextButton(
+            text = "复制",
+            onClick = copyLog,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(
+            text = "导出",
+            onClick = { exportLauncher.launch("vpn-autoswitch-log.txt") },
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(
+            text = "刷新",
+            onClick = onRefresh,
+            modifier = Modifier.weight(1f),
+        )
         TextButton(
             text = "删除",
             onClick = {
                 state.clearLog()
                 Toast.makeText(context, "日志已清空", Toast.LENGTH_SHORT).show()
             },
+            modifier = Modifier.weight(1f),
         )
     }
     Row(
@@ -1680,8 +1717,9 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
-    "1.6.8：「状态诊断」和「客户端适配」底部的四个按钮以前是两行各排各的，第二行靠右，「打开\n" +
-        "LSPosed」和「关闭」挤成一团。现在统一改成两行两列、每列等宽，手指不容易点错。\n" +
+    "1.6.8：把几个挤在一起的按钮重新排了。「状态诊断」「客户端适配」底部四个按钮以前是两行\n" +
+        "各排各的，第二行靠右，「打开 LSPosed」和「关闭」挤成一团；首页状态卡的「打开 LSPosed」\n" +
+        "和「刷新」在窄屏上直接叠住。现在统一成等宽两列，点起来不容易按错。\n" +
     "1.6.7：修「开机后第一次打不开 VPN」。客户端被强停过会处于 stopped 状态，启动服务的请求会被\n" +
         "系统静默丢弃，而清标记那一步原来排在十几秒之后——现在启动前先清。always-on 也改用\n" +
         "VpnManager 的正规入口，不再只是把设置键写进去。另外，重启后配置镜像读坏会每两秒重读重打，\n" +
