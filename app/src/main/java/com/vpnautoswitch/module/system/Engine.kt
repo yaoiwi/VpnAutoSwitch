@@ -17,6 +17,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.os.Process
 import android.os.SystemClock
+import android.os.UserManager
 import android.provider.Settings
 import android.widget.Toast
 import com.vpnautoswitch.module.BuildConfig
@@ -301,6 +302,20 @@ internal object Engine {
      */
     internal const val CONFIG_WARMUP_ATTEMPTS = 8
     internal const val CONFIG_WARMUP_INTERVAL_MS = 2_000L
+
+    /**
+     * 设备还没解锁时，隔这么久再看一眼。
+     *
+     * 文件级加密（FBE）下，用户没解锁之前，App 里非 directBootAware 的组件根本起不来，
+     * `startService` 会直接返回 null。日志里开机 49 秒那两次「同步服务起不来
+     * （service=true, stopped=false, enabled=true）」就是撞在这上面——三种常见原因都排除了，
+     * 剩下的只有「还没解锁」。这时每 2 秒重试纯属白撞，也不该在 16 秒后判定失败：
+     * 用户往往过一会儿才解锁，解锁广播一到就能立刻接上。
+     */
+    internal const val USER_LOCKED_RETRY_MS = 30_000L
+
+    /** 是否已经因为「设备未解锁」记过一条日志，避免每 30 秒重复 */
+    internal var lockedWaitLogged = false
 
     /** 配置读不到时，这条提醒最多每 30 秒记一次（否则每次切换应用都刷一行） */
     internal const val CONFIG_MISSING_LOG_MS = 30_000L
@@ -782,6 +797,19 @@ internal object Engine {
         }
         if (attempt == 0) log(ctx, "config not ready yet, waiting for the app process")
         if (attempt >= CONFIG_WARMUP_ATTEMPTS) {
+            // 设备还没解锁：App 的非 directBootAware 组件一律起不来，怎么重试都白搭。
+            // 不在这里判死刑，降到 30 秒一次等解锁；解锁广播会立刻再叫一次（见 onUserUnlocked）。
+            if (isUserUnlocked(ctx) == false) {
+                if (!lockedWaitLogged) {
+                    lockedWaitLogged = true
+                    log(ctx, "config: 设备还没解锁，模块 App 起不来，等解锁后自动重试")
+                }
+                // 解锁那一刻 App 才允许启动，所以每轮都再敲一次门：成功的那次会打
+                // 「module app process requested」，从日志能直接看出解锁后是否接上了
+                kickAppProcess(ctx)
+                handler.postDelayed({ warmupConfig(ctx, attempt) }, USER_LOCKED_RETRY_MS)
+                return
+            }
             log(
                 ctx,
                 "config unavailable after ${attempt * 2}s: " +
@@ -834,10 +862,14 @@ internal object Engine {
                 } catch (t: Throwable) {
                     null
                 }
+                // 开机那几十秒里，前三项往往全是正常的：service 在、没被强停、组件也没禁用，
+                // 就是起不来。剩下唯一说得通的原因就是用户还没解锁（FBE），所以把它一起打出来。
+                val unlocked = isUserUnlocked(ctx)
                 log(
                     ctx,
                     "config: 模块 App 的同步服务起不来" +
-                        "（service=$serviceFound, stopped=$stopped, enabled=$enabled），继续等 provider",
+                        "（service=$serviceFound, stopped=$stopped, enabled=$enabled, " +
+                        "unlocked=$unlocked），继续等 provider",
                 )
             }
         } catch (t: Throwable) {
@@ -1143,6 +1175,8 @@ internal object Engine {
                     Intent.ACTION_SCREEN_OFF -> onScreenOff(ctx)
                     Intent.ACTION_SCREEN_ON -> cancelScreenOffTimer(ctx)
                     Intent.ACTION_USER_PRESENT -> onScreenUnlocked(ctx)
+                    // 解锁完成：开机时拉不起 App 进程的，在这里补一次
+                    Intent.ACTION_USER_UNLOCKED -> onUserUnlocked(ctx)
                 }
             }
         }
@@ -1155,6 +1189,7 @@ internal object Engine {
                 addAction(Intent.ACTION_SCREEN_OFF)
                 addAction(Intent.ACTION_SCREEN_ON)
                 addAction(Intent.ACTION_USER_PRESENT)
+                addAction(Intent.ACTION_USER_UNLOCKED)
             }
             // Android 14+（targetSdk 34 起）注册非系统广播的接收器必须显式声明导出标志，
             // 否则 registerReceiver 会直接抛 SecurityException —— 表现就是 App 发什么广播都没人收，
@@ -1255,6 +1290,29 @@ internal object Engine {
     } catch (t: Throwable) {
         // 读不到就当作亮着：宁可少断一次，也不要在用户正用手机时断开
         true
+    }
+
+    /** 用户是否已经解锁；读不到返回 null（当作「不知道」，不要据此做决定） */
+    internal fun isUserUnlocked(ctx: Context?): Boolean? = try {
+        (ctx?.getSystemService(Context.USER_SERVICE) as? UserManager)?.isUserUnlocked
+    } catch (t: Throwable) {
+        null
+    }
+
+    /**
+     * 解锁完成（FBE 解密之后）。
+     *
+     * 开机时模块可能比用户解锁早得多，那时拉不起 App 进程，配置一直读不到，
+     * 自动化就停在 idle——用户看到的是「重启后第一次打开目标应用没反应」。
+     * 这里补一次启动，并把开机期间排队的前台/死亡事件重放掉。
+     */
+    internal fun onUserUnlocked(ctx: Context) {
+        lockedWaitLogged = false
+        if (ConfigRepo.getOrNull(ctx) != null) return
+        log(ctx, "user unlocked -> retry starting the module app")
+        warmupConfig(ctx, 0)
+        replayPendingEvents()
+        publishRuntime(ctx)
     }
 
     internal fun isWifiOnActive(cfg: Config): Boolean {

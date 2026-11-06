@@ -29,8 +29,20 @@ internal fun Engine.turnOff(reason: String) {
     beat(ctx)
     val cfg = ConfigRepo.get(ctx)
     val generation = ++offGeneration
-    // 用户刚手动关过 VPN：现在这条隧道是他自己又连回来的，模块不该去强停它
-    val wasUserOff = userOff
+    // 用户刚手动关过 VPN、现在这条隧道是他自己又连回来的：模块不该去强停它。
+    // 但 [userOff] 会一直挂到下次打开目标应用，中间客户端完全可能自己把隧道拉起来
+    // （日志 22:38 判了关闭，23:23 隧道又在），那时再按「他连的」禁止强停，
+    // 关闭链只能放弃，VPN 一直挂到下次打开应用。所以还要看现场：
+    // 前台是不是客户端、距离上次关闭过了多久。
+    val wasUserOff = EnginePolicy.tunnelIsUserOwned(
+        userOff = userOff,
+        foregroundIsClient = lastForeground == cfg.vpnPackage,
+        sinceOffMs = if (lastOffAt == 0L) {
+            Long.MAX_VALUE
+        } else {
+            SystemClock.elapsedRealtime() - lastOffAt
+        },
+    )
     chainForceStopAllowed = !wasUserOff
     // 取消尚未执行的关闭任务，避免同一次关闭派生多条验证链
     offToken++

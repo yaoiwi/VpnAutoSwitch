@@ -84,12 +84,11 @@ class EnginePolicyTest {
     }
 
     @Test
-    fun `a client that dies while the target is in front is reconnected, not treated as user off`() {
-        // 用了几分钟才掉，客户端进程还在，目标应用就在前台：
-        // 用户不可能正在看视频时跑去客户端点断开，这就是客户端自己断流
+    fun `a drop while the target is in front is reconnected, not treated as user off`() {
+        // 用了几分钟才掉，目标应用就在前台：用户不可能正在看视频时跑去客户端点断开，
+        // 这就是客户端自己断流
         assertTrue(
-            EnginePolicy.isClientDrop(
-                clientAlive = true,
+            EnginePolicy.shouldRecoverAfterDrop(
                 targetForeground = true,
                 connectedForMs = 180_000,
                 retries = 0,
@@ -97,8 +96,7 @@ class EnginePolicyTest {
             )
         )
         assertTrue(
-            EnginePolicy.isClientDrop(
-                clientAlive = true,
+            EnginePolicy.shouldRecoverAfterDrop(
                 targetForeground = true,
                 connectedForMs = 6_000,
                 retries = 1,
@@ -107,19 +105,8 @@ class EnginePolicyTest {
         )
         // 用户在客户端里点断开的那一刻，前台是客户端而不是目标应用 —— 不能把他的关闭又拉回来
         assertFalse(
-            EnginePolicy.isClientDrop(
-                clientAlive = true,
+            EnginePolicy.shouldRecoverAfterDrop(
                 targetForeground = false,
-                connectedForMs = 180_000,
-                retries = 0,
-                maxRetries = 2,
-            )
-        )
-        // 客户端进程没了：更像是用户强杀或崩溃，维持「保持关闭」
-        assertFalse(
-            EnginePolicy.isClientDrop(
-                clientAlive = false,
-                targetForeground = true,
                 connectedForMs = 180_000,
                 retries = 0,
                 maxRetries = 2,
@@ -127,8 +114,7 @@ class EnginePolicyTest {
         )
         // 抖动窗口内的掉落归 isStartupFlap 管，这里不接管
         assertFalse(
-            EnginePolicy.isClientDrop(
-                clientAlive = true,
+            EnginePolicy.shouldRecoverAfterDrop(
                 targetForeground = true,
                 connectedForMs = 1_000,
                 retries = 0,
@@ -137,8 +123,7 @@ class EnginePolicyTest {
         )
         // 已经救过两次：再拉就是耗电循环
         assertFalse(
-            EnginePolicy.isClientDrop(
-                clientAlive = true,
+            EnginePolicy.shouldRecoverAfterDrop(
                 targetForeground = true,
                 connectedForMs = 180_000,
                 retries = 2,
@@ -147,12 +132,72 @@ class EnginePolicyTest {
         )
         // 不知道这轮连了多久（connectedAt 丢过）：保守起见不当作客户端掉线
         assertFalse(
-            EnginePolicy.isClientDrop(
-                clientAlive = true,
+            EnginePolicy.shouldRecoverAfterDrop(
                 targetForeground = true,
                 connectedForMs = Long.MAX_VALUE,
                 retries = 0,
                 maxRetries = 2,
+            )
+        )
+    }
+
+    @Test
+    fun `a client killed by the rom is treated the same as a client that dropped`() {
+        // 判据里不再看客户端进程：进程被 ROM 清掉时隧道跟着没，这正是最需要接回的场景。
+        // 前台仍是目标应用，说明用户没有去点断开（点断开要先切到客户端或设置）。
+        // 20:10、22:38 那几次「目标应用开着、VPN 却一直不回来」就是这个漏掉的。
+        assertTrue(
+            EnginePolicy.shouldRecoverAfterDrop(
+                targetForeground = true,
+                connectedForMs = 39 * 60_000L,
+                retries = 0,
+                maxRetries = 2,
+            )
+        )
+        // 前台换成了桌面/别的应用：用户已经离开，按设计保持关闭
+        assertFalse(
+            EnginePolicy.shouldRecoverAfterDrop(
+                targetForeground = false,
+                connectedForMs = 39 * 60_000L,
+                retries = 0,
+                maxRetries = 2,
+            )
+        )
+    }
+
+    @Test
+    fun `a tunnel the client restored long after a user off can still be force stopped`() {
+        // 22:38 判了关闭、23:23 隧道又在了：这不是用户连的，关闭链必须允许强停，
+        // 否则只能打一句 no further step allowed 然后让 VPN 挂到下次打开应用
+        assertFalse(
+            EnginePolicy.tunnelIsUserOwned(
+                userOff = true,
+                foregroundIsClient = false,
+                sinceOffMs = 45 * 60_000L,
+            )
+        )
+        // 他刚刚在客户端里点了连接：前台就是客户端，这条隧道算他的
+        assertTrue(
+            EnginePolicy.tunnelIsUserOwned(
+                userOff = true,
+                foregroundIsClient = true,
+                sinceOffMs = 45 * 60_000L,
+            )
+        )
+        // 关掉后几秒又连上（多半是从磁贴开的），也算他的
+        assertTrue(
+            EnginePolicy.tunnelIsUserOwned(
+                userOff = true,
+                foregroundIsClient = false,
+                sinceOffMs = 5_000L,
+            )
+        )
+        // 没有 userOff 这个前提就无所谓归属
+        assertFalse(
+            EnginePolicy.tunnelIsUserOwned(
+                userOff = false,
+                foregroundIsClient = true,
+                sinceOffMs = 0L,
             )
         )
     }

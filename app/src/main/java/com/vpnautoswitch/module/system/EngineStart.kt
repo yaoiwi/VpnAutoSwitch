@@ -185,13 +185,13 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
             return
         }
 
-        // 用了一会儿才掉，而且目标应用正开着、客户端进程也还活着：这更像客户端自己断流或
-        // 后台重连失败，不是用户要关。以前一律按「用户断开」处理，用户正看着视频呢，
-        // 得退出应用再重进才有网。这里自动补两次，补不上再认账。
+        // 用了一会儿才掉，而且目标应用正开着：这更像客户端自己断流、或远端把进程清掉了，
+        // 不是用户要关。以前还要求「客户端进程活着」才算，可 MIUI 清后台时进程和隧道一起没，
+        // 于是这种最该救的情况反而被当成手动断开（日志 15:34、20:10、22:38 全是）。
+        // 用户要手动关，前台会是客户端或系统界面，不会停在目标应用。
         val clientAlive = isProcessAlive(ctx, cfg.vpnPackage)
         if (
-            EnginePolicy.isClientDrop(
-                clientAlive = clientAlive,
+            EnginePolicy.shouldRecoverAfterDrop(
                 // 用户在客户端里点断开的那一刻，前台是客户端而不是目标应用，
                 // 所以这条判据不会把他刚关掉的又拉回来
                 targetForeground = lastForeground in aliveTargets,
@@ -211,9 +211,17 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
             )
             log(
                 ctx,
-                "vpn dropped after ${connectedFor}ms but ${cfg.vpnPackage} is still alive " +
-                    "and the target is in front -> reconnect " +
-                    "($clientDropRetries/$MAX_CLIENT_DROP_RETRIES)",
+                if (clientAlive) {
+                    "vpn dropped after ${connectedFor}ms but ${cfg.vpnPackage} is still alive " +
+                        "and the target is in front -> reconnect " +
+                        "($clientDropRetries/$MAX_CLIENT_DROP_RETRIES)"
+                } else {
+                    // 进程都没了：看门狗下一拍会走外部控制重新拉起它，
+                    // 启动前那段 unstop 就是为这种情况准备的
+                    "vpn dropped after ${connectedFor}ms and ${cfg.vpnPackage} is gone " +
+                        "while the target is in front -> restart the client " +
+                        "($clientDropRetries/$MAX_CLIENT_DROP_RETRIES)"
+                },
             )
             return
         }
@@ -238,10 +246,17 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
             log(ctx, "vpn dropped, always-on cleared=$cleared so it stays off")
         }
         // 把「活了多久」写出来：下次再判成手动断开时，能直接看出是 2.1 秒还是 30 分钟，
-        // 不用再靠时间戳反推
+        // 不用再靠时间戳反推。现场三项也要带上——判据到底是「前台不是目标」
+        // 还是「重试次数用完了」，只看结论这两个原因长得一模一样。
         val lifeText =
             if (connectedFor == Long.MAX_VALUE) "" else " after ${connectedFor}ms"
-        log(ctx, "vpn dropped$lifeText -> stay off until a target app is reopened")
+        log(
+            ctx,
+            "vpn dropped$lifeText -> stay off until a target app is reopened " +
+                "(clientAlive=$clientAlive, foreground=${lastForeground ?: "-"}, " +
+                "targets=${aliveTargets.size}, " +
+                "retries=$clientDropRetries/$MAX_CLIENT_DROP_RETRIES)",
+        )
         return
     }
 
@@ -396,7 +411,15 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
     tileAttempts = 0
     externalAttempts = 0
     connectedNotified = false
-    log(ctx, "apply vpn ok=$ok (active=$active, pointsToUs=$settingPointsToUs, connected=$connected)")
+    // 括号里那三个值是**写之前**采样到的，ok=true 只说明这次写入没抛异常。
+    // 以前只打这一组，看到「ok=true, pointsToUs=false」会以为设置没生效；
+    // 现在补一个 after：写完立刻再读一遍，才能真正判断有没有落盘。
+    val after = VpnSwitcher.currentAlwaysOn(ctx) == cfg.vpnPackage
+    log(
+        ctx,
+        "apply vpn ok=$ok (active=$active, pointsToUs=$settingPointsToUs, connected=$connected, " +
+            "pointsToUsAfter=$after)",
+    )
     // 之前确认过这个客户端不响应 always-on → 直接按记住的方式启动
     if (ok) {
         when (ExternalControl.modeOf(ctx, cfg.vpnPackage)) {

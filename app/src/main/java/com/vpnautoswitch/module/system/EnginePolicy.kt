@@ -62,31 +62,48 @@ internal object EnginePolicy {
     ): Boolean = connectedForMs >= 0 && connectedForMs < windowMs && retries < maxRetries
 
     /**
-     * 隧道断掉时，判断这更像「客户端自己掉线」还是「用户要关闭」。
+     * 隧道断掉、目标应用还停在前台时，要不要自己把它接回来。
      *
-     * 原来只看「连了多久」：超过抖动窗口就一律当成用户手动断开，`userOff` 一挂上就不再重连，
-     * 用户明明正开着目标应用，却要退出去再重进才有网。
-     *
-     * 这里的判据只取最保守的一条：**目标应用此刻就在前台**，客户端进程也还活着。
-     * 用户要手动关，得先切到 VPN 客户端去点断开，那一刻前台是客户端、不是目标应用，
-     * 所以不会误判成「客户端掉线」而把他刚关掉的又拉回来。
+     * 原来这里还要求「客户端进程也还活着」，那条判断是反的：MIUI 这类 ROM 清后台时
+     * 会把客户端连同 VPN 一起带走，此时隧道没了、目标应用还开着，模块却因为「进程不在」
+     * 判成用户手动断开，于是 `userOff` 一挂、整个会话作废，用户得切走再切回才有网。
+     * 进程被杀恰恰说明不是他点的断开——真要手动关，他得先切到客户端或设置，
+     * 那一刻 [Engine.lastForeground] 就不是目标应用了，[targetForeground] 自然不成立。
      *
      * @param connectedForMs 这一轮隧道活了多久；[Long.MAX_VALUE] 表示不知道何时连上的
      */
-    fun isClientDrop(
-        clientAlive: Boolean,
+    fun shouldRecoverAfterDrop(
         targetForeground: Boolean,
         connectedForMs: Long,
         retries: Int,
         maxRetries: Int,
         windowMs: Long = TARGET_FLAP_MS,
     ): Boolean =
-        clientAlive &&
-            targetForeground &&
+        targetForeground &&
             // 抖动窗口内的掉落归 [isStartupFlap] 管，这里只接「用了一会儿才掉」
             connectedForMs >= windowMs &&
             connectedForMs != Long.MAX_VALUE &&
             retries < maxRetries
+
+    /**
+     * 关闭时这条隧道是不是「用户自己连的」。
+     *
+     * [Engine.userOff] 只代表「上一轮我们判断他不要」，它会一直挂到下次打开目标应用。
+     * 中间客户端或系统完全可能把隧道重新拉起来（日志 22:38 判了关闭，23:23 隧道又在），
+     * 那时再按「用户自己连的」禁止强停，关闭链就只能放弃，VPN 一直挂到下次打开应用。
+     *
+     * 只有两种情况仍然算他的：前台就是 VPN 客户端（他刚在里面点了连接），
+     * 或者距上次关闭还不到 [windowMs]（短时间内自己又连上，通常是从磁贴开的）。
+     */
+    fun tunnelIsUserOwned(
+        userOff: Boolean,
+        foregroundIsClient: Boolean,
+        sinceOffMs: Long,
+        windowMs: Long = USER_OWN_TUNNEL_MS,
+    ): Boolean = userOff && (foregroundIsClient || sinceOffMs in 0 until windowMs)
+
+    /** 关掉后这么久之内又连上，仍算「用户自己连的」；再久就是客户端/系统自己恢复的 */
+    const val USER_OWN_TUNNEL_MS = 120_000L
 
     /**
      * 补偿重试要绕开正常冷却：把「上次动手时刻」往前挪到只剩 [retryMs] 冷却的位置。
