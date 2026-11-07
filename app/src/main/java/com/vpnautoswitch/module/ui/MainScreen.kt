@@ -1,5 +1,6 @@
 package com.vpnautoswitch.module.ui
 
+import android.os.Build
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
 import kotlinx.coroutines.delay
@@ -1205,6 +1206,25 @@ private fun LazyListScope.settingsItems(
                     )
                 },
             )
+            if (md3) {
+                // 壁纸取色只有 Android 12 起才有，低版本把这个开关灰掉并说明原因，
+                // 免得用户以为是坏了
+                val paletteOk = Build.VERSION.SDK_INT >= WALLPAPER_PALETTE_MIN_SDK
+                SettingsSwitch(
+                    title = "跟随壁纸取色",
+                    summary = when {
+                        !paletteOk -> "需要 Android 12 及以上，当前系统没有壁纸取色接口"
+                        state.config.md3Wallpaper -> "配色取自系统壁纸，换壁纸或主题色会一起变"
+                        else -> "已固定为紫调基线色，打开后跟随壁纸"
+                    },
+                    icon = MiuixIcons.Theme,
+                    checked = state.config.md3Wallpaper && paletteOk,
+                    enabled = paletteOk,
+                    onCheckedChange = { on ->
+                        state.save(state.config.copy(md3Wallpaper = on))
+                    },
+                )
+            }
         }
     }
     if (visible("界面与动画")) item {
@@ -1762,17 +1782,16 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
+    "1.8.1：Material 3 界面支持莫奈取色（设置 → 外观 → 跟随壁纸取色）。配色直接取自系统\n" +
+        "壁纸，换壁纸或改主题色界面会跟着变；想固定成紫调基线色就把开关关掉。需要\n" +
+        "Android 12 及以上，低版本自动用基线紫。\n" +
     "1.8.0：新增「Material 3 界面」开关（设置 → 外观）。打开后换成 Material You 的紫调\n" +
         "调色板、12dp 卡片圆角和全圆角按钮，顶栏底栏也改成扁平样式，不再用液态玻璃和\n" +
         "悬浮胶囊。默认仍是 HyperOS 风格，想切回来把开关关掉即可，深浅色两套都支持。\n" +
     "1.7.0：修「重启后那句『同步服务起不来』是假警报」。设备早就解锁了，日志里却还是\n" +
         "service=false——其实是查组件信息那一步自己抛了异常，被吞掉后一律显示成 false。\n" +
         "现在会把异常类型写出来，重试轮次也不再重复刷同一段现场。另外，切一次应用时\n" +
-        "「process died ignored」会连刷十几行，把真正的对账结论埋掉，现在同一个包一秒只记一条。\n" +
-    "1.6.9：修「客户端被系统清掉后 VPN 一直不回来」。掉落判据以前要求客户端进程还活着，\n" +
-        "可 ROM 清后台时进程和隧道是一起没的，于是最该救的情况被当成你手动关了。现在只看\n" +
-        "目标应用在不在前台，进程没了也会重新拉起。另外，关不掉时不再因为残留的「已手动关闭」\n" +
-        "状态就放弃强停；重启后没解锁也不再 16 秒就判定失败，解锁即刻补拉一次。"
+        "「process died ignored」会连刷十几行，把真正的对账结论埋掉，现在同一个包一秒只记一条。"
 
 private const val ACK_TIPS =
     "本模块的实现离不开这些开源项目，在此致谢：\n\n" +

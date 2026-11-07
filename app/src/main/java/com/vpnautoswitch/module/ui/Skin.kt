@@ -32,6 +32,18 @@ val LocalThemeStyle: ProvidableCompositionLocal<ThemeStyle> = compositionLocalOf
 fun themeStyleOf(key: String): ThemeStyle =
     if (key == Config.THEME_MD3) ThemeStyle.Md3 else ThemeStyle.Hyper
 
+/** 系统能给出「从壁纸提取的调色板」的最低版本：Android 12 */
+const val WALLPAPER_PALETTE_MIN_SDK = 31
+
+/**
+ * 这一轮要不要让系统决定配色（也就是莫奈取色）。
+ *
+ * 三个条件缺一不可：确实选了 M3、没有关掉跟随壁纸、系统至少是 Android 12。
+ * 低于 12 的系统没有壁纸取色这套接口，关掉开关则回到基线紫。
+ */
+fun useSystemPalette(md3: Boolean, wallpaper: Boolean, sdkInt: Int): Boolean =
+    md3 && wallpaper && sdkInt >= WALLPAPER_PALETTE_MIN_SDK
+
 /** 当前是否 Material 3 风格 */
 @Composable
 fun isMd3(): Boolean = LocalThemeStyle.current == ThemeStyle.Md3

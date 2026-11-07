@@ -51,6 +51,14 @@ data class Config(
     val darkMode: String = "system",
     /** 界面风格：hyper（HyperOS/Miuix，默认） / md3（Material Design 3） */
     val themeStyle: String = THEME_HYPER,
+    /**
+     * Material 3 是否跟随壁纸取色（莫奈）。
+     *
+     * 打开后不再用固定的基线紫，而是让系统把它从壁纸里提取的种子色交给我们，
+     * 换壁纸、换主题色，整个界面的配色会跟着变。系统低于 Android 12 时没有这套机制，
+     * 会退回基线紫。
+     */
+    val md3Wallpaper: Boolean = true,
     /** 连上这些 Wi-Fi 时始终开启 VPN（优先于目标应用判断） */
     val wifiOn: Set<String> = emptySet(),
     /** 连上这些 Wi-Fi 时始终关闭 VPN，且不再自动开启 */
@@ -98,6 +106,7 @@ data class Config(
         o.put("haptic", hapticFeedback)
         o.put("darkMode", darkMode)
         o.put("themeStyle", themeStyle)
+        o.put("md3Wallpaper", md3Wallpaper)
         o.put("wifiOn", JSONArray(wifiOn.toList()))
         o.put("wifiOff", JSONArray(wifiOff.toList()))
         o.put("sortApps", sortAppsByName)
@@ -161,7 +170,8 @@ data class Config(
                         THEME_MD3
                     } else {
                         THEME_HYPER
-                    }
+                    },
+                    md3Wallpaper = o.optBoolean("md3Wallpaper", true)
                 )
             } catch (t: Throwable) {
                 null

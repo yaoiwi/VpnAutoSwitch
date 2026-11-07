@@ -2,6 +2,8 @@ package com.vpnautoswitch.module.ui
 
 import com.vpnautoswitch.module.Config
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ThemeStyleTest {
@@ -24,5 +26,23 @@ class ThemeStyleTest {
     fun `new configs default to hyper`() {
         // 默认值必须是老的 HyperOS 风格：升级上来第一眼不能变样
         assertEquals(Config.THEME_HYPER, Config().themeStyle)
+    }
+
+    @Test
+    fun `wallpaper colours are on by default and only for md3 on android 12 plus`() {
+        assertTrue(Config().md3Wallpaper)
+        // 三件都满足才走系统取色
+        assertTrue(useSystemPalette(md3 = true, wallpaper = true, sdkInt = 31))
+        assertTrue(useSystemPalette(md3 = true, wallpaper = true, sdkInt = 34))
+        // 少了任何一件都回到基线紫
+        assertFalse(useSystemPalette(md3 = false, wallpaper = true, sdkInt = 34))
+        assertFalse(useSystemPalette(md3 = true, wallpaper = false, sdkInt = 34))
+        assertFalse(useSystemPalette(md3 = true, wallpaper = true, sdkInt = 30))
+    }
+
+    @Test
+    fun `the wallpaper switch defaults on and can be turned off`() {
+        assertEquals(true, Config().md3Wallpaper)
+        assertEquals(false, Config(md3Wallpaper = false).md3Wallpaper)
     }
 }
