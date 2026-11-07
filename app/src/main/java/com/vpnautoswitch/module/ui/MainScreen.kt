@@ -21,6 +21,7 @@ import top.yukonga.miuix.kmp.icon.extended.Show
 import top.yukonga.miuix.kmp.icon.extended.UploadCloud
 import top.yukonga.miuix.kmp.icon.extended.VolumeUp
 import androidx.compose.foundation.isSystemInDarkTheme
+import top.yukonga.miuix.kmp.icon.extended.Album
 import top.yukonga.miuix.kmp.icon.extended.Background
 import top.yukonga.miuix.kmp.icon.extended.Theme
 import top.yukonga.miuix.kmp.icon.extended.Blocklist
@@ -115,6 +116,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vpnautoswitch.module.BuildConfig
+import com.vpnautoswitch.module.Config
 import com.vpnautoswitch.module.R
 import com.vpnautoswitch.module.RuleConflict
 import com.vpnautoswitch.module.RuleConflicts
@@ -124,6 +126,7 @@ import com.vpnautoswitch.module.ui.hyper.LiquidGlassNavigationBar
 import com.vpnautoswitch.module.ui.hyper.StandardNavigationBar
 import com.vpnautoswitch.module.ui.hyper.LiquidGlassNavigationItem
 import com.vpnautoswitch.module.ui.hyper.IslandTopBar
+import com.vpnautoswitch.module.ui.hyper.Md3TopBar
 import com.vpnautoswitch.module.ui.hyper.PageList
 import com.vpnautoswitch.module.ui.hyper.SectionTitle
 import com.vpnautoswitch.module.ui.effect.BgEffectBackground
@@ -164,6 +167,9 @@ private val PAGE_TITLES = listOf("首页", "应用", "设置", "关于")
 fun MainScreen(state: AppState) {
     val context = LocalContext.current
     val view = LocalView.current
+    // Material 3 风格：配色由 App 换成 M3 调色板，这里负责把「玻璃」关掉、
+    // 顶栏底栏换成扁平样式，两套风格的差别才看得出来
+    val md3 = isMd3()
     val haptic = {
         if (state.config.hapticFeedback) {
             view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
@@ -234,20 +240,38 @@ fun MainScreen(state: AppState) {
         LiquidGlassNavigationItem(MiuixIcons.Info, "关于"),
     )
 
-    BarBlurHost(enabled = true, captureForEffects = true, liquidGlassEnabled = true) {
+    BarBlurHost(enabled = !md3, captureForEffects = !md3, liquidGlassEnabled = !md3) {
         Scaffold(
             containerColor = MiuixTheme.colorScheme.surface,
             topBar = {
                 // 关于页是整屏渐变 hero，不显示大标题栏
                 if (pagerState.currentPage != 3) {
-                    IslandTopBar(
-                        title = PAGE_TITLES[pagerState.currentPage],
-                        scrollBehavior = scrollBehavior,
-                    )
+                    if (md3) {
+                        // M3 的小标题栏：贴顶、纯色，不再是一颗悬浮胶囊
+                        Md3TopBar(
+                            title = PAGE_TITLES[pagerState.currentPage],
+                            scrollBehavior = scrollBehavior,
+                        )
+                    } else {
+                        IslandTopBar(
+                            title = PAGE_TITLES[pagerState.currentPage],
+                            scrollBehavior = scrollBehavior,
+                        )
+                    }
                 }
             },
             bottomBar = {
-                if (state.config.floatingBottomBar) {
+                // M3 不用悬浮玻璃底栏，也不跟着滚动收起：贴底、纯色分区
+                if (md3) {
+                    StandardNavigationBar(
+                        selectedTabIndex = { pagerState.currentPage },
+                        onTabSelected = {
+                            haptic()
+                            goTo(it)
+                        },
+                        items = navItems,
+                    )
+                } else if (state.config.floatingBottomBar) {
                     LiquidGlassNavigationBar(
                         selectedTabIndex = { pagerState.currentPage },
                         onTabSelected = {
@@ -364,7 +388,7 @@ private fun LazyListScope.overviewItems(
 
     item {
         SectionTitle("快捷开关")
-        Card(modifier = Modifier.fillMaxWidth()) {
+        AppCard(modifier = Modifier.fillMaxWidth()) {
             SettingsSwitch(
                 title = "启用模块",
                 summary = "关闭后不再自动操作 VPN",
@@ -391,7 +415,7 @@ private fun LazyListScope.overviewItems(
 
     item {
         SectionTitle("联动")
-        Card(modifier = Modifier.fillMaxWidth()) {
+        AppCard(modifier = Modifier.fillMaxWidth()) {
             SettingsActionWithArrow(
                 title = "目标应用",
                 icon = MiuixIcons.GridView,
@@ -452,7 +476,7 @@ private fun HeroStatusCard(state: AppState) {
         now = now,
     )
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    AppCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp)) {
             Text(
                 text = summary.headline,
@@ -487,12 +511,12 @@ private fun HeroStatusCard(state: AppState) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                TextButton(
+                AppButton(
                     text = "打开 LSPosed",
                     onClick = { state.openLsposed() },
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(
+                AppButton(
                     text = "刷新",
                     onClick = { state.refreshDiagnostics() },
                     modifier = Modifier.weight(1f),
@@ -504,7 +528,7 @@ private fun HeroStatusCard(state: AppState) {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    TextButton(
+                    AppButton(
                         text = "恢复联动",
                         onClick = { state.togglePause() },
                         modifier = Modifier.weight(1f),
@@ -579,7 +603,7 @@ private fun LazyListScope.appsItems(
 
     item { SectionTitle("目标应用") }
     item {
-        Card(modifier = Modifier.fillMaxWidth()) {
+        AppCard(modifier = Modifier.fillMaxWidth()) {
             SettingsActionWithArrow(
                 title = "添加 / 管理目标应用",
                 icon = MiuixIcons.GridView,
@@ -590,7 +614,7 @@ private fun LazyListScope.appsItems(
     }
     if (state.config.targets.isEmpty()) {
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            AppCard(modifier = Modifier.fillMaxWidth()) {
                 Text(
                     text = "还没有选择应用。打开列表里的应用时会自动连接 VPN。",
                     fontSize = 12.sp,
@@ -663,7 +687,7 @@ private fun LazyListScope.appsItems(
 
     item { SectionTitle("打开时关闭 VPN") }
     item {
-        Card(modifier = Modifier.fillMaxWidth()) {
+        AppCard(modifier = Modifier.fillMaxWidth()) {
             SettingsActionWithArrow(
                 title = "添加 / 管理关闭列表",
                 icon = MiuixIcons.Hide,
@@ -674,7 +698,7 @@ private fun LazyListScope.appsItems(
     }
     if (state.config.offTargets.isEmpty()) {
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            AppCard(modifier = Modifier.fillMaxWidth()) {
                 Text(
                     text = "还没有选择应用。打开列表里的应用时会立即断开 VPN。",
                     fontSize = 12.sp,
@@ -746,7 +770,7 @@ private fun LazyListScope.appsItems(
 
     item { SectionTitle("VPN 客户端") }
     item {
-        Card(modifier = Modifier.fillMaxWidth()) {
+        AppCard(modifier = Modifier.fillMaxWidth()) {
             SettingsActionWithArrow(
                 title = "默认 VPN",
                 icon = MiuixIcons.Pin,
@@ -772,7 +796,7 @@ private fun AppSelectionBar(
     onRemove: () -> Unit,
     onMove: () -> Unit,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    AppCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
             Text(
                 text = if (count == 0) "选择要处理的应用" else "已选 $count 项",
@@ -868,7 +892,7 @@ private fun AppListFilterBar(
 @Composable
 private fun RuleConflictCard(conflict: RuleConflict, labelOf: (String) -> String) {
     val colors = MiuixTheme.colorScheme
-    Card(modifier = Modifier.fillMaxWidth()) {
+    AppCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp)) {
             Text(
                 text = "规则冲突",
@@ -912,7 +936,7 @@ private fun RuleConflictCard(conflict: RuleConflict, labelOf: (String) -> String
 /** 筛选后一个都不剩，但列表本身非空 */
 @Composable
 private fun AppListEmptyMatch() {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    AppCard(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = "没有匹配的应用",
             fontSize = 12.sp,
@@ -936,7 +960,7 @@ private fun AppToggleCard(
 ) {
     val icon = rememberAppIcon(pkg, state.apps.firstOrNull { it.packageName == pkg }?.activityName)
     val haptic = LocalHapticFeedback.current
-    Card(modifier = Modifier.fillMaxWidth()) {
+    AppCard(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1066,6 +1090,9 @@ private fun LazyListScope.settingsItems(
     context: Context,
 ) {
     fun visible(title: String): Boolean = visibleSections == null || title in visibleSections
+    // 设置页要拿它写开关文案；这里是 LazyListScope 扩展函数，取不到 CompositionLocal，
+    // 所以直接看配置
+    val md3 = themeStyleOf(state.config.themeStyle) == ThemeStyle.Md3
 
     item {
         SettingsSearchField(query = query, onQueryChange = onQueryChange)
@@ -1073,7 +1100,7 @@ private fun LazyListScope.settingsItems(
 
     if (visibleSections != null && visibleSections.isEmpty()) {
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            AppCard(modifier = Modifier.fillMaxWidth()) {
                 Text(
                     text = "没有找到「$query」相关的设置",
                     modifier = Modifier.padding(horizontal = 18.dp, vertical = 20.dp),
@@ -1086,7 +1113,7 @@ private fun LazyListScope.settingsItems(
 
     if (visible("网络条件")) item {
         SectionTitle("网络条件")
-        Card(modifier = Modifier.fillMaxWidth()) {
+        AppCard(modifier = Modifier.fillMaxWidth()) {
             SettingsSwitch(
                 title = "Wi-Fi 网络下生效",
                 summary = "连接 Wi-Fi 时才自动开关 VPN",
@@ -1126,7 +1153,7 @@ private fun LazyListScope.settingsItems(
 
     if (visible("外观")) item {
         SectionTitle("外观")
-        Card(modifier = Modifier.fillMaxWidth()) {
+        AppCard(modifier = Modifier.fillMaxWidth()) {
             val systemDark = isSystemInDarkTheme()
             val dark = when (state.config.darkMode) {
                 "dark" -> true
@@ -1161,11 +1188,28 @@ private fun LazyListScope.settingsItems(
                     )
                 },
             )
+            SettingsSwitch(
+                title = "Material 3 界面",
+                summary = if (md3) {
+                    "当前是 Material 3：紫调调色板、12dp 卡片、贴底导航栏"
+                } else {
+                    "打开后换成 Material 3 配色与扁平卡片；关闭为 HyperOS 风格"
+                },
+                icon = MiuixIcons.Album,
+                checked = md3,
+                onCheckedChange = { on ->
+                    state.save(
+                        state.config.copy(
+                            themeStyle = if (on) Config.THEME_MD3 else Config.THEME_HYPER
+                        )
+                    )
+                },
+            )
         }
     }
     if (visible("界面与动画")) item {
         SectionTitle("界面与动画")
-        Card(modifier = Modifier.fillMaxWidth()) {
+        AppCard(modifier = Modifier.fillMaxWidth()) {
             SettingsSwitch(
                 title = "悬浮导航栏",
                 summary = "开启时使用液态玻璃悬浮底栏；关闭后改为贴底的普通导航栏",
@@ -1204,7 +1248,7 @@ private fun LazyListScope.settingsItems(
         // 十个开关挤在一张卡里，想找「保留客户端进程」得从头滑到尾。
         // 按用途分三组，默认只展开最常用的「关闭与断开」；搜索时全部展开，免得匹配到却看不见。
         val searching = visibleSections != null
-        Card(modifier = Modifier.fillMaxWidth()) {
+        AppCard(modifier = Modifier.fillMaxWidth()) {
             SettingsGroup(
                 title = "关闭与断开",
                 summary = "划掉任务怎么断、断开后客户端留不留",
@@ -1360,7 +1404,7 @@ private fun LazyListScope.settingsItems(
 
     if (visible("备份与恢复")) item {
         SectionTitle("备份与恢复")
-        Card(modifier = Modifier.fillMaxWidth()) {
+        AppCard(modifier = Modifier.fillMaxWidth()) {
             SettingsActionWithArrow(
                 title = "导出配置",
                 icon = MiuixIcons.UploadCloud,
@@ -1383,7 +1427,7 @@ private fun LazyListScope.settingsItems(
 
     if (visible("运行日志")) item {
         SectionTitle("运行日志")
-        Card(modifier = Modifier.fillMaxWidth()) {
+        AppCard(modifier = Modifier.fillMaxWidth()) {
             val lines = state.diagnostics.log.lines().filter { it.isNotBlank() }
             SettingsActionWithArrow(
                 title = if (showLog) "收起运行日志" else "展开运行日志",
@@ -1440,22 +1484,22 @@ private fun LogBody(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         // 四个等宽按钮，宽度一致才不会在窄屏上互相挤压
-        TextButton(
+        AppButton(
             text = "复制",
             onClick = copyLog,
             modifier = Modifier.weight(1f),
         )
-        TextButton(
+        AppButton(
             text = "导出",
             onClick = { exportLauncher.launch("vpn-autoswitch-log.txt") },
             modifier = Modifier.weight(1f),
         )
-        TextButton(
+        AppButton(
             text = "刷新",
             onClick = onRefresh,
             modifier = Modifier.weight(1f),
         )
-        TextButton(
+        AppButton(
             text = "删除",
             onClick = {
                 state.clearLog()
@@ -1470,7 +1514,7 @@ private fun LogBody(
             .padding(horizontal = 12.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        TextButton(
+        AppButton(
             text = if (onlyAbnormal) "只看异常 ✓" else "只看异常",
             onClick = { onlyAbnormal = !onlyAbnormal },
         )
@@ -1571,7 +1615,7 @@ private fun SsidRuleDialog(mode: String, state: AppState, onDismiss: () -> Unit)
                 fontSize = 13.sp,
             )
             if (current.isNotEmpty() && !list.contains(current)) {
-                TextButton(
+                AppButton(
                     text = "加入「$current」",
                     onClick = { update(list + current) },
                 )
@@ -1587,7 +1631,7 @@ private fun SsidRuleDialog(mode: String, state: AppState, onDismiss: () -> Unit)
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
             ) {
-                TextButton(
+                AppButton(
                     text = "添加",
                     onClick = {
                         val v = input.trim()
@@ -1615,7 +1659,7 @@ private fun SsidRuleDialog(mode: String, state: AppState, onDismiss: () -> Unit)
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
                             Text(text = ssid, fontSize = 14.sp)
-                            TextButton(text = "删除", onClick = { update(list - ssid) })
+                            AppButton(text = "删除", onClick = { update(list - ssid) })
                         }
                     }
                 }
@@ -1624,7 +1668,7 @@ private fun SsidRuleDialog(mode: String, state: AppState, onDismiss: () -> Unit)
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 horizontalArrangement = Arrangement.End,
             ) {
-                TextButton(text = "关闭", onClick = onDismiss)
+                AppButton(text = "关闭", onClick = onDismiss)
             }
         }
     }
@@ -1687,7 +1731,7 @@ private fun ScreenOffMinutesDialog(
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                 horizontalArrangement = Arrangement.End,
             ) {
-                TextButton(text = "取消", onClick = onDismiss)
+                AppButton(text = "取消", onClick = onDismiss)
             }
         }
     }
@@ -1718,6 +1762,9 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
+    "1.8.0：新增「Material 3 界面」开关（设置 → 外观）。打开后换成 Material You 的紫调\n" +
+        "调色板、12dp 卡片圆角和全圆角按钮，顶栏底栏也改成扁平样式，不再用液态玻璃和\n" +
+        "悬浮胶囊。默认仍是 HyperOS 风格，想切回来把开关关掉即可，深浅色两套都支持。\n" +
     "1.7.0：修「重启后那句『同步服务起不来』是假警报」。设备早就解锁了，日志里却还是\n" +
         "service=false——其实是查组件信息那一步自己抛了异常，被吞掉后一律显示成 false。\n" +
         "现在会把异常类型写出来，重试轮次也不再重复刷同一段现场。另外，切一次应用时\n" +
@@ -1725,10 +1772,7 @@ private const val CHANGELOG_TIPS =
     "1.6.9：修「客户端被系统清掉后 VPN 一直不回来」。掉落判据以前要求客户端进程还活着，\n" +
         "可 ROM 清后台时进程和隧道是一起没的，于是最该救的情况被当成你手动关了。现在只看\n" +
         "目标应用在不在前台，进程没了也会重新拉起。另外，关不掉时不再因为残留的「已手动关闭」\n" +
-        "状态就放弃强停；重启后没解锁也不再 16 秒就判定失败，解锁即刻补拉一次。\n" +
-    "1.6.8：把几个挤在一起的按钮重新排了。「状态诊断」「客户端适配」底部四个按钮以前是两行\n" +
-        "各排各的，第二行靠右，「打开 LSPosed」和「关闭」挤成一团；首页状态卡的「打开 LSPosed」\n" +
-        "和「刷新」在窄屏上直接叠住。现在统一成等宽两列，点起来不容易按错。"
+        "状态就放弃强停；重启后没解锁也不再 16 秒就判定失败，解锁即刻补拉一次。"
 
 private const val ACK_TIPS =
     "本模块的实现离不开这些开源项目，在此致谢：\n\n" +
@@ -1954,7 +1998,7 @@ private fun AboutPage(
             onDismissRequest = { dialogTitle = null },
         ) {
             Row(modifier = Modifier.padding(top = 12.dp)) {
-                TextButton(text = "知道了", onClick = { dialogTitle = null })
+                AppButton(text = "知道了", onClick = { dialogTitle = null })
             }
         }
     }
@@ -2002,7 +2046,7 @@ private fun ChangelogDialog(onDismiss: () -> Unit) {
                 modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
                 horizontalArrangement = Arrangement.End,
             ) {
-                TextButton(text = "关闭", onClick = onDismiss)
+                AppButton(text = "关闭", onClick = onDismiss)
             }
         }
     }

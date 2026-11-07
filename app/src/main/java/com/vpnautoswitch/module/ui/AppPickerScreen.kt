@@ -88,7 +88,7 @@ fun AppPickerScreen(state: AppState) {
                         }
                     },
                     actions = {
-                        TextButton(text = "完成", onClick = { state.confirmPicker() })
+                        AppButton(text = "完成", onClick = { state.confirmPicker() })
                     },
                 )
             },
@@ -126,7 +126,7 @@ fun AppPickerScreen(state: AppState) {
                         if (presets.isNotEmpty()) {
                             item {
                                 SectionTitle("已安装的常见客户端")
-                                Card(modifier = Modifier.fillMaxWidth()) {
+                                AppCard(modifier = Modifier.fillMaxWidth()) {
                                     presets.forEach { preset ->
                                         val app = state.apps.firstOrNull {
                                             it.packageName == preset.packageName
@@ -178,7 +178,7 @@ fun AppPickerScreen(state: AppState) {
                     if (userApps.isNotEmpty() || single) {
                         item {
                             SectionTitle(if (single) "全部应用" else "应用")
-                            Card(modifier = Modifier.fillMaxWidth()) {
+                            AppCard(modifier = Modifier.fillMaxWidth()) {
                                 userApps.forEach { app ->
                                     AppRow(
                                         app = app,
@@ -197,7 +197,7 @@ fun AppPickerScreen(state: AppState) {
                     if (systemApps.isNotEmpty()) {
                         item {
                             SectionTitle("系统应用")
-                            Card(modifier = Modifier.fillMaxWidth()) {
+                            AppCard(modifier = Modifier.fillMaxWidth()) {
                                 systemApps.forEach { app ->
                                     AppRow(
                                         app = app,

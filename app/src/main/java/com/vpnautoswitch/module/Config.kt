@@ -49,6 +49,8 @@ data class Config(
     val hapticFeedback: Boolean = true,
     /** 深浅色：system（跟随系统） / light / dark */
     val darkMode: String = "system",
+    /** 界面风格：hyper（HyperOS/Miuix，默认） / md3（Material Design 3） */
+    val themeStyle: String = THEME_HYPER,
     /** 连上这些 Wi-Fi 时始终开启 VPN（优先于目标应用判断） */
     val wifiOn: Set<String> = emptySet(),
     /** 连上这些 Wi-Fi 时始终关闭 VPN，且不再自动开启 */
@@ -95,6 +97,7 @@ data class Config(
         o.put("floatingBar", floatingBottomBar)
         o.put("haptic", hapticFeedback)
         o.put("darkMode", darkMode)
+        o.put("themeStyle", themeStyle)
         o.put("wifiOn", JSONArray(wifiOn.toList()))
         o.put("wifiOff", JSONArray(wifiOff.toList()))
         o.put("sortApps", sortAppsByName)
@@ -108,6 +111,12 @@ data class Config(
     companion object {
         const val PREFS_NAME = "vpn_autoswitch_config"
         internal const val KEY_JSON = "config_json"
+
+        /** 界面风格：HyperOS / Miuix 那套 */
+        const val THEME_HYPER = "hyper"
+
+        /** 界面风格：Material Design 3 */
+        const val THEME_MD3 = "md3"
 
         fun parse(raw: String?): Config? {
             if (raw.isNullOrEmpty()) return null
@@ -147,6 +156,11 @@ data class Config(
                         "dark" -> "dark"
                         "light" -> "light"
                         else -> "system"
+                    },
+                    themeStyle = if (o.optString("themeStyle", THEME_HYPER) == THEME_MD3) {
+                        THEME_MD3
+                    } else {
+                        THEME_HYPER
                     }
                 )
             } catch (t: Throwable) {

@@ -190,12 +190,12 @@ internal fun ClientAdapterDialog(state: AppState, onDismiss: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                TextButton(
+                AppButton(
                     text = "测试外部控制",
                     onClick = { state.testClient("activity") },
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(
+                AppButton(
                     text = "测试 VpnService",
                     onClick = { state.testClient("service") },
                     modifier = Modifier.weight(1f),
@@ -207,7 +207,7 @@ internal fun ClientAdapterDialog(state: AppState, onDismiss: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                TextButton(
+                AppButton(
                     text = "清除记忆",
                     onClick = {
                         state.forgetClientMode()
@@ -215,7 +215,7 @@ internal fun ClientAdapterDialog(state: AppState, onDismiss: () -> Unit) {
                     },
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(
+                AppButton(
                     text = "关闭",
                     onClick = onDismiss,
                     modifier = Modifier.weight(1f),

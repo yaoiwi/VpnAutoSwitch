@@ -17,7 +17,10 @@ internal object SettingsSearch {
         ),
         Section(
             "外观",
-            listOf("深色", "浅色", "主题", "颜色", "跟随", "系统", "dark", "light", "夜间"),
+            listOf(
+                "深色", "浅色", "主题", "颜色", "跟随", "系统", "dark", "light", "夜间",
+                "material", "md3", "风格", "界面", "配色", "hyperos", "miuix",
+            ),
         ),
         Section(
             "界面与动画",

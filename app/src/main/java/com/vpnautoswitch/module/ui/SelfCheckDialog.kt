@@ -45,7 +45,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 @Composable
 internal fun SelfCheckSection(state: AppState) {
     var show by remember { mutableStateOf(false) }
-    Card(modifier = Modifier.fillMaxWidth()) {
+    AppCard(modifier = Modifier.fillMaxWidth()) {
         SettingsActionWithArrow(
             title = "一键自检",
             icon = MiuixIcons.Info,
@@ -162,7 +162,7 @@ internal fun SelfCheckDialog(state: AppState, onDismiss: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                TextButton(
+                AppButton(
                     text = "重新检测",
                     onClick = {
                         state.refreshDiagnostics()
@@ -170,7 +170,7 @@ internal fun SelfCheckDialog(state: AppState, onDismiss: () -> Unit) {
                     },
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(
+                AppButton(
                     text = "复制报告",
                     onClick = {
                         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -191,7 +191,7 @@ internal fun SelfCheckDialog(state: AppState, onDismiss: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                TextButton(
+                AppButton(
                     text = "打开 LSPosed",
                     onClick = {
                         if (!state.openLsposed()) {
@@ -200,7 +200,7 @@ internal fun SelfCheckDialog(state: AppState, onDismiss: () -> Unit) {
                     },
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(
+                AppButton(
                     text = "关闭",
                     onClick = onDismiss,
                     modifier = Modifier.weight(1f),
