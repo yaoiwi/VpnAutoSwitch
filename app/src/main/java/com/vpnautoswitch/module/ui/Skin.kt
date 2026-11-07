@@ -10,6 +10,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.vpnautoswitch.module.Config
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardColors
+import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.TextButton
 
 /**
@@ -60,16 +62,28 @@ fun isMd3(): Boolean = LocalThemeStyle.current == ThemeStyle.Md3
 /**
  * 卡片。M3 用 12dp 圆角（HyperOS 那套是更大的方块圆角）；
  * 其余一律交给 Miuix 默认值，两套风格的行为才不会分叉。
+ *
+ * [colors] 只在需要自定义底色时传（关于页的玻璃卡），其余场景留空走默认。
  */
 @Composable
 fun AppCard(
     modifier: Modifier = Modifier,
+    colors: CardColors? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     if (isMd3()) {
-        Card(modifier = modifier, cornerRadius = MD3_CARD_CORNER, content = content)
+        Card(
+            modifier = modifier,
+            cornerRadius = MD3_CARD_CORNER,
+            colors = colors ?: CardDefaults.defaultColors(),
+            content = content,
+        )
     } else {
-        Card(modifier = modifier, content = content)
+        Card(
+            modifier = modifier,
+            colors = colors ?: CardDefaults.defaultColors(),
+            content = content,
+        )
     }
 }
 

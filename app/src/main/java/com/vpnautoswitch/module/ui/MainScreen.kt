@@ -40,6 +40,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.alpha
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -65,6 +68,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -138,7 +142,6 @@ import com.vpnautoswitch.module.ui.hyper.SettingsActionWithArrow
 import com.vpnautoswitch.module.ui.hyper.SettingsItemMargin
 import com.vpnautoswitch.module.ui.hyper.SettingsSwitch
 import kotlinx.coroutines.launch
-import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
@@ -1794,16 +1797,14 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
+    "1.8.3：关于页也跟随 Material 3 了：纯色底、实色卡片、小一号的头图，不再有整屏流动\n" +
+        "光晕。切到 M3 后四个页面风格一致，切回 HyperOS 还是原来的样子。\n" +
     "1.8.2：Material 3 界面支持莫奈取色（设置 → 外观 → 跟随壁纸取色），换壁纸或改主题色\n" +
         "界面会跟着变；关掉回到紫调基线色，Android 12 以下自动用基线色。悬浮导航栏改为按主题\n" +
         "各自记忆：M3 下也能开，开了不影响 HyperOS 那边，切回来还是原来的选择。\n" +
     "1.8.0：新增「Material 3 界面」开关（设置 → 外观）。打开后换成 Material You 的配色、\n" +
         "12dp 卡片圆角和全圆角按钮，顶栏底栏也改成扁平样式。默认仍是 HyperOS 风格，\n" +
-        "想切回来把开关关掉即可，深浅色两套都支持。\n" +
-    "1.7.0：修「重启后那句『同步服务起不来』是假警报」。设备早就解锁了，日志里却还是\n" +
-        "service=false——其实是查组件信息那一步自己抛了异常，被吞掉后一律显示成 false。\n" +
-        "现在会把异常类型写出来，重试轮次也不再重复刷同一段现场。另外，切一次应用时\n" +
-        "「process died ignored」会连刷十几行，把真正的对账结论埋掉，现在同一个包一秒只记一条。"
+        "想切回来把开关关掉即可，深浅色两套都支持。"
 
 private const val ACK_TIPS =
     "本模块的实现离不开这些开源项目，在此致谢：\n\n" +
@@ -1854,8 +1855,11 @@ private fun AboutPage(
     haptic: () -> Unit,
 ) {
     val context = LocalContext.current
+    val md3 = isMd3()
     val listState = rememberLazyListState()
-    val heroHeight = 420.dp
+    // M3 的头图不做那么大：「图标 + 名称 + 版本」三行居中即可，
+    // 不像 HyperOS 那样需要一整屏光晕托着
+    val heroHeight = if (md3) 240.dp else 420.dp
     val density = LocalDensity.current
     val heroPx = with(density) { heroHeight.toPx() }
     val scrollOffset by remember(listState, heroPx) {
@@ -1870,9 +1874,12 @@ private fun AboutPage(
 
     // 深色主题下玻璃更透，光晕才真的透得上来；浅色主题也跟着再透一点，别糊成一块实色
     val darkSurface = MiuixTheme.colorScheme.surface.luminance() < 0.5f
-    val glassColor = MiuixTheme.colorScheme.surface.copy(
-        alpha = if (darkSurface) 0.44f else 0.60f,
-    )
+    // M3 不用半透明玻璃：卡片直接铺 surfaceContainer，免得和环境光混成脏色
+    val glassColor = if (md3) {
+        MiuixTheme.colorScheme.surfaceContainer
+    } else {
+        MiuixTheme.colorScheme.surface.copy(alpha = if (darkSurface) 0.44f else 0.60f)
+    }
 
     // 滚动驱动的过渡：淡出 + 轻微缩小 + 上移视差，跟着手指连续变化，不会一下子消失
     val fadeDistance = with(density) { 130.dp.toPx() }
@@ -1890,28 +1897,24 @@ private fun AboutPage(
         dialogBody = body
     }
 
-    BgEffectBackground(
-        modifier = Modifier.fillMaxSize(),
-        alpha = { backgroundAlpha },
-        // 老系统没有 AGSL，退回原来的径向渐变，至少不会白一块
-        fallback = {
-            AboutBackground(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(heroHeight)
-                    .alpha(backgroundAlpha),
-            )
-        },
-    ) {
+    // 页面主体两套风格共用，只有外面的背景壳不同
+    val pageContent: @Composable BoxScope.() -> Unit = {
+        // M3 是纯色页，内容滚上去会直接顶到状态栏，给列表补一段状态栏高度
+        val statusTop = if (md3) {
+            WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+        } else {
+            0.dp
+        }
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize().overScrollVertical(),
             contentPadding = PaddingValues(
                 start = 16.dp,
-                top = 0.dp,
+                top = statusTop,
                 end = 16.dp,
-                // 多留一点滚动余量，让头像区有完整的淡出过程，而不是滚两下就到尽头
-                bottom = bottomInset + 140.dp,
+                // 多留一点滚动余量，让头像区有完整的淡出过程，而不是滚两下就到尽头；
+                // M3 的头图小得多，余量也跟着收一点
+                bottom = bottomInset + if (md3) 80.dp else 140.dp,
             ),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -1920,10 +1923,11 @@ private fun AboutPage(
             // 开发者 / 致谢 / 项目合成一张卡，行之间靠组件自带的分隔线，
             // 不再各占一个分组标题——那几段空白正好把环境光隔成了几条
             item {
-                Card(
+                // M3 下是 surfaceContainer 实色卡 + 12dp 圆角；
+                // HyperOS 下是半透明玻璃，底下的环境光透上来，才有那种
+                // 上下一片渐变、而不是「渐变到卡片就断掉」的感觉
+                AppCard(
                     modifier = Modifier.fillMaxWidth(),
-                    // 卡片是半透明的玻璃：底下的环境光透上来，才有 HyperOS 那种
-                    // 上下一片渐变、而不是“渐变到卡片就断掉”的感觉
                     colors = CardDefaults.defaultColors(color = glassColor),
                 ) {
                     SettingsAction(
@@ -1997,23 +2001,24 @@ private fun AboutPage(
                     },
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
+                    // M3 的头图收小一号：图标 72dp、标题 24sp，和 M3 的标题层级对齐
                     Image(
                         painter = painterResource(R.drawable.ic_launcher),
                         contentDescription = null,
                         modifier = Modifier
-                            .size(96.dp)
-                            .clip(RoundedCornerShape(24.dp)),
+                            .size(if (md3) 72.dp else 96.dp)
+                            .clip(RoundedCornerShape(if (md3) 18.dp else 24.dp)),
                     )
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(if (md3) 16.dp else 20.dp))
                     Text(
                         text = "VPN 自动开关",
-                        fontSize = 28.sp,
+                        fontSize = if (md3) 24.sp else 28.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(if (md3) 6.dp else 8.dp))
                     Text(
                         text = "${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE})",
-                        fontSize = 15.sp,
+                        fontSize = if (md3) 14.sp else 15.sp,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
                 }
@@ -2031,6 +2036,33 @@ private fun AboutPage(
             Row(modifier = Modifier.padding(top = 12.dp)) {
                 AppButton(text = "知道了", onClick = { dialogTitle = null })
             }
+        }
+    }
+
+    if (md3) {
+        // M3 的关于页也是一张纯色页面，不再有整屏流动的光晕
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MiuixTheme.colorScheme.surface),
+        ) {
+            pageContent()
+        }
+    } else {
+        BgEffectBackground(
+            modifier = Modifier.fillMaxSize(),
+            alpha = { backgroundAlpha },
+            // 老系统没有 AGSL，退回原来的径向渐变，至少不会白一块
+            fallback = {
+                AboutBackground(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(heroHeight)
+                        .alpha(backgroundAlpha),
+                )
+            },
+        ) {
+            pageContent()
         }
     }
     if (showChangelog) {
