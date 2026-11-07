@@ -1828,13 +1828,12 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
+    "1.8.5：新增「隐藏桌面图标」开关（设置 → 外观），隐藏后仍可从 LSPosed 管理器打开\n" +
+        "本页恢复。\n" +
     "1.8.4：Material 3 下关于页补上顶部标题栏，和其它页一致；去掉应用图标，\n" +
         "名称与版本改成两行普通文字，跟着卡片一起滚。\n" +
     "1.8.3：关于页也跟随 Material 3 了：纯色底、实色卡片、小一号的头图，不再有整屏流动\n" +
-        "光晕。切到 M3 后四个页面风格一致，切回 HyperOS 还是原来的样子。\n" +
-    "1.8.2：Material 3 界面支持莫奈取色（设置 → 外观 → 跟随壁纸取色），换壁纸或改主题色\n" +
-        "界面会跟着变；关掉回到紫调基线色，Android 12 以下自动用基线色。悬浮导航栏改为按主题\n" +
-        "各自记忆：M3 下也能开，开了不影响 HyperOS 那边，切回来还是原来的选择。"
+        "光晕。切到 M3 后四个页面风格一致，切回 HyperOS 还是原来的样子。"
 
 private const val ACK_TIPS =
     "本模块的实现离不开这些开源项目，在此致谢：\n\n" +
