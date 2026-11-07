@@ -1903,9 +1903,9 @@ private fun AboutPage(
             modifier = Modifier.fillMaxSize().overScrollVertical(),
             contentPadding = PaddingValues(
                 start = 16.dp,
-                // M3 的顶栏是贴着状态栏的实色条，列表从它下面开始；
-                // HyperOS 没有顶栏，靠下面那段 hero 占位把内容顶下去
-                top = if (md3) topInset else 0.dp,
+                // M3 的顶栏是贴着状态栏的实色条，列表从它下面开始，再多留 8dp
+                // 和其它页的起始间距一致；HyperOS 没有顶栏，靠下面那段 hero 占位把内容顶下去
+                top = if (md3) topInset + 8.dp else 0.dp,
                 end = 16.dp,
                 // 多留一点滚动余量，让头像区有完整的淡出过程，而不是滚两下就到尽头；
                 // M3 没有头图，余量也跟着收一点
