@@ -28,6 +28,13 @@ class SettingsSearchTest {
     }
 
     @Test
+    fun `hide launcher icon setting is searchable`() {
+        assertTrue(SettingsSearch.matchedTitles("图标")!!.contains("外观"))
+        assertTrue(SettingsSearch.matchedTitles("桌面")!!.contains("外观"))
+        assertTrue(SettingsSearch.matchedTitles("launcher")!!.contains("外观"))
+    }
+
+    @Test
     fun `matching ignores case and spaces`() {
         assertEquals(
             SettingsSearch.matchedTitles("WIFI"),

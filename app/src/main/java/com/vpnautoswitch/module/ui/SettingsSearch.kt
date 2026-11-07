@@ -21,6 +21,7 @@ internal object SettingsSearch {
                 "深色", "浅色", "主题", "颜色", "跟随", "系统", "dark", "light", "夜间",
                 "material", "md3", "风格", "界面", "配色", "hyperos", "miuix",
                 "莫奈", "取色", "壁纸", "monet", "wallpaper",
+                "图标", "桌面", "隐藏", "launcher", "icon", "desktop", "home",
             ),
         ),
         Section(

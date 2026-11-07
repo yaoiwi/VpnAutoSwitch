@@ -44,14 +44,33 @@
             android:name="xposedscope"
             android:resource="@array/xposed_scope" />
 
+        <!-- 设置入口：桌面图标被隐藏后，LSPosed 管理器里的「打开」是唯一入口，
+             所以这条 MODULE_SETTINGS 必须留在 Activity 本身，不能跟着 alias 一起禁用 -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="de.robv.android.xposed.category.MODULE_SETTINGS" />
             </intent-filter>
         </activity>
+
+        <!-- 桌面入口：隐藏图标只禁用这个 alias，MainActivity 本身不受影响。
+             name 用完整类名（这里 namespace 与 applicationId 不同，写相对名容易踩空），
+             需与 LauncherIcon.ALIAS_CLASS 一致 -->
+        <activity-alias
+            android:name="com.vpnautoswitch.module.LauncherEntry"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="@string/app_name"
+            android:roundIcon="@mipmap/ic_launcher"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
         <!-- 卸载清理：目标应用被删除后自动从配置里移除，重装回来默认关闭 -->
         <receiver

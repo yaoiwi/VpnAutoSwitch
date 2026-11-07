@@ -1,5 +1,6 @@
 package com.vpnautoswitch.module.ui
 
+import com.vpnautoswitch.module.LauncherIcon
 import android.os.Build
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
@@ -1228,6 +1229,33 @@ private fun LazyListScope.settingsItems(
                     },
                 )
             }
+            // 桌面入口由 manifest 里独立的 activity-alias 承载，关掉它不影响
+            // MainActivity 的 MODULE_SETTINGS 入口，所以隐藏后还能从 LSPosed 管理器回来恢复
+            var iconHidden by remember { mutableStateOf(LauncherIcon.isHidden(context)) }
+            // 也可能是在别处（adb / 管理器）改过状态，每次滚回本页重新以系统为准
+            LaunchedEffect(Unit) { iconHidden = LauncherIcon.isHidden(context) }
+            SettingsSwitch(
+                title = "隐藏桌面图标",
+                summary = if (iconHidden) {
+                    "图标已从桌面与应用抽屉移除；仍可从 LSPosed 管理器打开本页恢复"
+                } else {
+                    "从桌面与应用抽屉中移除图标，隐藏后仍可从 LSPosed 管理器打开本页"
+                },
+                icon = if (iconHidden) MiuixIcons.Hide else MiuixIcons.Home,
+                checked = iconHidden,
+                onCheckedChange = { on ->
+                    if (LauncherIcon.setHidden(context, on)) {
+                        iconHidden = LauncherIcon.isHidden(context)
+                        Toast.makeText(
+                            context,
+                            if (on) "桌面图标已隐藏" else "桌面图标已恢复",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    } else {
+                        Toast.makeText(context, "修改桌面图标失败", Toast.LENGTH_SHORT).show()
+                    }
+                },
+            )
             // 悬浮底栏归属当前风格：两套各记各的，切主题不会把另一边的选择改掉
             SettingsSwitch(
                 title = "悬浮导航栏",
