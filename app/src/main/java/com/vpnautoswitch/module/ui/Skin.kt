@@ -44,6 +44,15 @@ const val WALLPAPER_PALETTE_MIN_SDK = 31
 fun useSystemPalette(md3: Boolean, wallpaper: Boolean, sdkInt: Int): Boolean =
     md3 && wallpaper && sdkInt >= WALLPAPER_PALETTE_MIN_SDK
 
+/**
+ * 当前风格下要不要用悬浮底栏。
+ *
+ * 两套风格各记各的开关：在 M3 里打开悬浮栏不会连带改变 HyperOS 那边的选择，
+ * 切回来还是原来的样子。M3 默认贴底，HyperOS 默认悬浮。
+ */
+fun floatingBarOf(config: Config, md3: Boolean): Boolean =
+    if (md3) config.md3FloatingBottomBar else config.floatingBottomBar
+
 /** 当前是否 Material 3 风格 */
 @Composable
 fun isMd3(): Boolean = LocalThemeStyle.current == ThemeStyle.Md3

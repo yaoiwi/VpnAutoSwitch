@@ -241,7 +241,16 @@ fun MainScreen(state: AppState) {
         LiquidGlassNavigationItem(MiuixIcons.Info, "关于"),
     )
 
-    BarBlurHost(enabled = !md3, captureForEffects = !md3, liquidGlassEnabled = !md3) {
+    // 悬浮底栏由当前风格自己的开关决定：M3 也能开。开了就需要模糊与液态玻璃，
+    // 贴底时则把这两样关掉，省下每帧的截屏开销。
+    val floatingBar = floatingBarOf(state.config, md3)
+    val needGlass = !md3 || floatingBar
+
+    BarBlurHost(
+        enabled = needGlass,
+        captureForEffects = needGlass,
+        liquidGlassEnabled = needGlass,
+    ) {
         Scaffold(
             containerColor = MiuixTheme.colorScheme.surface,
             topBar = {
@@ -262,17 +271,9 @@ fun MainScreen(state: AppState) {
                 }
             },
             bottomBar = {
-                // M3 不用悬浮玻璃底栏，也不跟着滚动收起：贴底、纯色分区
-                if (md3) {
-                    StandardNavigationBar(
-                        selectedTabIndex = { pagerState.currentPage },
-                        onTabSelected = {
-                            haptic()
-                            goTo(it)
-                        },
-                        items = navItems,
-                    )
-                } else if (state.config.floatingBottomBar) {
+                // 两种风格共用同一套判断：开悬浮就用玻璃底栏，关掉就贴底。
+                // M3 的默认值在配置里是「关」，所以刚切过去仍是贴底，不会突然浮起来。
+                if (floatingBar) {
                     LiquidGlassNavigationBar(
                         selectedTabIndex = { pagerState.currentPage },
                         onTabSelected = {
@@ -1192,7 +1193,7 @@ private fun LazyListScope.settingsItems(
             SettingsSwitch(
                 title = "Material 3 界面",
                 summary = if (md3) {
-                    "当前是 Material 3：紫调调色板、12dp 卡片、贴底导航栏"
+                    "当前是 Material 3：可跟随壁纸取色，卡片与按钮换成 M3 圆角"
                 } else {
                     "打开后换成 Material 3 配色与扁平卡片；关闭为 HyperOS 风格"
                 },
@@ -1225,20 +1226,31 @@ private fun LazyListScope.settingsItems(
                     },
                 )
             }
+            // 悬浮底栏归属当前风格：两套各记各的，切主题不会把另一边的选择改掉
+            SettingsSwitch(
+                title = "悬浮导航栏",
+                summary = if (md3) {
+                    "只影响 Material 3 界面：开启后底栏变成液态玻璃悬浮胶囊，关闭则贴底"
+                } else {
+                    "只影响 HyperOS 界面：开启时使用液态玻璃悬浮底栏，关闭后贴底"
+                },
+                icon = MiuixIcons.HorizontalSplit,
+                checked = floatingBarOf(state.config, md3),
+                onCheckedChange = { on ->
+                    state.save(
+                        if (md3) {
+                            state.config.copy(md3FloatingBottomBar = on)
+                        } else {
+                            state.config.copy(floatingBottomBar = on)
+                        }
+                    )
+                },
+            )
         }
     }
     if (visible("界面与动画")) item {
         SectionTitle("界面与动画")
         AppCard(modifier = Modifier.fillMaxWidth()) {
-            SettingsSwitch(
-                title = "悬浮导航栏",
-                summary = "开启时使用液态玻璃悬浮底栏；关闭后改为贴底的普通导航栏",
-                icon = MiuixIcons.HorizontalSplit,
-                checked = state.config.floatingBottomBar,
-                onCheckedChange = {
-                    state.save(state.config.copy(floatingBottomBar = it))
-                },
-            )
             SettingsSwitch(
                 title = "切页滑动动画",
                 summary = "左右划到别的页面时平滑过渡；关闭后瞬时切换",
@@ -1782,12 +1794,12 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
-    "1.8.1：Material 3 界面支持莫奈取色（设置 → 外观 → 跟随壁纸取色）。配色直接取自系统\n" +
-        "壁纸，换壁纸或改主题色界面会跟着变；想固定成紫调基线色就把开关关掉。需要\n" +
-        "Android 12 及以上，低版本自动用基线紫。\n" +
-    "1.8.0：新增「Material 3 界面」开关（设置 → 外观）。打开后换成 Material You 的紫调\n" +
-        "调色板、12dp 卡片圆角和全圆角按钮，顶栏底栏也改成扁平样式，不再用液态玻璃和\n" +
-        "悬浮胶囊。默认仍是 HyperOS 风格，想切回来把开关关掉即可，深浅色两套都支持。\n" +
+    "1.8.2：Material 3 界面支持莫奈取色（设置 → 外观 → 跟随壁纸取色），换壁纸或改主题色\n" +
+        "界面会跟着变；关掉回到紫调基线色，Android 12 以下自动用基线色。悬浮导航栏改为按主题\n" +
+        "各自记忆：M3 下也能开，开了不影响 HyperOS 那边，切回来还是原来的选择。\n" +
+    "1.8.0：新增「Material 3 界面」开关（设置 → 外观）。打开后换成 Material You 的配色、\n" +
+        "12dp 卡片圆角和全圆角按钮，顶栏底栏也改成扁平样式。默认仍是 HyperOS 风格，\n" +
+        "想切回来把开关关掉即可，深浅色两套都支持。\n" +
     "1.7.0：修「重启后那句『同步服务起不来』是假警报」。设备早就解锁了，日志里却还是\n" +
         "service=false——其实是查组件信息那一步自己抛了异常，被吞掉后一律显示成 false。\n" +
         "现在会把异常类型写出来，重试轮次也不再重复刷同一段现场。另外，切一次应用时\n" +

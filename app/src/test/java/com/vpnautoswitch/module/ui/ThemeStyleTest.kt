@@ -45,4 +45,19 @@ class ThemeStyleTest {
         assertEquals(true, Config().md3Wallpaper)
         assertEquals(false, Config(md3Wallpaper = false).md3Wallpaper)
     }
+
+    @Test
+    fun `each style keeps its own floating bar choice`() {
+        // 在 M3 里开了悬浮，不该把 HyperOS 那边的「贴底」改掉
+        val mixed = Config(floatingBottomBar = false, md3FloatingBottomBar = true)
+        assertTrue(floatingBarOf(mixed, md3 = true))
+        assertFalse(floatingBarOf(mixed, md3 = false))
+    }
+
+    @Test
+    fun `md3 docks the bar by default while hyper floats`() {
+        val defaults = Config()
+        assertTrue(floatingBarOf(defaults, md3 = false))
+        assertFalse(floatingBarOf(defaults, md3 = true))
+    }
 }

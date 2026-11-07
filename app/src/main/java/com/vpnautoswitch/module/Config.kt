@@ -45,6 +45,13 @@ data class Config(
     val pageAnimation: Boolean = true,
     /** 悬浮底栏：滚动时自动隐藏 */
     val floatingBottomBar: Boolean = true,
+    /**
+     * Material 3 风格下的悬浮底栏。
+     *
+     * 两套风格各记各的：HyperOS 的下沉玻璃底栏是它的设计语言，M3 规范里底栏本就该贴底，
+     * 所以这里默认关闭。用户在 M3 下打开后只影响 M3，切回 HyperOS 不会连带改掉那边的设置。
+     */
+    val md3FloatingBottomBar: Boolean = false,
     /** 点击底栏 / 列表项时震动 */
     val hapticFeedback: Boolean = true,
     /** 深浅色：system（跟随系统） / light / dark */
@@ -103,6 +110,7 @@ data class Config(
         o.put("swipe", swipePaging)
         o.put("pageAnim", pageAnimation)
         o.put("floatingBar", floatingBottomBar)
+        o.put("md3FloatingBar", md3FloatingBottomBar)
         o.put("haptic", hapticFeedback)
         o.put("darkMode", darkMode)
         o.put("themeStyle", themeStyle)
@@ -153,6 +161,7 @@ data class Config(
                     swipePaging = o.optBoolean("swipe", true),
                     pageAnimation = o.optBoolean("pageAnim", true),
                     floatingBottomBar = o.optBoolean("floatingBar", true),
+                    md3FloatingBottomBar = o.optBoolean("md3FloatingBar", false),
                     hapticFeedback = o.optBoolean("haptic", true),
                     wifiOn = readSet(o.optJSONArray("wifiOn")),
                     wifiOff = readSet(o.optJSONArray("wifiOff")),
