@@ -40,9 +40,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.alpha
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -257,8 +254,9 @@ fun MainScreen(state: AppState) {
         Scaffold(
             containerColor = MiuixTheme.colorScheme.surface,
             topBar = {
-                // 关于页是整屏渐变 hero，不显示大标题栏
-                if (pagerState.currentPage != 3) {
+                // 关于页在 HyperOS 下是整屏渐变 hero，不显示大标题栏；
+                // M3 没有光晕，就是一页普通内容，跟着其它页一起带顶栏
+                if (md3 || pagerState.currentPage != 3) {
                     if (md3) {
                         // M3 的小标题栏：贴顶、纯色，不再是一颗悬浮胶囊
                         Md3TopBar(
@@ -366,6 +364,7 @@ fun MainScreen(state: AppState) {
                         else -> AboutPage(
                             state = state,
                             bottomInset = bottomInset,
+                            topInset = outer.calculateTopPadding(),
                             haptic = haptic,
                         )
                     }
@@ -1797,14 +1796,13 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
+    "1.8.4：Material 3 下关于页补上顶部标题栏，和其它页一致；去掉应用图标，\n" +
+        "名称与版本改成两行普通文字，跟着卡片一起滚。\n" +
     "1.8.3：关于页也跟随 Material 3 了：纯色底、实色卡片、小一号的头图，不再有整屏流动\n" +
         "光晕。切到 M3 后四个页面风格一致，切回 HyperOS 还是原来的样子。\n" +
     "1.8.2：Material 3 界面支持莫奈取色（设置 → 外观 → 跟随壁纸取色），换壁纸或改主题色\n" +
         "界面会跟着变；关掉回到紫调基线色，Android 12 以下自动用基线色。悬浮导航栏改为按主题\n" +
-        "各自记忆：M3 下也能开，开了不影响 HyperOS 那边，切回来还是原来的选择。\n" +
-    "1.8.0：新增「Material 3 界面」开关（设置 → 外观）。打开后换成 Material You 的配色、\n" +
-        "12dp 卡片圆角和全圆角按钮，顶栏底栏也改成扁平样式。默认仍是 HyperOS 风格，\n" +
-        "想切回来把开关关掉即可，深浅色两套都支持。"
+        "各自记忆：M3 下也能开，开了不影响 HyperOS 那边，切回来还是原来的选择。"
 
 private const val ACK_TIPS =
     "本模块的实现离不开这些开源项目，在此致谢：\n\n" +
@@ -1852,14 +1850,15 @@ private const val USAGE_TIPS =
 private fun AboutPage(
     state: AppState,
     bottomInset: Dp,
+    topInset: Dp,
     haptic: () -> Unit,
 ) {
     val context = LocalContext.current
     val md3 = isMd3()
     val listState = rememberLazyListState()
-    // M3 的头图不做那么大：「图标 + 名称 + 版本」三行居中即可，
-    // 不像 HyperOS 那样需要一整屏光晕托着
-    val heroHeight = if (md3) 240.dp else 420.dp
+    // 头图只有 HyperOS 用：M3 的关于页是一页普通内容，顶上交给标题栏，
+    // 底下直接是「名称 + 版本」两行，不再垫一整屏光晕
+    val heroHeight = 420.dp
     val density = LocalDensity.current
     val heroPx = with(density) { heroHeight.toPx() }
     val scrollOffset by remember(listState, heroPx) {
@@ -1899,26 +1898,46 @@ private fun AboutPage(
 
     // 页面主体两套风格共用，只有外面的背景壳不同
     val pageContent: @Composable BoxScope.() -> Unit = {
-        // M3 是纯色页，内容滚上去会直接顶到状态栏，给列表补一段状态栏高度
-        val statusTop = if (md3) {
-            WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-        } else {
-            0.dp
-        }
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize().overScrollVertical(),
             contentPadding = PaddingValues(
                 start = 16.dp,
-                top = statusTop,
+                // M3 的顶栏是贴着状态栏的实色条，列表从它下面开始；
+                // HyperOS 没有顶栏，靠下面那段 hero 占位把内容顶下去
+                top = if (md3) topInset else 0.dp,
                 end = 16.dp,
                 // 多留一点滚动余量，让头像区有完整的淡出过程，而不是滚两下就到尽头；
-                // M3 的头图小得多，余量也跟着收一点
+                // M3 没有头图，余量也跟着收一点
                 bottom = bottomInset + if (md3) 80.dp else 140.dp,
             ),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item { Spacer(modifier = Modifier.height(heroHeight)) }
+            if (md3) {
+                // 顶栏已经写着「关于」，这里只留名称和版本；
+                // 也不再放应用图标——图标顶在大标题下面会让顶部叠成两层
+                item {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp, bottom = 2.dp),
+                    ) {
+                        Text(
+                            text = "VPN 自动开关",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE})",
+                            fontSize = 13.sp,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
+                }
+            } else {
+                item { Spacer(modifier = Modifier.height(heroHeight)) }
+            }
 
             // 开发者 / 致谢 / 项目合成一张卡，行之间靠组件自带的分隔线，
             // 不再各占一个分组标题——那几段空白正好把环境光隔成了几条
@@ -1981,19 +2000,21 @@ private fun AboutPage(
             }
         }
 
-        Column(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .height(heroHeight)
-                .statusBarsPadding()
-                .graphicsLayer {
-                    alpha = heroAlpha
-                    translationY = heroShift
-                },
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
+        // 头图只属于 HyperOS：M3 的那两行已经躺进列表里跟着滚了
+        if (!md3) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .height(heroHeight)
+                    .statusBarsPadding()
+                    .graphicsLayer {
+                        alpha = heroAlpha
+                        translationY = heroShift
+                    },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
                 Column(
                     modifier = Modifier.graphicsLayer {
                         scaleX = heroScale
@@ -2001,27 +2022,27 @@ private fun AboutPage(
                     },
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    // M3 的头图收小一号：图标 72dp、标题 24sp，和 M3 的标题层级对齐
                     Image(
                         painter = painterResource(R.drawable.ic_launcher),
                         contentDescription = null,
                         modifier = Modifier
-                            .size(if (md3) 72.dp else 96.dp)
-                            .clip(RoundedCornerShape(if (md3) 18.dp else 24.dp)),
+                            .size(96.dp)
+                            .clip(RoundedCornerShape(24.dp)),
                     )
-                    Spacer(modifier = Modifier.height(if (md3) 16.dp else 20.dp))
+                    Spacer(modifier = Modifier.height(20.dp))
                     Text(
                         text = "VPN 自动开关",
-                        fontSize = if (md3) 24.sp else 28.sp,
+                        fontSize = 28.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    Spacer(modifier = Modifier.height(if (md3) 6.dp else 8.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE})",
-                        fontSize = if (md3) 14.sp else 15.sp,
+                        fontSize = 15.sp,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
                 }
+            }
         }
     }
 
