@@ -1,6 +1,5 @@
 package com.vpnautoswitch.module.ui
 
-import com.vpnautoswitch.module.LauncherIcon
 import android.os.Build
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
@@ -120,6 +119,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vpnautoswitch.module.BuildConfig
 import com.vpnautoswitch.module.Config
+import com.vpnautoswitch.module.LauncherIcon
 import com.vpnautoswitch.module.R
 import com.vpnautoswitch.module.RuleConflict
 import com.vpnautoswitch.module.RuleConflicts
@@ -1244,16 +1244,20 @@ private fun LazyListScope.settingsItems(
                 icon = if (iconHidden) MiuixIcons.Hide else MiuixIcons.Home,
                 checked = iconHidden,
                 onCheckedChange = { on ->
-                    if (LauncherIcon.setHidden(context, on)) {
-                        iconHidden = LauncherIcon.isHidden(context)
-                        Toast.makeText(
-                            context,
-                            if (on) "桌面图标已隐藏" else "桌面图标已恢复",
-                            Toast.LENGTH_SHORT,
-                        ).show()
-                    } else {
-                        Toast.makeText(context, "修改桌面图标失败", Toast.LENGTH_SHORT).show()
-                    }
+                    LauncherIcon.setHidden(context, on)
+                    // 以系统回读为准：改组件状态的返回值靠不住（对不存在的组件也是静默成功），
+                    // 回读不一致说明没生效，这时开关停在旧状态，提示也说失败
+                    val hidden = LauncherIcon.isHidden(context)
+                    iconHidden = hidden
+                    Toast.makeText(
+                        context,
+                        when {
+                            hidden != on -> "修改桌面图标失败"
+                            on -> "桌面图标已隐藏"
+                            else -> "桌面图标已恢复"
+                        },
+                        Toast.LENGTH_SHORT,
+                    ).show()
                 },
             )
             // 悬浮底栏归属当前风格：两套各记各的，切主题不会把另一边的选择改掉

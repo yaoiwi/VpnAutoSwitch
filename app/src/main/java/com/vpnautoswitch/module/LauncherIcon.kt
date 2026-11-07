@@ -44,7 +44,11 @@ object LauncherIcon {
      *
      * `DONT_KILL_APP` 是必需的：改组件状态默认会连带杀掉本进程，设置页会当场退出。
      *
-     * @return true 表示系统已接受新的组件状态；false 表示写入失败，调用方应回滚 UI。
+     * 恢复用 `COMPONENT_ENABLED_STATE_DEFAULT` 而不是 `ENABLED`：DEFAULT 是「回到 manifest
+     * 的声明」，以后哪天把 alias 改成默认禁用也不会被这里强行覆盖。
+     *
+     * @return true 表示系统没有抛异常。注意这并不代表状态真的变了——对不存在的组件
+     *   调用是静默成功的，所以调用方仍要以 [isHidden] 的回读结果为准。
      */
     fun setHidden(context: Context, hidden: Boolean): Boolean = runCatching {
         context.packageManager.setComponentEnabledSetting(
@@ -52,7 +56,7 @@ object LauncherIcon {
             if (hidden) {
                 PackageManager.COMPONENT_ENABLED_STATE_DISABLED
             } else {
-                PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
             },
             PackageManager.DONT_KILL_APP,
         )
