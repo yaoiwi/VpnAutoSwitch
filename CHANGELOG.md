@@ -4,29 +4,9 @@
 
 ## 1.7.0 — 2026-11-07
 
-修「重启后那句『同步服务起不来』其实是假警报」
-
-01:53 那次日志里，设备已经开机 10 小时（uptime 36587s），肯定早就解锁了，可仍然打出
-`模块 App 的同步服务起不来（service=false, stopped=false, enabled=true）`。
-`stopped` 和 `enabled` 都读到了，说明包本身没问题——问题出在查 `ServiceInfo` 这一步
-自己抛了异常，被 catch 吞掉后一律显示成 false。同一秒还有一条
-`reboot receiver not ready yet (NullPointerException)`，是同一类：那会儿 PackageManager
-还没完全就绪，查询本身失败，不是组件真的不存在。
-
-- **查询失败时把异常类型写出来**（`查同步服务失败（NullPointerException: ...）`），
-  和「组件真的没声明」区分开。
-- **重试轮次不再重复打同一段现场**。以前第一次和第三次各打一遍完整诊断，看着像一直在失败；
-  现在只有第一次写进模块日志，重试那次只留 Xposed 日志。
-- 顺带确认了一件事：这次配置是**从 32 小时前的镜像读出来的**，`config from mirror
-  （写入于 1929 分钟前）`，开机没有卡在等 App 进程上——镜像兜底这条链路是通的。
-
-修「切一次应用刷十几行 process died ignored」
-
-09:10:33 切应用的瞬间，`com.android.vending` 连打 10 行、`com.github.android` 连打 4 行
-「process died ignored」，紧接着的 `reconcile: target process gone -> off` 被埋在里面。
-这些回调是 AMS 清理多进程和上一轮 ProcessRecord 产生的，内容只差 pid。
-
-- **同一个包一秒内只记第一条**。忽略动作照旧每次执行，只有日志节流，不影响任何判断。
+- 修重启后误报「同步服务起不来」：查询服务失败不再当成组件缺失，日志里写明异常类型。
+- 同一段诊断只在第一次打印，重试轮次不再重复刷。
+- 「process died ignored」同一包每秒只记一条，切多进程应用不再刷十几行。
 
 ## 1.6.9 — 2026-11-07
 
