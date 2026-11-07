@@ -176,6 +176,19 @@ internal object EnginePolicy {
     fun isStaleTaskRemoval(pkg: String, lastForeground: String?): Boolean = lastForeground == pkg
 
     /**
+     * 同一个包的「残留死亡」日志要不要写。
+     *
+     * 结论（忽略这次回调）每次都要照做，只有日志需要节流：一次切应用里 AMS 会为同一个包
+     * 连着回调好几次，内容只差 pid，全打出来会淹没紧随其后的 reconcile 结论。
+     * [lastAt] 为 0 表示这个包还没记过。
+     */
+    fun shouldLogStaleDeath(
+        now: Long,
+        lastAt: Long,
+        windowMs: Long = 1_000L,
+    ): Boolean = lastAt == 0L || now - lastAt >= windowMs
+
+    /**
      * 这条「任务被移除」是不是我们自己把客户端界面拉到前台造成的。
      *
      * [isStaleTaskRemoval] 只在「被移除的包仍是 lastForeground」时生效；而打开客户端界面后

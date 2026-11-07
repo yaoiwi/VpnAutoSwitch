@@ -153,7 +153,14 @@ internal fun Engine.handleProcessDied(pkg: String, detail: String? = null) {
     ) {
         val since = (now - lastForegroundSeenAt).coerceAtLeast(0)
         val extra = detail?.let { " / $it" } ?: ""
-        log(ctx0, "$pkg -> process died ignored（${since}ms 前刚回到前台，判定为残留记录$extra）")
+        // 同一次前台切换里，同一个包会被连着回调好几次（多进程、上一轮残留记录各来一遍），
+        // 这些行只差 pid。一秒内留第一条即可，否则一次切应用刷十几行，
+        // 把紧随其后的 reconcile 结论全埋掉。
+        val lastLog = staleDeathLogAt[pkg] ?: 0L
+        if (EnginePolicy.shouldLogStaleDeath(now, lastLog, STALE_DEATH_LOG_MS)) {
+            staleDeathLogAt[pkg] = now
+            log(ctx0, "$pkg -> process died ignored（${since}ms 前刚回到前台，判定为残留记录$extra）")
+        }
         // 不把它当成退出：进程还在，存活集合也不能动
         return
     }

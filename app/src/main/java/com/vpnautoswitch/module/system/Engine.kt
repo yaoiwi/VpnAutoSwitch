@@ -231,6 +231,18 @@ internal object Engine {
     internal const val DEATH_STALE_WINDOW_MS = 3_000L
 
     /**
+     * 同一个包的「残留死亡」日志，这么久之内只记一条。
+     *
+     * 一次切应用里 AMS 会连着回调好几次（多进程 + 上一轮 ProcessRecord），09:10:33 那次
+     * com.android.vending 一口气打了 10 行、com.github.android 4 行，把紧随其后的
+     * `reconcile: target process gone -> off` 全埋了。这些行内容只差 pid，留第一条就够。
+     */
+    internal const val STALE_DEATH_LOG_MS = 1_000L
+
+    /** 残留死亡日志的节流记录（包名 -> 上次打印时刻）；只在工作线程访问 */
+    internal val staleDeathLogAt = HashMap<String, Long>()
+
+    /**
      * 「任务被移除」被判定成残留之后，隔多久复查一次。
      *
      * 用户真的划掉应用时，桌面的 resume 事件一般紧跟着 removeTask 回调，
@@ -783,7 +795,10 @@ internal object Engine {
         // 后台限制），最终表现就是「重启后必须先打开一次模块界面」。
         // 与其干等，不如自己动手：调用方是 system_server，既不受后台启动限制，
         // 也能启动非 exported 组件。
-        if (attempt == 0 || attempt == 3) kickAppProcess(ctx)
+        //
+        // 只让第一次出声：第二次（attempt 3）是同一件事的重复尝试，成功后会有
+        // 「module app process requested」，失败也没必要把同一段现场再打一遍。
+        if (attempt == 0 || attempt == 3) kickAppProcess(ctx, verbose = attempt == 0)
 
         val cfg = ConfigRepo.getOrNull(ctx)
         if (cfg != null) {
@@ -826,7 +841,11 @@ internal object Engine {
      * 拉起来之后 provider 就能查了，配置随即可用；同时 [ConfigRepo] 会把配置镜像写进
      * Secure 设置，下次开机就算系统还不让起进程，也能直接用镜像。
      */
-    internal fun kickAppProcess(ctx: Context) {
+    /**
+     * @param verbose 拉不起来时要不要把现场写进模块日志。重试轮次传 false，只留 Xposed 日志，
+     *   免得同一段诊断在日志里出现两遍，看着像「一直在失败」。
+     */
+    internal fun kickAppProcess(ctx: Context, verbose: Boolean = true) {
         val pkg = BuildConfig.APPLICATION_ID
         try {
             // 被强停过的包（stopped）连 startService 都会被拒，先清标记
@@ -849,6 +868,9 @@ internal object Engine {
                     )
                     true
                 } catch (t: Throwable) {
+                    // 光知道「没找到」不够：开机初期 PackageManager 自己也可能抛 NPE，
+                    // 那种情况组件其实是好的，下一次就成功。把异常类型带上才分得清。
+                    if (verbose) log(ctx, "config: 查同步服务失败（${t.javaClass.simpleName}: ${t.message}）")
                     false
                 }
                 val stopped = try {
@@ -865,15 +887,14 @@ internal object Engine {
                 // 开机那几十秒里，前三项往往全是正常的：service 在、没被强停、组件也没禁用，
                 // 就是起不来。剩下唯一说得通的原因就是用户还没解锁（FBE），所以把它一起打出来。
                 val unlocked = isUserUnlocked(ctx)
-                log(
-                    ctx,
-                    "config: 模块 App 的同步服务起不来" +
-                        "（service=$serviceFound, stopped=$stopped, enabled=$enabled, " +
-                        "unlocked=$unlocked），继续等 provider",
-                )
+                val line = "config: 模块 App 的同步服务起不来" +
+                    "（service=$serviceFound, stopped=$stopped, enabled=$enabled, " +
+                    "unlocked=$unlocked），继续等 provider"
+                if (verbose) log(ctx, line) else XposedBridge.log("[$TAG] $line")
             }
         } catch (t: Throwable) {
-            log(ctx, "config: 拉不起模块 App 进程（$t），继续等 provider")
+            val line = "config: 拉不起模块 App 进程（$t），继续等 provider"
+            if (verbose) log(ctx, line) else XposedBridge.log("[$TAG] $line")
         }
     }
 

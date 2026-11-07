@@ -166,6 +166,17 @@ class EnginePolicyTest {
     }
 
     @Test
+    fun `stale death logs are throttled per package`() {
+        // 第一次一定记
+        assertTrue(EnginePolicy.shouldLogStaleDeath(now = 10_000, lastAt = 0))
+        // 一秒内的第二、第三条（同一包多进程各回调一次）丢掉
+        assertFalse(EnginePolicy.shouldLogStaleDeath(now = 10_300, lastAt = 10_000))
+        assertFalse(EnginePolicy.shouldLogStaleDeath(now = 10_999, lastAt = 10_000))
+        // 过了窗口就能再记一条
+        assertTrue(EnginePolicy.shouldLogStaleDeath(now = 11_000, lastAt = 10_000))
+    }
+
+    @Test
     fun `a tunnel the client restored long after a user off can still be force stopped`() {
         // 22:38 判了关闭、23:23 隧道又在了：这不是用户连的，关闭链必须允许强停，
         // 否则只能打一句 no further step allowed 然后让 VPN 挂到下次打开应用
