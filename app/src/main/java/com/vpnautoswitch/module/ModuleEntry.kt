@@ -6,10 +6,15 @@ import android.content.Intent
 import android.os.IBinder
 import android.os.SystemClock
 import com.vpnautoswitch.module.system.ActivityRecords
+import com.vpnautoswitch.module.system.attach
 import com.vpnautoswitch.module.system.ClientStartGuard
 import com.vpnautoswitch.module.system.ConfigRepo
 import com.vpnautoswitch.module.system.Engine
 import com.vpnautoswitch.module.system.ModuleLog
+import com.vpnautoswitch.module.system.onAppLaunching
+import com.vpnautoswitch.module.system.onForeground
+import com.vpnautoswitch.module.system.onProcessDied
+import com.vpnautoswitch.module.system.onTaskRemoved
 import com.vpnautoswitch.module.system.ProcessRecords
 import com.vpnautoswitch.module.system.TaskRecords
 import de.robv.android.xposed.IXposedHookLoadPackage
