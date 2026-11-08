@@ -12,8 +12,21 @@ object ModuleContract {
     /** App 请求清除已记住的客户端启动方式 */
     const val ACTION_FORGET_CLIENT = "com.vpnautoswitch.module.action.FORGET_CLIENT"
 
+    /**
+     * system_server 通知 App 刷新常驻状态通知（由 App 自己发，归属和图标才是本应用）。
+     *
+     * 只由系统进程发出：接收方声明了 `android.permission.STATUS_BAR_SERVICE`，
+     * 普通应用拿不到这个权限，发不过来。
+     */
+    const val ACTION_STATUS_NOTIFY = "com.vpnautoswitch.module.action.STATUS_NOTIFY"
+
     const val EXTRA_CLIENT_PACKAGE = "client_package"
     const val EXTRA_CLIENT_MODE = "client_mode"
+
+    /** 状态通知的字段：on=false 表示撤掉，其余三项是正文内容 */
+    const val EXTRA_STATUS_ON = "status_on"
+    const val EXTRA_STATUS_TITLE = "status_title"
+    const val EXTRA_STATUS_TEXT = "status_text"
 
     /** 暂停标记，由 system_server 写入，App 与磁贴只读 */
     const val PAUSED_KEY = "vpn_autoswitch_paused"

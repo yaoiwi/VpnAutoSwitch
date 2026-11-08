@@ -1,5 +1,8 @@
 package com.vpnautoswitch.module.ui
 
+import android.Manifest
+import android.app.Activity
+import android.content.pm.PackageManager
 import android.os.Build
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
@@ -1576,11 +1579,15 @@ private fun LazyListScope.settingsItems(
             ) {
                 SettingsSwitch(
                     title = "常驻状态通知",
-                    summary = "在通知栏显示 VPN 是否连接、命中了哪条规则。通知由系统进程发出，" +
-                        "归属会显示成「Android 系统」，这是权限决定的",
+                    summary = "在通知栏显示 VPN 是否连接、命中了哪条规则",
                     icon = MiuixIcons.Info,
                     checked = state.config.statusNotification,
-                    onCheckedChange = { state.save(state.config.copy(statusNotification = it)) },
+                    onCheckedChange = { on ->
+                        // 通知由本应用发，Android 13 起要先拿到运行时授权，
+                        // 否则 notify 会被系统静默丢弃、开关看着开了却没东西
+                        if (on) requestNotificationPermission(context)
+                        state.save(state.config.copy(statusNotification = on))
+                    },
                 )
                 SettingsSwitch(
                     title = "显示开关提示（Toast）",
@@ -1972,11 +1979,9 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
+    "1.9.3：状态通知改由应用自己发，通知栏里终于显示蓝色图标，不再是系统的绿色机器人。\n" +
     "1.9.2：状态通知的图标改成桌面图标里那把钥匙，和 App 图标保持一致。\n" +
-    "1.9.1：状态通知的小图标换成挂锁，不再用系统自带的钥匙图标，换 ROM 或主题形状也不变。\n" +
-    "1.9.0：单个应用可以单独设置网络条件（目标应用里点一行）；自检报告与运行日志都能\n" +
-        "直接分享，报告里带上机型和系统版本；Wi-Fi 名称读不到时会自动换条路再试；\n" +
-        "新增可选的常驻状态通知。"
+    "1.9.1：状态通知的小图标换成挂锁，不再用系统自带的钥匙图标，换 ROM 或主题形状也不变。"
 
 private const val ACK_TIPS =
     "本模块的实现离不开这些开源项目，在此致谢：\n\n" +
@@ -2407,3 +2412,25 @@ private fun AboutBackground(modifier: Modifier = Modifier) {
         )
     }
 }
+
+/**
+ * Android 13 起发通知要运行时授权。
+ *
+ * 打开开关时顺手弹一次；用户拒绝也不拦着——开关照存，等下次系统里给了权限就会生效。
+ * 这里没有回调结果，是因为设置项本身不依赖授权状态：没权限时通知自然不出现，
+ * 比「开关被强制打回去」更好理解。
+ */
+private fun requestNotificationPermission(context: Context) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+    if (context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+        PackageManager.PERMISSION_GRANTED
+    ) {
+        return
+    }
+    (context as? Activity)?.requestPermissions(
+        arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+        REQUEST_NOTIFICATION_PERMISSION,
+    )
+}
+
+private const val REQUEST_NOTIFICATION_PERMISSION = 0x5651

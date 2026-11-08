@@ -21,6 +21,9 @@
     <!-- 仅用于在应用选择器里列出全部已安装应用 -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
+    <!-- 常驻状态通知由本应用自己发（归属和图标才是本应用） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
@@ -71,6 +74,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity-alias>
+
+        <!--
+            状态通知的渲染入口：system_server 只发内容，由 App 自己发通知，
+            这样通知归属才是本应用（Android 13 起通知栏左侧显示应用图标）。
+            用 STATUS_BAR_SERVICE 兜住入口——只有系统进程持有这个权限，普通应用发不过来。
+        -->
+        <receiver
+            android:name=".StatusNotifyReceiver"
+            android:exported="true"
+            android:permission="android.permission.STATUS_BAR_SERVICE" />
 
         <!-- 卸载清理：目标应用被删除后自动从配置里移除，重装回来默认关闭 -->
         <receiver
