@@ -6,9 +6,11 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
 import com.vpnautoswitch.module.BuildConfig
 import com.vpnautoswitch.module.Config
 import com.vpnautoswitch.module.ModuleContract
+import org.json.JSONObject
 
 /**
  * 常驻状态通知的「决策层」。
@@ -21,8 +23,9 @@ import com.vpnautoswitch.module.ModuleContract
  * 反复换 small icon 都不见效，就是卡在这儿。交给 App 发之后，归属、图标、点击全部回到
  * 本应用，small icon 也能正常生效。
  *
- * 代价是每次状态变化要拉起一次 App 进程（显式广播，代价约百毫秒级，且只在状态真的
- * 变了的时候才发）。通知本身挂在系统里，App 进程被回收不影响它继续显示。
+ * 两路投递：显式广播能把 App 进程拉起来，是主通道；同时把内容写进 Settings.Secure，
+ * App 下次打开时读出来补发——广播偶尔会漏（后台受限、组件被停），兜底的这一份保证
+ * 用户至少「打开一次应用就看到当前状态」。
  */
 internal object StatusNotification {
 
@@ -38,8 +41,9 @@ internal object StatusNotification {
      * 按当前状态刷新通知；[Config.statusNotification] 关掉或模块停用时把已有通知撤掉。
      *
      * [detail] 直接用 `currentRule` 的中文说明，不在通知层再翻译一遍，避免两处文案分叉。
+     * [sinceMs] 是隧道连上的墙钟时刻，只在已连接时非 0，用于通知里的正计时。
      */
-    fun sync(ctx: Context, cfg: Config, rule: String, detail: String) {
+    fun sync(ctx: Context, cfg: Config, rule: String, detail: String, sinceMs: Long) {
         clearLegacy(ctx)
         if (!cfg.statusNotification || !cfg.enabled || cfg.vpnPackage.isEmpty()) {
             cancel(ctx)
@@ -71,12 +75,40 @@ internal object StatusNotification {
             )
             if (detail.isNotEmpty()) append(" · ").append(detail)
         }
-        if (send(ctx, true, "VPN 自动开关", text)) {
+        val since = if (connected) sinceMs else 0L
+        // 先落盘再广播：万一广播这一下失败，App 下次启动还能从这份内容补上
+        writeState(ctx, true, "VPN 自动开关", text, cfg.vpnPackage, since)
+        if (send(ctx, true, "VPN 自动开关", text, cfg.vpnPackage, since)) {
             lastKey = key
             if (!loggedSent) {
                 loggedSent = true
                 Engine.log(ctx, "status notification -> app")
             }
+        }
+    }
+
+    fun cancel(ctx: Context) {
+        clearLegacy(ctx)
+        if (lastKey == null) return
+        lastKey = null
+        writeState(ctx, false, "", "", "", 0L)
+        send(ctx, false, "", "", "", 0L)
+    }
+
+    /**
+     * 撤掉 1.9.2 及以前由 system_server 直接发的那条通知。
+     *
+     * 那条的归属包是 `android`，App 自己 cancel 不掉；升级后如果不在这里清一次，
+     * 它会一直挂在通知栏里（ongoing），跟新的那条并排显示。
+     */
+    private fun clearLegacy(ctx: Context) {
+        if (legacyCleared) return
+        legacyCleared = true
+        try {
+            ctx.getSystemService(NotificationManager::class.java)
+                ?.cancel(NOTIFICATION_ID)
+        } catch (t: Throwable) {
+            // 忽略：清不掉也只是多一条旧通知，不影响功能
         }
     }
 
@@ -104,27 +136,30 @@ internal object StatusNotification {
         "查 App 状态失败: $t"
     }
 
-    fun cancel(ctx: Context) {
-        clearLegacy(ctx)
-        if (lastKey == null) return
-        lastKey = null
-        send(ctx, false, "", "")
-    }
-
-    /**
-     * 撤掉 1.9.2 及以前由 system_server 直接发的那条通知。
-     *
-     * 那条的归属包是 `android`，App 自己 cancel 不掉；升级后如果不在这里清一次，
-     * 它会一直挂在通知栏里（ongoing），跟新的那条并排显示。
-     */
-    private fun clearLegacy(ctx: Context) {
-        if (legacyCleared) return
-        legacyCleared = true
+    /** 把当前内容写进 Secure 设置，App 进程起不来时靠它补发 */
+    private fun writeState(
+        ctx: Context,
+        on: Boolean,
+        title: String,
+        text: String,
+        pkg: String,
+        since: Long,
+    ) {
         try {
-            ctx.getSystemService(NotificationManager::class.java)
-                ?.cancel(NOTIFICATION_ID)
+            val json = JSONObject()
+                .put("on", on)
+                .put("title", title)
+                .put("text", text)
+                .put("pkg", pkg)
+                .put("since", since)
+                .put("at", System.currentTimeMillis())
+            Settings.Secure.putString(
+                ctx.contentResolver,
+                ModuleContract.STATUS_STATE_KEY,
+                json.toString(),
+            )
         } catch (t: Throwable) {
-            // 忽略：清不掉也只是多一条旧通知，不影响功能
+            // 写不进也不影响广播这条主通道
         }
     }
 
@@ -134,7 +169,14 @@ internal object StatusNotification {
      * 类名必须写全：应用 id 是 io.github.yaoiwi.vpnautoswitch，代码所在的包是
      * com.vpnautoswitch.module，两者不是一回事。
      */
-    private fun send(ctx: Context, on: Boolean, title: String, text: String): Boolean = try {
+    private fun send(
+        ctx: Context,
+        on: Boolean,
+        title: String,
+        text: String,
+        pkg: String,
+        since: Long,
+    ): Boolean = try {
         val intent = Intent(ModuleContract.ACTION_STATUS_NOTIFY)
             .setClassName(BuildConfig.APPLICATION_ID, STATUS_RECEIVER)
             // 常驻通知要对得上当前状态，别排进后台队列里等
@@ -142,6 +184,8 @@ internal object StatusNotification {
             .putExtra(ModuleContract.EXTRA_STATUS_ON, on)
             .putExtra(ModuleContract.EXTRA_STATUS_TITLE, title)
             .putExtra(ModuleContract.EXTRA_STATUS_TEXT, text)
+            .putExtra(ModuleContract.EXTRA_STATUS_PKG, pkg)
+            .putExtra(ModuleContract.EXTRA_STATUS_SINCE, since)
         ctx.sendBroadcast(intent)
         true
     } catch (t: Throwable) {

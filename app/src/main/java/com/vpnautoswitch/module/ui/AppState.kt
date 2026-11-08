@@ -1,10 +1,13 @@
 package com.vpnautoswitch.module.ui
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -77,6 +80,13 @@ data class Diagnostics(
     val moduleState: DiagnosticsPolicy.ModuleState = DiagnosticsPolicy.ModuleState.NEVER,
     /** 快捷磁贴暂停了自动联动 */
     val paused: Boolean = false,
+    /** 状态通知：模块最后一次写下的是「要显示」还是「已撤掉」 */
+    val notifyOn: Boolean = false,
+    /** 模块最后一次更新通知内容的时刻，0 表示从没写过 */
+    val notifyAt: Long = 0L,
+    val notifyText: String = "",
+    /** 本应用有没有通知权限（低于 Android 13 恒为 true） */
+    val notifyPermission: Boolean = false,
 ) {
     companion object {
         /**
@@ -94,6 +104,7 @@ data class Diagnostics(
             RuntimeDiagnostics.FAILURE_KEY,
             RuntimeDiagnostics.TIMING_KEY,
             ModuleContract.PAUSED_KEY,
+            ModuleContract.STATUS_STATE_KEY,
             "always_on_vpn_app",
             "vpn_autoswitch_active",
         )
@@ -114,6 +125,7 @@ data class Diagnostics(
             val runtime = readJson(cr, RuntimeDiagnostics.RUNTIME_KEY)
             val failure = readJson(cr, RuntimeDiagnostics.FAILURE_KEY)
             val timing = readJson(cr, RuntimeDiagnostics.TIMING_KEY)
+            val notify = readJson(cr, ModuleContract.STATUS_STATE_KEY)
             val inspection = AppsRepository.inspectVpn(context, config.vpnPackage)
             return Diagnostics(
                 heartbeat = heartbeat,
@@ -169,6 +181,12 @@ data class Diagnostics(
                 } catch (t: Throwable) {
                     false
                 },
+                notifyOn = notify?.optBoolean("on", false) ?: false,
+                notifyAt = notify?.optLong("at", 0L) ?: 0L,
+                notifyText = notify?.optString("text").orEmpty(),
+                notifyPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                    context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+                    PackageManager.PERMISSION_GRANTED,
             )
         }
 

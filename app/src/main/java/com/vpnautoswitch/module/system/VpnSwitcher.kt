@@ -167,7 +167,15 @@ internal object VpnSwitcher {
         val cr = ctx.contentResolver
         return try {
             if (!isActive(cr)) {
-                ModuleLog.append(ctx, "disable skipped: not in takeover state")
+                // 没接管就没接管：调用方紧接着会写一行「off requested」，
+                // 这里再记一遍只是噪音。只有设置还残留指着当前客户端，才是真没清干净。
+                val residual = Settings.Secure.getString(cr, KEY_ALWAYS_ON_APP)
+                if (residual == vpnPackage) {
+                    ModuleLog.append(
+                        ctx,
+                        "disable skipped: not adopted, but always_on still points to $vpnPackage",
+                    )
+                }
                 return false
             }
 

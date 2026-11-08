@@ -1374,6 +1374,18 @@ internal object Engine {
         return lastTransport == 1 && cfg.wifiOn.contains(ssid)
     }
 
+    /**
+     * 隧道连上的**墙钟**时刻；没连或不知道何时连上时返回 0。
+     *
+     * [connectedAt] 记的是 elapsedRealtime（不受用户改时间影响，用来算存活时长），
+     * 而通知的正计时需要 System.currentTimeMillis()，两者在入口这里换算一次。
+     */
+    private fun connectedSince(): Long {
+        val at = connectedAt
+        if (at == 0L) return 0L
+        return System.currentTimeMillis() - (SystemClock.elapsedRealtime() - at)
+    }
+
     /** 只描述当前命中的规则，不参与任何控制决策。 */
     internal fun currentRule(cfg: Config): Pair<String, String> {
         if (!cfg.enabled || cfg.vpnPackage.isEmpty()) {
@@ -1412,7 +1424,7 @@ internal object Engine {
             val (rule, detail) = currentRule(cfg)
             // 通知自己按「规则 + 连接状态」去重，成本只有一次 Settings 读取；
             // 放在快照的节流之前，开关刚改完也能立刻生效，不用等下一次状态变化
-            StatusNotification.sync(context, cfg, rule, detail)
+            StatusNotification.sync(context, cfg, rule, detail, connectedSince())
             // 快照里带时间戳，写一次内容就「变」一次；换成自己比对关键字段，
             // 没人看诊断时就不必每次前台回调都写一遍设置
             val key = "$rule|$detail|$lastTransport|${lastForeground.orEmpty()}"

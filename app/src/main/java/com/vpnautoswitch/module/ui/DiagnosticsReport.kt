@@ -21,6 +21,9 @@ internal object DiagnosticsReport {
     /** 开启超过这么久就认为偏慢，在诊断里标黄 */
     private const val SLOW_ON_MS = 5_000L
 
+    /** 通知内容超过这么久没更新，就认为链路可能断了 */
+    private const val NOTIFY_STALE_MS = 30 * 60_000L
+
     fun buildChecks(diagnostics: Diagnostics, config: Config): List<CheckItem> {
         val now = System.currentTimeMillis()
         val checks = mutableListOf<CheckItem>()
@@ -106,6 +109,7 @@ internal object DiagnosticsReport {
         )
 
         checks += failureCheck(diagnostics, now)
+        checks += notificationCheck(config, diagnostics, now)
         checks += configCheck(config)
 
         return checks
@@ -147,6 +151,14 @@ internal object DiagnosticsReport {
                     "未记录"
                 }
             )
+            appendLine(
+                "状态通知：" + when {
+                    !config.statusNotification -> "未启用"
+                    !diagnostics.notifyPermission -> "无通知权限"
+                    diagnostics.notifyAt > 0L -> "最近更新 ${ago(diagnostics.notifyAt, now)}"
+                    else -> "模块尚未上报"
+                }
+            )
             appendLine("目标应用：${config.targets.size} · 打开即关闭：${config.offTargets.size} · Wi-Fi 开/关：${config.wifiOn.size}/${config.wifiOff.size}")
             appendLine()
             appendLine("检查结果：")
@@ -156,6 +168,58 @@ internal object DiagnosticsReport {
             appendLine()
             appendLine("最近日志：")
             append(diagnostics.log.lines().filter { it.isNotBlank() }.takeLast(20).joinToString("\n"))
+        }
+    }
+
+    /**
+     * 状态通知这条链路是否通。
+     *
+     * 模块写内容、App 渲染，任何一环断了通知都不会出现，而且失败时是静默的——
+     * 三条判据（权限、有没有上报过、多久没更新）刚好能把三种断点分开。
+     */
+    private fun notificationCheck(
+        config: Config,
+        diagnostics: Diagnostics,
+        now: Long,
+    ): CheckItem {
+        if (!config.statusNotification) {
+            return CheckItem(
+                "状态通知",
+                CheckStatus.OK,
+                "未启用（默认关闭，不影响自动开关）",
+            )
+        }
+        if (!diagnostics.notifyPermission) {
+            return CheckItem(
+                "状态通知",
+                CheckStatus.FAIL,
+                "已启用，但本应用没有通知权限，通知不会出现。" +
+                    "打开应用时会请求授权，也可以去系统设置里手动打开",
+            )
+        }
+        return when {
+            diagnostics.notifyAt <= 0L -> CheckItem(
+                "状态通知",
+                CheckStatus.WARN,
+                "已启用，但模块还没有上报过通知内容。切一次前台应用再看",
+            )
+            now - diagnostics.notifyAt > NOTIFY_STALE_MS -> CheckItem(
+                "状态通知",
+                CheckStatus.WARN,
+                "最后一次更新在 ${ago(diagnostics.notifyAt, now)}，超过 30 分钟没变化。" +
+                    "如果刚用过目标应用，说明广播没有送达 App",
+            )
+            !diagnostics.notifyOn -> CheckItem(
+                "状态通知",
+                CheckStatus.OK,
+                "模块已撤掉通知（当前不满足显示条件）",
+            )
+            else -> CheckItem(
+                "状态通知",
+                CheckStatus.OK,
+                "最近一次更新在 ${ago(diagnostics.notifyAt, now)} · " +
+                    diagnostics.notifyText.ifEmpty { "（无内容）" },
+            )
         }
     }
 

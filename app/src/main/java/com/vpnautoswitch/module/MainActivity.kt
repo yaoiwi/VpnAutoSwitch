@@ -31,6 +31,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // 模块可能在 App 没运行时更新过状态，广播收不到就只剩这一份记录，进门先补一次。
+        // 开关已经关掉的情况不能照着旧快照发，那会让「关掉通知」看起来没生效。
+        if (Config.load(this).statusNotification) {
+            StatusNotifyReceiver.replay(this)
+        } else {
+            StatusNotifyReceiver.cancel(this)
+        }
         setContent {
             val state = remember {
                 AppState(this@MainActivity).also { appState = it }
@@ -106,6 +113,18 @@ class MainActivity : ComponentActivity() {
         appState?.dispose()
         appState = null
         super.onDestroy()
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        // 刚拿到通知权限：把之前没发出去的那条补上，不用等下一次状态变化
+        if (requestCode == REQUEST_NOTIFICATION_PERMISSION) {
+            StatusNotifyReceiver.replay(this)
+        }
     }
 
     private companion object {

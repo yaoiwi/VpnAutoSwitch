@@ -78,12 +78,12 @@
         <!--
             状态通知的渲染入口：system_server 只发内容，由 App 自己发通知，
             这样通知归属才是本应用（Android 13 起通知栏左侧显示应用图标）。
-            用 STATUS_BAR_SERVICE 兜住入口——只有系统进程持有这个权限，普通应用发不过来。
+            这里不再挂 STATUS_BAR_SERVICE 做门禁——部分 ROM 上它把系统进程也一起挡了，
+            通知就一直发不出来。接收器只认 action + 组件名，Android 14 起再校验发送方 uid。
         -->
         <receiver
             android:name=".StatusNotifyReceiver"
-            android:exported="true"
-            android:permission="android.permission.STATUS_BAR_SERVICE" />
+            android:exported="true" />
 
         <!-- 卸载清理：目标应用被删除后自动从配置里移除，重装回来默认关闭 -->
         <receiver

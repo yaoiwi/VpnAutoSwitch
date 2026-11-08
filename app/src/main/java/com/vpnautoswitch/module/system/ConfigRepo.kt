@@ -34,6 +34,15 @@ internal object ConfigRepo {
      */
     private const val MIRROR_BAD_MS = 30_000L
 
+    /**
+     * 读镜像时抛异常后的冷却。
+     *
+     * 开机头十几秒 `SettingsProvider` 常常还没完全就绪，读一次抛一次异常；
+     * 以前这里也罚 30 秒，于是「配置就绪」被推到开机 47 秒后（日志里实测）。
+     * 这类失败几秒就会自己好，冷却按秒级走；真正读坏了才罚 [MIRROR_BAD_MS]。
+     */
+    private const val MIRROR_ERROR_MS = 3_000L
+
     @Volatile
     private var cached: Config? = null
 
@@ -173,7 +182,13 @@ internal object ConfigRepo {
             )
             config
         } catch (t: Throwable) {
-            mirrorBadUntil = SystemClock.elapsedRealtime() + MIRROR_BAD_MS
+            // 解析失败说明内容真的坏了，罚久一点；其余多半是系统还没就绪，几秒后重试
+            val cooldown = if (t is org.json.JSONException || t is IllegalArgumentException) {
+                MIRROR_BAD_MS
+            } else {
+                MIRROR_ERROR_MS
+            }
+            mirrorBadUntil = SystemClock.elapsedRealtime() + cooldown
             XposedBridge.log("[$TAG] config mirror read failed: $t")
             null
         }
