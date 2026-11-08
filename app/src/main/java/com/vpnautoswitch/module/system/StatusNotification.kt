@@ -3,10 +3,12 @@ package com.vpnautoswitch.module.system
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
+import android.os.Build
 import com.vpnautoswitch.module.BuildConfig
 import com.vpnautoswitch.module.Config
 import com.vpnautoswitch.module.ModuleContract
-import de.robv.android.xposed.XposedBridge
 
 /**
  * 常驻状态通知的「决策层」。
@@ -26,7 +28,11 @@ internal object StatusNotification {
 
     private var lastKey: String? = null
     private var loggedFailure = false
+    private var loggedSent = false
     private var legacyCleared = false
+
+    /** 上一次「发不出去」的原因，用于去重，避免每次前台切换都写一行 */
+    private var lastBlockReason: String? = null
 
     /**
      * 按当前状态刷新通知；[Config.statusNotification] 关掉或模块停用时把已有通知撤掉。
@@ -47,13 +53,55 @@ internal object StatusNotification {
         val key = "$rule|$detail|$connected"
         if (key == lastKey) return
 
+        // 广播发出去不等于有人收：App 被强停、或者没有通知权限时，这条会石沉大海。
+        // 先查一遍，把原因写进运行日志——否则用户只能看到「开关是开的、通知栏空的」。
+        val blocked = blockedReason(ctx)
+        if (blocked != null) {
+            if (blocked != lastBlockReason) {
+                lastBlockReason = blocked
+                Engine.log(ctx, "status notification skipped: $blocked")
+            }
+            return
+        }
+        lastBlockReason = null
+
         val text = buildString {
             if (rule == "paused") append("自动联动已暂停") else append(
                 if (connected) "VPN 已连接" else "VPN 未连接"
             )
             if (detail.isNotEmpty()) append(" · ").append(detail)
         }
-        if (send(ctx, true, "VPN 自动开关", text)) lastKey = key
+        if (send(ctx, true, "VPN 自动开关", text)) {
+            lastKey = key
+            if (!loggedSent) {
+                loggedSent = true
+                Engine.log(ctx, "status notification -> app")
+            }
+        }
+    }
+
+    /**
+     * App 侧收不到广播的两种情况，查不到就当没问题。
+     *
+     * 只在状态真的变了之后才调（前面有 key 去重），不会随每次前台回调都查一遍。
+     */
+    private fun blockedReason(ctx: Context): String? = try {
+        val pm = ctx.packageManager
+        @Suppress("DEPRECATION")
+        val info = pm.getApplicationInfo(BuildConfig.APPLICATION_ID, 0)
+        when {
+            info.flags and ApplicationInfo.FLAG_STOPPED != 0 ->
+                "App 处于强制停止状态，组件收不到广播，打开一次 App 即可恢复"
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                pm.checkPermission(
+                    android.Manifest.permission.POST_NOTIFICATIONS,
+                    BuildConfig.APPLICATION_ID,
+                ) != PackageManager.PERMISSION_GRANTED ->
+                "App 还没有通知权限，打开一次 App 授权"
+            else -> null
+        }
+    } catch (t: Throwable) {
+        "查 App 状态失败: $t"
     }
 
     fun cancel(ctx: Context) {
@@ -100,7 +148,7 @@ internal object StatusNotification {
         // 通知失败绝不能影响 VPN 控制；只在第一次记一行，避免刷屏
         if (!loggedFailure) {
             loggedFailure = true
-            XposedBridge.log("[${Engine.TAG}] status notification failed: $t")
+            Engine.log(ctx, "status notification failed: $t")
         }
         false
     }

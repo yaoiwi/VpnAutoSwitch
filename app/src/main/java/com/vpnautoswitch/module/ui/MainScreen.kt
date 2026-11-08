@@ -1979,9 +1979,9 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
+    "1.9.4：状态通知发不出去时，运行日志会直接写明原因（App 被强制停止，或没有通知权限）。\n" +
     "1.9.3：状态通知改由应用自己发，通知栏里终于显示蓝色图标，不再是系统的绿色机器人。\n" +
-    "1.9.2：状态通知的图标改成桌面图标里那把钥匙，和 App 图标保持一致。\n" +
-    "1.9.1：状态通知的小图标换成挂锁，不再用系统自带的钥匙图标，换 ROM 或主题形状也不变。"
+    "1.9.2：状态通知的图标改成桌面图标里那把钥匙，和 App 图标保持一致。"
 
 private const val ACK_TIPS =
     "本模块的实现离不开这些开源项目，在此致谢：\n\n" +
