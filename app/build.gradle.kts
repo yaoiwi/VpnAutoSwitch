@@ -108,7 +108,8 @@ val checkVersionDocs = tasks.register("checkVersionDocs") {
     val readmeFile = rootProject.file("README.md")
     val readmeEnFile = rootProject.file("README_EN.md")
     val changelogFile = rootProject.file("CHANGELOG.md")
-    val mainScreenFile = file("src/main/java/com/vpnautoswitch/module/ui/MainScreen.kt")
+    // 关于页的文案：按目录扫，避免文件再搬家时这条校验悄悄失效
+    val uiDir = file("src/main/java/com/vpnautoswitch/module/ui")
     inputs.property("versionName", name)
     inputs.property("versionCode", code)
     doLast {
@@ -124,8 +125,8 @@ val checkVersionDocs = tasks.register("checkVersionDocs") {
         if (changelogTop == null || !changelogTop.startsWith("## $name")) {
             problems += "CHANGELOG.md 首条是「${changelogTop ?: "（没有小节）"}」，应为 ## $name — 日期"
         }
-        if ("\"$name：" !in text(mainScreenFile)) {
-            problems += "MainScreen.kt 的 CHANGELOG_TIPS 首条不是 \"$name：…\""
+        if (uiDir.listFiles { f -> f.extension == "kt" }.orEmpty().none { "\"$name：" in text(it) }) {
+            problems += "关于页的 CHANGELOG_TIPS 首条不是 \"$name：…\""
         }
 
         if (problems.isNotEmpty()) {
