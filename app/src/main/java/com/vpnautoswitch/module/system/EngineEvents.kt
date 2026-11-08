@@ -107,7 +107,7 @@ internal fun Engine.handleForeground(pkg: String) {
     if (freshOpen) wasConnected = false
 
     logForeground(ctx, pkg, freshOpen)
-    if (isNetworkAllowed(cfg)) {
+    if (isNetworkAllowed(cfg, pkg)) {
         ensureVpn(ctx, cfg, pkg)
     } else {
         log(ctx, "network type disabled, skip enabling")

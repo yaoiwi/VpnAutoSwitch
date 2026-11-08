@@ -156,22 +156,14 @@ internal fun SelfCheckDialog(state: AppState, onDismiss: () -> Unit) {
             }
 
             Spacer(modifier = Modifier.height(8.dp))
-            // 四个按钮排成两行两列，每列等宽。以前第一行左对齐、第二行右对齐，
-            // 「打开 LSPosed」和「关闭」两个宽度不同的按钮挤在右边，看着又乱又窄。
+            // 五个按钮排成两行。第一行是「拿报告」的三个动作，第二行是「去修 / 关掉」，
+            // 每列等宽，窄屏上也不会互相挤压。
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 AppButton(
-                    text = "重新检测",
-                    onClick = {
-                        state.refreshDiagnostics()
-                        Toast.makeText(context, "已重新检测", Toast.LENGTH_SHORT).show()
-                    },
-                    modifier = Modifier.weight(1f),
-                )
-                AppButton(
-                    text = "复制报告",
+                    text = "复制",
                     onClick = {
                         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         cm.setPrimaryClip(
@@ -181,6 +173,25 @@ internal fun SelfCheckDialog(state: AppState, onDismiss: () -> Unit) {
                             )
                         )
                         Toast.makeText(context, "报告已复制", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                AppButton(
+                    text = "分享",
+                    onClick = {
+                        shareText(
+                            context,
+                            "VpnAutoSwitch 状态报告",
+                            DiagnosticsReport.buildText(state.diagnostics, state.config),
+                        )
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                AppButton(
+                    text = "重新检测",
+                    onClick = {
+                        state.refreshDiagnostics()
+                        Toast.makeText(context, "已重新检测", Toast.LENGTH_SHORT).show()
                     },
                     modifier = Modifier.weight(1f),
                 )

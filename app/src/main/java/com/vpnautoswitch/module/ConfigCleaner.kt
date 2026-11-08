@@ -54,5 +54,6 @@ internal fun Config.withoutPackages(gone: Set<String>): Config {
     return copy(
         targets = targets - gone,
         offTargets = offTargets - gone,
+        networkOverride = networkOverride.filterKeys { it !in gone },
     )
 }

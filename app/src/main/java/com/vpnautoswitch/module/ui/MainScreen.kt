@@ -612,7 +612,7 @@ private fun LazyListScope.appsItems(
             SettingsActionWithArrow(
                 title = "添加 / 管理目标应用",
                 icon = MiuixIcons.GridView,
-                summary = "长按列表项可批量移除或移动",
+                summary = "长按可批量管理；点列表里的应用可以为它单独设置网络条件",
                 onClick = { state.openPicker(AppState.MODE_MULTI) },
             )
         }
@@ -685,6 +685,7 @@ private fun LazyListScope.appsItems(
                             if (current.contains(pkg)) current - pkg else current + pkg
                         )
                     },
+                    networkEditable = true,
                 )
             }
         }
@@ -962,18 +963,24 @@ private fun AppToggleCard(
     onRemove: () -> Unit,
     onEnterSelection: () -> Unit = {},
     onToggleRow: () -> Unit = {},
+    /** 只有「目标应用」列表能改网络条件；「打开时关闭」列表不参与自动开启，改了没意义 */
+    networkEditable: Boolean = false,
 ) {
     val icon = rememberAppIcon(pkg, state.apps.firstOrNull { it.packageName == pkg }?.activityName)
     val haptic = LocalHapticFeedback.current
+    var showNetwork by remember { mutableStateOf(false) }
+    val netMode = if (networkEditable) state.config.networkModeOf(pkg) else Config.NET_FOLLOW
     AppCard(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                // 长按进入批量选择；平时点整行不做任何事，开关仍由右侧 Switch 负责
+                // 长按进入批量选择；平时点整行打开「网络条件」，开关仍由右侧 Switch 负责
                 .combinedClickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
-                    onClick = { if (selecting) onToggleRow() },
+                    onClick = {
+                        if (selecting) onToggleRow() else if (networkEditable) showNetwork = true
+                    },
                     onLongClick = {
                         if (!selecting) {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -1016,6 +1023,15 @@ private fun AppToggleCard(
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.padding(top = 2.dp),
                 )
+                // 有覆盖时把条件写在包名下面：不然用户点过一次就忘了这个应用被单独设过
+                if (netMode.isNotEmpty()) {
+                    Text(
+                        text = netModeLabel(netMode),
+                        fontSize = 11.sp,
+                        color = MiuixTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
             }
             if (selecting) {
                 Checkbox(
@@ -1029,6 +1045,106 @@ private fun AppToggleCard(
                     onCheckedChange = { if (!it) onRemove() },
                 )
             }
+        }
+    }
+    if (showNetwork) {
+        AppNetworkDialog(state, pkg) { showNetwork = false }
+    }
+}
+
+/** 「仅 Wi-Fi / 仅移动数据 / 都允许」在列表里的短标签 */
+private fun netModeLabel(mode: String): String = when (mode) {
+    Config.NET_WIFI -> "仅 Wi-Fi 下生效"
+    Config.NET_MOBILE -> "仅移动数据下生效"
+    Config.NET_ANY -> "所有网络下生效"
+    else -> ""
+}
+
+/**
+ * 单个应用的网络条件。
+ *
+ * 全局的两个开关仍是默认值，这里只给「这个应用不一样」的场景留出口：
+ * 下载工具只在 Wi-Fi 下连、银行类在移动数据下也要连，都是很具体的诉求。
+ */
+@Composable
+private fun AppNetworkDialog(state: AppState, pkg: String, onDismiss: () -> Unit) {
+    val colors = MiuixTheme.colorScheme
+    val current = state.config.networkModeOf(pkg)
+    val follow = buildString {
+        append("Wi-Fi ")
+        append(if (state.config.allowWifi) "允许" else "禁止")
+        append(" · 移动数据 ")
+        append(if (state.config.allowMobile) "允许" else "禁止")
+    }
+    val options = listOf(
+        Triple(Config.NET_FOLLOW, "跟随全局", follow),
+        Triple(Config.NET_WIFI, "仅 Wi-Fi 下生效", "移动数据下打开它不会连 VPN"),
+        Triple(Config.NET_MOBILE, "仅移动数据下生效", "Wi-Fi 下打开它不会连 VPN"),
+        Triple(Config.NET_ANY, "所有网络下生效", "不受全局开关限制，任何网络都连"),
+    )
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .heightIn(max = 560.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(colors.surface)
+                .padding(horizontal = 20.dp, vertical = 18.dp),
+        ) {
+            Text(
+                text = state.labelOf(pkg),
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "只影响这一个应用，其它应用仍按「网络条件」里的全局设置走。",
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+                color = colors.onSurfaceVariantSummary,
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            options.forEach { (mode, title, summary) ->
+                val selected = mode == current
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable {
+                            val next = if (mode == Config.NET_FOLLOW) {
+                                state.config.networkOverride - pkg
+                            } else {
+                                state.config.networkOverride + (pkg to mode)
+                            }
+                            state.save(state.config.copy(networkOverride = next))
+                            onDismiss()
+                        }
+                        .padding(horizontal = 10.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = title,
+                            fontSize = 14.sp,
+                            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                        )
+                        Text(
+                            text = summary,
+                            fontSize = 11.sp,
+                            color = colors.onSurfaceVariantSummary,
+                            modifier = Modifier.padding(top = 1.dp),
+                        )
+                    }
+                    if (selected) {
+                        Text(text = "✓", fontSize = 15.sp, color = colors.primary)
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            AppButton(text = "关闭", onClick = onDismiss, modifier = Modifier.fillMaxWidth())
         }
     }
 }
@@ -1151,6 +1267,14 @@ private fun LazyListScope.settingsItems(
                     modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
                     fontSize = 12.sp,
                     color = MiuixTheme.colorScheme.error,
+                )
+            } else {
+                Text(
+                    text = "上面两个是全局默认。单个应用要例外时，去「目标应用」点那一行单独设置。",
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
             }
         }
@@ -1451,6 +1575,14 @@ private fun LazyListScope.settingsItems(
                 onToggle = { state.toggleAdvancedGroup(AppState.ADV_GROUP_HINTS) },
             ) {
                 SettingsSwitch(
+                    title = "常驻状态通知",
+                    summary = "在通知栏显示 VPN 是否连接、命中了哪条规则。通知由系统进程发出，" +
+                        "归属会显示成「Android 系统」，这是权限决定的",
+                    icon = MiuixIcons.Info,
+                    checked = state.config.statusNotification,
+                    onCheckedChange = { state.save(state.config.copy(statusNotification = it)) },
+                )
+                SettingsSwitch(
                     title = "显示开关提示（Toast）",
                     summary = "VPN 开启 / 关闭时在屏幕上弹出提示",
                     icon = MiuixIcons.Messages,
@@ -1556,6 +1688,18 @@ private fun LogBody(
             modifier = Modifier.weight(1f),
         )
         AppButton(
+            text = "分享",
+            onClick = {
+                shareText(
+                    context,
+                    "VpnAutoSwitch 运行日志",
+                    // 只发筛选后正在看的那部分；用户点「只看异常」时，发出去的也就是异常行
+                    copyText,
+                )
+            },
+            modifier = Modifier.weight(1f),
+        )
+        AppButton(
             text = "导出",
             onClick = { exportLauncher.launch("vpn-autoswitch-log.txt") },
             modifier = Modifier.weight(1f),
@@ -1563,14 +1707,6 @@ private fun LogBody(
         AppButton(
             text = "刷新",
             onClick = onRefresh,
-            modifier = Modifier.weight(1f),
-        )
-        AppButton(
-            text = "删除",
-            onClick = {
-                state.clearLog()
-                Toast.makeText(context, "日志已清空", Toast.LENGTH_SHORT).show()
-            },
             modifier = Modifier.weight(1f),
         )
     }
@@ -1587,8 +1723,16 @@ private fun LogBody(
         Text(
             text = if (onlyAbnormal) "筛出 ${shown.size} / ${lines.size} 条" else "共 ${lines.size} 条，显示最近 60 条",
             fontSize = 11.sp,
-            modifier = Modifier.align(Alignment.CenterVertically),
+            // weight 把「清空」推到最右，按钮不会跟着文字长度左右乱跳
+            modifier = Modifier.weight(1f).align(Alignment.CenterVertically),
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        )
+        AppButton(
+            text = "清空",
+            onClick = {
+                state.clearLog()
+                Toast.makeText(context, "日志已清空", Toast.LENGTH_SHORT).show()
+            },
         )
     }
     Column(
@@ -1828,12 +1972,13 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
+    "1.9.0：单个应用可以单独设置网络条件（目标应用里点一行）；自检报告与运行日志都能\n" +
+        "直接分享，报告里带上机型和系统版本；Wi-Fi 名称读不到时会自动换条路再试；\n" +
+        "新增可选的常驻状态通知。\n" +
     "1.8.5：新增「隐藏桌面图标」开关（设置 → 外观），隐藏后仍可从 LSPosed 管理器打开\n" +
         "本页恢复。\n" +
     "1.8.4：Material 3 下关于页补上顶部标题栏，和其它页一致；去掉应用图标，\n" +
-        "名称与版本改成两行普通文字，跟着卡片一起滚。\n" +
-    "1.8.3：关于页也跟随 Material 3 了：纯色底、实色卡片、小一号的头图，不再有整屏流动\n" +
-        "光晕。切到 M3 后四个页面风格一致，切回 HyperOS 还是原来的样子。"
+        "名称与版本改成两行普通文字，跟着卡片一起滚。"
 
 private const val ACK_TIPS =
     "本模块的实现离不开这些开源项目，在此致谢：\n\n" +

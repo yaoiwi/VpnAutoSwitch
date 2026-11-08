@@ -1,5 +1,7 @@
 package com.vpnautoswitch.module.system
 
+import com.vpnautoswitch.module.Config
+
 /** 不依赖 Android 的核心判断，便于固定旧行为并覆盖时序边界。 */
 internal object EnginePolicy {
 
@@ -124,6 +126,41 @@ internal object EnginePolicy {
             2 -> allowMobile
             else -> true
         }
+
+    /**
+     * 带应用覆盖的网络判定。
+     *
+     * [mode] 为空表示跟随全局；`any` 无视全局开关——这是有意的：
+     * 用户把某个应用单独设成「都允许」，就是想让它不受全局的 Wi-Fi / 移动数据限制。
+     * 其余取值按「只在这种网络下生效」处理。
+     */
+    fun isNetworkAllowedFor(
+        transport: Int,
+        mode: String,
+        allowWifi: Boolean,
+        allowMobile: Boolean,
+    ): Boolean = when (mode) {
+        Config.NET_ANY -> true
+        Config.NET_WIFI -> transport == 1
+        Config.NET_MOBILE -> transport == 2
+        else -> isNetworkAllowed(transport, allowWifi, allowMobile)
+    }
+
+    /**
+     * 一组存活目标里，是否至少有一个在当前网络下允许生效。
+     *
+     * 看门狗要靠它决定「网络不支持就断开」：只要还有一个目标能在当前网络下工作，
+     * 就不能因为别的目标被限制而把隧道断掉。
+     */
+    fun anyTargetAllowed(
+        transport: Int,
+        packages: Collection<String>,
+        overrides: Map<String, String>,
+        allowWifi: Boolean,
+        allowMobile: Boolean,
+    ): Boolean = packages.any {
+        isNetworkAllowedFor(transport, overrides[it].orEmpty(), allowWifi, allowMobile)
+    }
 
     fun shouldScheduleOffAfterDeath(removedTarget: Boolean, remainingTargets: Int): Boolean =
         removedTarget && remainingTargets == 0

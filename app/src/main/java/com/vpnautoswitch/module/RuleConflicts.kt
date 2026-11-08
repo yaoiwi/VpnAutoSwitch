@@ -43,6 +43,8 @@ object RuleConflicts {
         return config.copy(
             offTargets = LinkedHashSet(offTargets),
             targets = LinkedHashSet(config.targets - offTargets),
+            // 不再是目标应用了，单独设过的网络条件跟着失效，别留在配置里
+            networkOverride = config.networkOverride - offTargets,
         ) to removed.size
     }
 
@@ -70,6 +72,7 @@ object RuleConflicts {
         val cleaned = config.copy(
             targets = LinkedHashSet(config.targets - config.offTargets),
             wifiOn = LinkedHashSet(config.wifiOn - config.wifiOff),
+            networkOverride = config.networkOverride - config.offTargets,
         )
         return cleaned to before
     }

@@ -37,11 +37,22 @@ internal object Engine {
     internal const val TAG = "VpnAutoSwitch"
     const val HEARTBEAT_KEY = "vpn_autoswitch_heartbeat"
 
+    /** 系统对 SSID 脱敏时返回的占位值（Android 13+ 无定位权限 / ROM 加固时常见） */
+    private const val UNKNOWN_SSID = "<unknown ssid>"
+
     /** 当前加载进 system_server 的模块版本号，App 用它判断「是不是旧代码」 */
     const val MODULE_VERSION_KEY = "vpn_autoswitch_module_version"
 
     /** 当前 Wi-Fi 名称，写给 App 显示（App 自己没有定位权限，读不到 SSID） */
     const val SSID_KEY = "vpn_autoswitch_ssid"
+
+    /**
+     * SSID 的读取结果：`ok` / `off`（没连 Wi-Fi）/ `masked`（连着但系统不给名字）。
+     *
+     * 只有 [SSID_KEY] 是空字符串时，分不清「没连 Wi-Fi」和「读取被系统拦了」，
+     * 而这两种情况的排查方向完全相反，所以单独记一份。
+     */
+    const val SSID_STATE_KEY = "vpn_autoswitch_ssid_state"
 
     /** App 通过这个 action 请求重启（受 signature 权限保护） */
     /** App 请求清空运行日志（App 没有 WRITE_SECURE_SETTINGS，只能让 system_server 代删） */
@@ -639,7 +650,7 @@ internal object Engine {
         if (!cfg.targets.contains(pkg)) return
         if (automationPaused || userOff || wifiSuppressed || offAppForeground != null) return
         if (screenOffActive) return
-        if (!isNetworkAllowed(cfg)) return
+        if (!isNetworkAllowed(cfg, pkg)) return
         // 已经连着就不用插手，resumed 之后走正常流程
         if (hasVpnTransport(ctx)) return
 
@@ -1237,8 +1248,30 @@ internal object Engine {
         }
     }
 
-    internal fun isNetworkAllowed(cfg: Config): Boolean =
-        EnginePolicy.isNetworkAllowed(lastTransport, cfg.allowWifi, cfg.allowMobile)
+    internal fun isNetworkAllowed(cfg: Config, pkg: String? = null): Boolean =
+        EnginePolicy.isNetworkAllowedFor(
+            lastTransport,
+            pkg?.let { cfg.networkModeOf(it) }.orEmpty(),
+            cfg.allowWifi,
+            cfg.allowMobile,
+        )
+
+    /**
+     * 存活目标里是否还有在当前网络下能生效的。
+     *
+     * 没有存活目标时退回全局判定：此时多半是 Wi-Fi 规则或用户手动开启的场景，
+     * 全局开关才是唯一说得清的判据。
+     */
+    internal fun anyTargetAllowedOnNetwork(cfg: Config): Boolean {
+        if (aliveTargets.isEmpty()) return isNetworkAllowed(cfg)
+        return EnginePolicy.anyTargetAllowed(
+            lastTransport,
+            aliveTargets,
+            cfg.networkOverride,
+            cfg.allowWifi,
+            cfg.allowMobile,
+        )
+    }
 
     // ------------------------------------------------------------ 锁屏断开
 
@@ -1358,7 +1391,7 @@ internal object Engine {
         if (isWifiOnActive(cfg)) {
             return "wifiOn" to "Wi-Fi \"${currentSsid.orEmpty()}\" 命中开启规则"
         }
-        if (!isNetworkAllowed(cfg)) {
+        if (!anyTargetAllowedOnNetwork(cfg)) {
             return "networkDisabled" to "当前网络类型已关闭自动开关"
         }
         if (userOff) {
@@ -1377,6 +1410,9 @@ internal object Engine {
         try {
             val cfg = ConfigRepo.get(context)
             val (rule, detail) = currentRule(cfg)
+            // 通知自己按「规则 + 连接状态」去重，成本只有一次 Settings 读取；
+            // 放在快照的节流之前，开关刚改完也能立刻生效，不用等下一次状态变化
+            StatusNotification.sync(context, cfg, rule, detail)
             // 快照里带时间戳，写一次内容就「变」一次；换成自己比对关键字段，
             // 没人看诊断时就不必每次前台回调都写一遍设置
             val key = "$rule|$detail|$lastTransport|${lastForeground.orEmpty()}"
@@ -1392,27 +1428,58 @@ internal object Engine {
 
     /**
      * 读取当前 Wi-Fi 名称并写进 Settings（App 侧没有定位权限，读不到 SSID）。
-     * 模块跑在 system_server，可以直接拿 WifiManager 的连接信息。
+     *
+     * 模块跑在 system_server，正常情况下 `connectionInfo.ssid` 不会脱敏；
+     * 但 Android 13 起系统加了 SSID 脱敏，部分 ROM 对 system uid 也一并处理，
+     * 读回来是 `<unknown ssid>`。这时退回按 networkId 查已配置网络——
+     * 那条路径读的是用户自己保存的网络名，不受定位权限影响。
      */
     internal fun refreshSsid(ctx: Context, isWifi: Boolean): String? {
-        val ssid = if (!isWifi) {
-            null
-        } else {
-            try {
-                val wm = ctx.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-                wm?.connectionInfo?.ssid?.trim('"')
-            } catch (t: Throwable) {
-                null
-            }
-        }
-        val clean = ssid?.takeIf { it.isNotEmpty() && it != "<unknown ssid>" }
+        val raw = if (!isWifi) null else readSsid(ctx)
+        val clean = raw?.takeIf { it.isNotEmpty() && it != UNKNOWN_SSID }
         currentSsid = clean
+        val state = when {
+            !isWifi -> "off"
+            clean != null -> "ok"
+            else -> "masked"
+        }
         try {
             Settings.Secure.putString(ctx.contentResolver, SSID_KEY, clean ?: "")
+            Settings.Secure.putString(ctx.contentResolver, SSID_STATE_KEY, state)
         } catch (t: Throwable) {
             // 忽略
         }
         return clean
+    }
+
+    private fun readSsid(ctx: Context): String? {
+        val wm = try {
+            ctx.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+        } catch (t: Throwable) {
+            null
+        } ?: return null
+        val info = try {
+            wm.connectionInfo
+        } catch (t: Throwable) {
+            null
+        }
+        val direct = info?.ssid?.trim('"')?.takeIf { it.isNotEmpty() && it != UNKNOWN_SSID }
+        if (direct != null) return direct
+
+        // 兜底：连接信息里只剩 networkId（或带上 <unknown ssid>）时，去已保存网络里反查
+        val netId = info?.networkId ?: -1
+        if (netId < 0) return null
+        return try {
+            @Suppress("DEPRECATION")
+            wm.configuredNetworks
+                ?.firstOrNull { it.networkId == netId }
+                ?.SSID
+                ?.trim('"')
+                ?.takeIf { it.isNotEmpty() && it != UNKNOWN_SSID }
+        } catch (t: Throwable) {
+            // Android 13+ 对普通应用要定位权限；system_server 一般放行，被拦就当作读不到
+            null
+        }
     }
 
     internal fun handleNetworkChanged() {
@@ -1448,7 +1515,7 @@ internal object Engine {
             return
         }
 
-        if (!isNetworkAllowed(cfg)) {
+        if (!anyTargetAllowedOnNetwork(cfg)) {
             if (VpnSwitcher.isActive(ctx.contentResolver)) {
                 log(ctx, "network type disabled -> turn off")
                 turnOff("network type disabled")

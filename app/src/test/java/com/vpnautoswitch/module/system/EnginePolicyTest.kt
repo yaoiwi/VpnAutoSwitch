@@ -1,5 +1,6 @@
 package com.vpnautoswitch.module.system
 
+import com.vpnautoswitch.module.Config
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -780,5 +781,61 @@ class EnginePolicyTest {
     fun `broadcast skip threshold is configurable`() {
         assertFalse(EnginePolicy.shouldSkipBroadcast(1, threshold = 3))
         assertTrue(EnginePolicy.shouldSkipBroadcast(3, threshold = 3))
+    }
+
+    @Test
+    fun `per app override wins over the global switches`() {
+        // 全局禁了 Wi-Fi，但应用单独设成「仅 Wi-Fi」：允许，这是覆盖的意义
+        assertTrue(
+            EnginePolicy.isNetworkAllowedFor(1, Config.NET_WIFI, allowWifi = false, allowMobile = false)
+        )
+        // 全局允许 Wi-Fi，应用设成「仅移动数据」：Wi-Fi 下不允许
+        assertFalse(
+            EnginePolicy.isNetworkAllowedFor(1, Config.NET_MOBILE, allowWifi = true, allowMobile = true)
+        )
+        assertTrue(
+            EnginePolicy.isNetworkAllowedFor(2, Config.NET_MOBILE, allowWifi = true, allowMobile = true)
+        )
+        // 「都允许」要能突破全局的禁用
+        assertTrue(
+            EnginePolicy.isNetworkAllowedFor(2, Config.NET_ANY, allowWifi = false, allowMobile = false)
+        )
+    }
+
+    @Test
+    fun `empty or unknown override falls back to global`() {
+        assertFalse(
+            EnginePolicy.isNetworkAllowedFor(1, Config.NET_FOLLOW, allowWifi = false, allowMobile = true)
+        )
+        assertFalse(
+            EnginePolicy.isNetworkAllowedFor(1, "bogus", allowWifi = false, allowMobile = true)
+        )
+        // 以太网等未知传输类型沿用原来的「一律允许」
+        assertTrue(
+            EnginePolicy.isNetworkAllowedFor(3, Config.NET_FOLLOW, allowWifi = false, allowMobile = false)
+        )
+    }
+
+    @Test
+    fun `one allowed target is enough to keep the tunnel`() {
+        val overrides = mapOf("only-wifi" to Config.NET_WIFI)
+        // Wi-Fi 下：两个都能用
+        assertTrue(
+            EnginePolicy.anyTargetAllowed(
+                1, listOf("only-wifi", "free"), overrides, allowWifi = true, allowMobile = true
+            )
+        )
+        // 移动数据下：只剩 free 能用，仍然允许
+        assertTrue(
+            EnginePolicy.anyTargetAllowed(
+                2, listOf("only-wifi", "free"), overrides, allowWifi = true, allowMobile = true
+            )
+        )
+        // 只剩被限制的那个了，就该断
+        assertFalse(
+            EnginePolicy.anyTargetAllowed(
+                2, listOf("only-wifi"), overrides, allowWifi = true, allowMobile = true
+            )
+        )
     }
 }

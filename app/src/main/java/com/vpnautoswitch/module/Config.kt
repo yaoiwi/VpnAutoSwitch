@@ -70,6 +70,14 @@ data class Config(
     val wifiOn: Set<String> = emptySet(),
     /** 连上这些 Wi-Fi 时始终关闭 VPN，且不再自动开启 */
     val wifiOff: Set<String> = emptySet(),
+    /**
+     * 单个应用覆盖全局网络条件。
+     *
+     * 上面两个开关是「默认值」，这里只影响被点名的应用：比如全局允许 Wi-Fi 与移动数据，
+     * 但某个下载工具设成「仅 Wi-Fi」，到移动数据下它就不会再把 VPN 拉起来。
+     * 值取 [NET_WIFI] / [NET_MOBILE] / [NET_ANY]，不在表里就是跟随全局。
+     */
+    val networkOverride: Map<String, String> = emptyMap(),
     /** 已选应用列表按名称排序（默认按添加顺序） */
     val sortAppsByName: Boolean = false,
     /** 关闭 VPN 后保留客户端进程（下次打开应用时不用冷启动，代价是客户端常驻后台） */
@@ -84,13 +92,24 @@ data class Config(
     /** 锁屏后等待多久断开 VPN（分钟）；需要 [disconnectOnScreenOff] 打开 */
     val screenOffMinutes: Int = 10,
     /** 锁屏超过 [screenOffMinutes] 分钟后断开 VPN（默认关） */
-    val disconnectOnScreenOff: Boolean = false
+    val disconnectOnScreenOff: Boolean = false,
+    /**
+     * 常驻状态通知。
+     *
+     * 通知由 system_server 里的模块发出（App 不常驻，没法实时感知状态），
+     * 所以通知归属会显示成「Android 系统」，这是权限决定的，不是 bug。
+     */
+    val statusNotification: Boolean = false
 ) {
+
+    /** 某个应用生效的网络条件：有覆盖用覆盖，否则看全局 */
+    fun networkModeOf(packageName: String): String =
+        networkOverride[packageName]?.takeIf { it.isNotEmpty() } ?: NET_FOLLOW
 
     fun toJson(): String {
         val o = JSONObject()
         o.put("app", "vpn-autoswitch")
-        o.put("schema", 1)
+        o.put("schema", SCHEMA)
         o.put("enabled", enabled)
         o.put("targets", JSONArray(targets.toList()))
         o.put("offTargets", JSONArray(offTargets.toList()))
@@ -117,6 +136,10 @@ data class Config(
         o.put("md3Wallpaper", md3Wallpaper)
         o.put("wifiOn", JSONArray(wifiOn.toList()))
         o.put("wifiOff", JSONArray(wifiOff.toList()))
+        val ov = JSONObject()
+        networkOverride.forEach { (pkg, mode) -> if (mode.isNotEmpty()) ov.put(pkg, mode) }
+        o.put("netOverride", ov)
+        o.put("statusNotif", statusNotification)
         o.put("sortApps", sortAppsByName)
         o.put("keepAlive", keepClientAlive)
         o.put("forceStopNow", forceStopImmediately)
@@ -129,11 +152,28 @@ data class Config(
         const val PREFS_NAME = "vpn_autoswitch_config"
         internal const val KEY_JSON = "config_json"
 
+        /** 配置结构版本：2 起多了「单应用网络覆盖」与「常驻状态通知」，旧版本读新配置会忽略这些字段 */
+        const val SCHEMA = 2
+
         /** 界面风格：HyperOS / Miuix 那套 */
         const val THEME_HYPER = "hyper"
 
         /** 界面风格：Material Design 3 */
         const val THEME_MD3 = "md3"
+
+        /** 应用网络条件：跟随全局 */
+        const val NET_FOLLOW = ""
+
+        /** 应用网络条件：仅 Wi-Fi 下生效 */
+        const val NET_WIFI = "wifi"
+
+        /** 应用网络条件：仅移动数据下生效 */
+        const val NET_MOBILE = "mobile"
+
+        /** 应用网络条件：任何网络下都生效（即便全局关了某种网络） */
+        const val NET_ANY = "any"
+
+        private val NET_MODES = setOf(NET_WIFI, NET_MOBILE, NET_ANY)
 
         fun parse(raw: String?): Config? {
             if (raw.isNullOrEmpty()) return null
@@ -165,6 +205,8 @@ data class Config(
                     hapticFeedback = o.optBoolean("haptic", true),
                     wifiOn = readSet(o.optJSONArray("wifiOn")),
                     wifiOff = readSet(o.optJSONArray("wifiOff")),
+                    networkOverride = readOverrides(o.optJSONObject("netOverride")),
+                    statusNotification = o.optBoolean("statusNotif", false),
                     sortAppsByName = o.optBoolean("sortApps", false),
                     keepClientAlive = o.optBoolean("keepAlive", true),
                     forceStopImmediately = o.optBoolean("forceStopNow", false),
@@ -195,6 +237,19 @@ data class Config(
                 if (p.isNotEmpty()) set.add(p)
             }
             return set
+        }
+
+        /** 非法值直接丢掉：宁可退回「跟随全局」，也不要让一个拼错的模式让应用永远不触发 */
+        private fun readOverrides(obj: JSONObject?): Map<String, String> {
+            if (obj == null) return emptyMap()
+            val out = LinkedHashMap<String, String>()
+            val keys = obj.keys()
+            while (keys.hasNext()) {
+                val pkg = keys.next()
+                val mode = obj.optString(pkg, "")
+                if (pkg.isNotEmpty() && mode in NET_MODES) out[pkg] = mode
+            }
+            return out
         }
 
         fun load(ctx: Context): Config {

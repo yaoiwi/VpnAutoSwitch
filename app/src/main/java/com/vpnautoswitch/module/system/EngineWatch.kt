@@ -100,7 +100,7 @@ internal fun Engine.watchdogTick() {
         log(ctx, "$suppressor is gone, auto vpn available again")
     }
 
-    if (!isNetworkAllowed(cfg)) {
+    if (!anyTargetAllowedOnNetwork(cfg)) {
         if (active) {
             log(ctx, "reconcile: network type disabled -> off")
             turnOff("network type disabled")

@@ -1,5 +1,6 @@
 package com.vpnautoswitch.module.ui
 
+import android.os.Build
 import com.vpnautoswitch.module.BuildConfig
 import com.vpnautoswitch.module.Config
 import java.text.SimpleDateFormat
@@ -72,7 +73,10 @@ internal object DiagnosticsReport {
             },
             buildString {
                 append(diagnostics.network)
-                if (diagnostics.currentSsid.isNotEmpty()) append(" · ${diagnostics.currentSsid}")
+                append(" · ").append(ssidLabel(diagnostics))
+                if (diagnostics.ssidState == "masked") {
+                    append("\n读到的是占位值：系统对 SSID 做了脱敏，「指定 Wi-Fi」规则可能匹配不上")
+                }
                 if (diagnostics.ruleDetail.isNotEmpty()) {
                     append("\n当前：${ruleLabel(diagnostics.activeRule)}，${diagnostics.ruleDetail}")
                 } else {
@@ -112,6 +116,9 @@ internal object DiagnosticsReport {
         val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA)
         return buildString {
             appendLine("VpnAutoSwitch 状态报告")
+            appendLine("生成：${fmt.format(Date(now))}")
+            appendLine("设备：${Build.MANUFACTURER} ${Build.MODEL} · Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+            appendLine("ROM：${Build.DISPLAY}")
             appendLine("App：${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
             appendLine("模块：v${diagnostics.moduleVersion} · ${moduleStateLabel(diagnostics.moduleState)}")
             appendLine(
@@ -121,7 +128,7 @@ internal object DiagnosticsReport {
                     "从未"
                 }
             )
-            appendLine("网络：${diagnostics.network} · SSID=${diagnostics.currentSsid.ifEmpty { "无" }}")
+            appendLine("网络：${diagnostics.network} · SSID=${ssidLabel(diagnostics)}")
             appendLine("VPN 包：${config.vpnPackage.ifEmpty { "未选择" }}")
             appendLine("安装：${yesNo(diagnostics.vpnInstalled)} · 启用：${yesNo(diagnostics.vpnEnabled)} · VpnService：${yesNo(diagnostics.vpnHasService)}")
             appendLine("隧道：${if (diagnostics.vpnConnected) "已连接" else "未连接"}")
@@ -301,6 +308,14 @@ internal object DiagnosticsReport {
         "userOff" -> "手动关闭后等待重开"
         "target" -> "目标应用在前台"
         "idle" -> "空闲"
+        else -> "未上报"
+    }
+
+    /** SSID 的三种状态分开写，否则「没连 Wi-Fi」和「读不到名字」看起来一模一样 */
+    private fun ssidLabel(d: Diagnostics): String = when {
+        d.currentSsid.isNotEmpty() -> d.currentSsid
+        d.ssidState == "masked" -> "读取失败（系统可能已脱敏）"
+        d.ssidState == "off" -> "未连接 Wi-Fi"
         else -> "未上报"
     }
 

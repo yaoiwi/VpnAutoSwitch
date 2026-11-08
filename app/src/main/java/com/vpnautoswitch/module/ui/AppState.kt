@@ -49,6 +49,8 @@ data class Diagnostics(
     val moduleVersion: Int = 0,
     /** 当前 Wi-Fi 名称（模块写在 Settings 里，App 自己读不到 SSID） */
     val currentSsid: String = "",
+    /** SSID 读取结果：ok / off / masked，用来区分「没连 Wi-Fi」和「被系统脱敏」 */
+    val ssidState: String = "",
     /** 配置的 VPN 客户端 */
     val vpnPackage: String = "",
     /** null 表示未配置或无法查询 */
@@ -87,6 +89,7 @@ data class Diagnostics(
             Engine.HEARTBEAT_KEY,
             Engine.MODULE_VERSION_KEY,
             Engine.SSID_KEY,
+            Engine.SSID_STATE_KEY,
             RuntimeDiagnostics.RUNTIME_KEY,
             RuntimeDiagnostics.FAILURE_KEY,
             RuntimeDiagnostics.TIMING_KEY,
@@ -129,6 +132,11 @@ data class Diagnostics(
                 moduleVersion = moduleVersion,
                 currentSsid = try {
                     Settings.Secure.getString(cr, "vpn_autoswitch_ssid").orEmpty()
+                } catch (t: Throwable) {
+                    ""
+                },
+                ssidState = try {
+                    Settings.Secure.getString(cr, Engine.SSID_STATE_KEY).orEmpty()
                 } catch (t: Throwable) {
                     ""
                 },
