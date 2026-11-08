@@ -117,7 +117,10 @@ internal object StatusNotification {
     /**
      * 通知栏小图标。
      *
-     * 首选自己画的挂锁（`ic_stat_vpn_lock`）。这里有两个坑：
+     * 首选应用图标里的那把斜钥匙（`ic_stat_vpn_key`），所以通知栏的图标和桌面图标
+     * 是同一个形状，不会出现「桌面上一个样、通知栏里另一个样」。
+     *
+     * 这里有两个坑：
      *
      * 1. 资源 id 属于本应用，必须用**应用的包名**构建 Icon。传 `ctx`（system_server 的）
      *    会让 pkg 变成 "android"，SystemUI 跑到 framework 的资源表里找这个 id，
@@ -125,7 +128,7 @@ internal object StatusNotification {
      * 2. 所以先 `createPackageContext` 拿应用上下文，顺便试加载一次 drawable ——
      *    资源表里真没有这个 id 时会在这里抛异常，能干净地走回退，而不是发出去一个坏通知。
      *
-     * 回退顺序：系统自带的锁 → 系统 VPN 钥匙 → 通用信息图标。
+     * 回退顺序：系统 VPN 钥匙 → 系统自带的锁 → 通用信息图标。
      */
     private fun smallIcon(ctx: Context): Icon {
         customIcon(ctx)?.let { return it }
@@ -142,8 +145,8 @@ internal object StatusNotification {
 
     private fun customIcon(ctx: Context): Icon? = try {
         val appCtx = ctx.createPackageContext(BuildConfig.APPLICATION_ID, 0)
-        appCtx.resources.getDrawable(R.drawable.ic_stat_vpn_lock, null)
-        Icon.createWithResource(appCtx, R.drawable.ic_stat_vpn_lock)
+        appCtx.resources.getDrawable(R.drawable.ic_stat_vpn_key, null)
+        Icon.createWithResource(appCtx, R.drawable.ic_stat_vpn_key)
     } catch (t: Throwable) {
         null
     }
@@ -178,8 +181,8 @@ internal object StatusNotification {
     /**
      * 自定义图标不可用时的候选，按顺序取第一个存在的。
      *
-     * `ic_lock_lock` 是 framework 里的锁，形状和自定义图标最接近；
-     * `stat_sys_vpn_ic` 是以前一直用的钥匙，保底不改变老用户观感。
+     * `stat_sys_vpn_ic` 是系统那把 VPN 钥匙，语义最接近，放第一位；
+     * `ic_lock_lock` 是 framework 里的锁，几乎每个 ROM 都有。
      */
-    private val FALLBACK_ICONS = arrayOf("ic_lock_lock", "stat_sys_vpn_ic", "ic_lock_idle_lock")
+    private val FALLBACK_ICONS = arrayOf("stat_sys_vpn_ic", "ic_lock_lock", "ic_lock_idle_lock")
 }

@@ -1972,12 +1972,11 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
+    "1.9.2：状态通知的图标改成桌面图标里那把钥匙，和 App 图标保持一致。\n" +
     "1.9.1：状态通知的小图标换成挂锁，不再用系统自带的钥匙图标，换 ROM 或主题形状也不变。\n" +
     "1.9.0：单个应用可以单独设置网络条件（目标应用里点一行）；自检报告与运行日志都能\n" +
         "直接分享，报告里带上机型和系统版本；Wi-Fi 名称读不到时会自动换条路再试；\n" +
-        "新增可选的常驻状态通知。\n" +
-    "1.8.5：新增「隐藏桌面图标」开关（设置 → 外观），隐藏后仍可从 LSPosed 管理器打开\n" +
-        "本页恢复。"
+        "新增可选的常驻状态通知。"
 
 private const val ACK_TIPS =
     "本模块的实现离不开这些开源项目，在此致谢：\n\n" +

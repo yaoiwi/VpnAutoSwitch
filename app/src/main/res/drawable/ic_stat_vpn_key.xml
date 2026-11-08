@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  通知栏小图标：应用图标里那把斜钥匙。
+
+  形状和 `ic_launcher_foreground` 完全一致（圆环 + 45° 钥匙杆 + 两道齿），
+  只是换到 24dp 画布、去掉蓝底 —— 通知图标是单色图层，系统会按状态栏
+  前景色统一染色，蓝色底传进去也会被丢掉，只会剩下一个方块。
+
+  整体放大 1.08 倍：原图在 24dp 里留白 4.5dp，缩到状态栏后显得太小。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <group
+        android:pivotX="12"
+        android:pivotY="12"
+        android:scaleX="1.08"
+        android:scaleY="1.08">
+
+        <!-- 钥匙环 -->
+        <path
+            android:fillColor="#00000000"
+            android:pathData="M8.6,8.6m-4.1,0a4.1,4.1 0,1 1,8.2 0a4.1,4.1 0,1 1,-8.2 0"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="2.5" />
+
+        <!-- 钥匙杆 -->
+        <path
+            android:fillColor="#00000000"
+            android:pathData="M11.7,11.7L19.2,19.2"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeLineCap="round"
+            android:strokeWidth="2.5" />
+
+        <!-- 第一道齿 -->
+        <path
+            android:fillColor="#00000000"
+            android:pathData="M15.9,15.9L17.6,14.2"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeLineCap="round"
+            android:strokeWidth="2.3" />
+
+        <!-- 第二道齿 -->
+        <path
+            android:fillColor="#00000000"
+            android:pathData="M17.7,17.7L19.4,16"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeLineCap="round"
+            android:strokeWidth="2.3" />
+    </group>
+</vector>
