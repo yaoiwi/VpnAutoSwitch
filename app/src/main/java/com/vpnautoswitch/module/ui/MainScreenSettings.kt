@@ -890,11 +890,3 @@ internal fun vpnSummary(state: AppState): String {
     }
     return "${state.labelOf(pkg)}\n$pkg$warn"
 }
-
-private fun offVpnSummary(state: AppState): String {
-    val list = state.config.offTargets
-    if (list.isEmpty()) return "未选择。打开这些应用时，若 VPN 已连接会自动断开"
-    val head = list.take(3).map { state.labelOf(it) }.joinToString("、") +
-        if (list.size > 3) " 等 ${list.size} 个" else ""
-    return "$head\n打开时自动断开，退出前不再自动连接"
-}
