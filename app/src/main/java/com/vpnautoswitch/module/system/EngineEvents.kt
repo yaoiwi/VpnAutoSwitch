@@ -74,6 +74,10 @@ internal fun Engine.handleForeground(pkg: String) {
 
     if (foregroundKind != EnginePolicy.ForegroundKind.TARGET) return
 
+    // 同 prewarm：回调没来时按当下网络重算一次，别用上一次留下的结论
+    probeNetwork(ctx)
+    refreshWifiSuppression(ctx, cfg)
+
     // 当前 Wi-Fi 在「关闭 VPN」列表里：不自动开启
     if (wifiSuppressed) {
         log(ctx, "$pkg -> foreground, but wifi rule keeps vpn off")

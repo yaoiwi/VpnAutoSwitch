@@ -600,12 +600,18 @@ internal object Engine {
     /** 当前连着的 Wi-Fi 名称（不带引号）；非 Wi-Fi 时为 null */
     internal var currentSsid: String? = null
 
+    /** 上一次写进 Settings 的 SSID 状态（ok/off/masked），用来跳过重复写入 */
+    internal var ssidState: String? = null
+
     /** 当前 Wi-Fi 命中「指定 Wi-Fi 关 VPN」规则：期间不再自动开启 */
     internal var wifiSuppressed = false
 
     /** 当前默认网络的传输类型：0 未知 / 1 Wi-Fi / 2 移动数据 / 3 其他 */
     internal var lastTransport = 0
     internal var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    /** 上一次主动探测网络的时间，避免切应用时连着查好几次 */
+    internal var lastProbeAt = 0L
     internal var rebootReceiverRegistered = false
     internal var booted = false
 

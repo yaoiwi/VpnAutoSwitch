@@ -90,9 +90,9 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
+    "1.9.7：修复开机后「指定 Wi-Fi 关 VPN」不生效，网络状态会在启动、解锁和打开应用时各补一次判断。\n" +
     "1.9.6：代码按职责拆成多个文件，功能和界面完全没变。\n" +
-    "1.9.5：状态通知改成两路投递，打开应用会补齐没送到的状态；显示已连接时长，点通知进客户端。\n" +
-    "1.9.4：状态通知发不出去时，运行日志会直接写明原因（App 被强制停止，或没有通知权限）。"
+    "1.9.5：状态通知改成两路投递，打开应用会补齐没送到的状态；显示已连接时长，点通知进客户端。"
 
 private const val ACK_TIPS =
     "本模块的实现离不开这些开源项目，在此致谢：\n\n" +

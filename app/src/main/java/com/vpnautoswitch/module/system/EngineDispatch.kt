@@ -36,6 +36,10 @@ internal fun Engine.prewarm(pkg: String) {
     if (!cfg.enabled || cfg.vpnPackage.isEmpty()) return
     if (pkg == cfg.vpnPackage || pkg == BuildConfig.APPLICATION_ID) return
     if (!cfg.targets.contains(pkg)) return
+    // 开机早期注册的网络回调可能一直没来，这里按当下网络补一次判断：
+    // 否则 lastTransport 是 0、wifiSuppressed 还是初始的 false，Wi-Fi 规则等于没配。
+    probeNetwork(ctx)
+    refreshWifiSuppression(ctx, cfg)
     if (automationPaused || userOff || wifiSuppressed || offAppForeground != null) return
     if (screenOffActive) return
     if (!isNetworkAllowed(cfg, pkg)) return

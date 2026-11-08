@@ -116,6 +116,13 @@ internal fun Engine.warmupConfig(ctx: Context, attempt: Int) {
             ConfigRepo.lastSource() != "provider" ->
                 log(ctx, "config from ${ConfigRepo.lastSource()} cache, app process not up yet")
         }
+        // 配置是异步到的：它到达之前发生的网络事件会被丢掉（那时 ConfigRepo 还是空的），
+        // 而「开机时 Wi-Fi 已经连着、用户直接开目标应用」正是最常见的情形。
+        // 不在这里补一次评估，就得等下一次网络切换规则才会生效。
+        handler.post {
+            handleNetworkChanged()
+            publishRuntime(ctx)
+        }
         return
     }
     if (attempt == 0) log(ctx, "config not ready yet, waiting for the app process")

@@ -94,7 +94,15 @@ internal fun Engine.isUserUnlocked(ctx: Context?): Boolean? = try {
  */
 internal fun Engine.onUserUnlocked(ctx: Context) {
     lockedWaitLogged = false
-    if (ConfigRepo.getOrNull(ctx) != null) return
+    if (ConfigRepo.getOrNull(ctx) != null) {
+        // 配置在锁屏期间已经从镜像拿到了，这里没什么可等的。但解锁前后网络状态
+        // 往往变过（Wi-Fi 这时才真正可用），补一次评估，省得规则等到下次切换才认。
+        handler.post {
+            handleNetworkChanged()
+            publishRuntime(ctx)
+        }
+        return
+    }
     log(ctx, "user unlocked -> retry starting the module app")
     warmupConfig(ctx, 0)
     replayPendingEvents()
