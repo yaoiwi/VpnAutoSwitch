@@ -128,10 +128,11 @@ internal object StatusNotification {
     }
 
     private fun openAppIntent(ctx: Context): PendingIntent? = try {
-        val intent = Intent().apply {
-            setClassName(BuildConfig.APPLICATION_ID, "${BuildConfig.APPLICATION_ID}.MainActivity")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        }
+        // 优先走桌面入口：用户隐藏图标后 activity-alias 是 disabled，这个方法会返回 null，
+        // 于是退回设置页本身——两条路都能进来，不会因为隐藏图标导致通知点了没反应
+        val intent = ctx.packageManager.getLaunchIntentForPackage(BuildConfig.APPLICATION_ID)
+            ?: Intent().setClassName(MODULE_PACKAGE, "$MODULE_PACKAGE.MainActivity")
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         // minSdk 26，FLAG_IMMUTABLE 必须有（Android 12 起不带会直接崩）
         PendingIntent.getActivity(
             ctx,
@@ -142,4 +143,14 @@ internal object StatusNotification {
     } catch (t: Throwable) {
         null
     }
+
+    /**
+     * 代码所在的真实包名（namespace），和 applicationId 不是一回事。
+     *
+     * 这里不能写 `BuildConfig.APPLICATION_ID + ".MainActivity"`：
+     * 应用 id 是 io.github.yaoiwi.vpnautoswitch，而类是 com.vpnautoswitch.module.MainActivity。
+     * 也不能用 `MainActivity::class.java.name`——那会触发 App 侧的类加载，
+     * 在 system_server 里没有 App 的 classloader。
+     */
+    private const val MODULE_PACKAGE = "com.vpnautoswitch.module"
 }
