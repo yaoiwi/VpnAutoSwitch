@@ -1,7 +1,10 @@
 package com.vpnautoswitch.module
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.database.ContentObserver
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -54,6 +57,22 @@ class MainActivity : ComponentActivity() {
             }
 
             LaunchedEffect(Unit) {
+                // 1.9.3 起通知改由本应用发，Android 13 需要运行时授权。
+                // 开关在旧版本就打开过的用户不会触发 onCheckedChange，这里补一次，
+                // 否则升级上来会「开关是开的、通知栏什么都没有」。
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    state.config.statusNotification &&
+                    checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+                    PackageManager.PERMISSION_GRANTED
+                ) {
+                    requestPermissions(
+                        arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                        REQUEST_NOTIFICATION_PERMISSION,
+                    )
+                }
+            }
+
+            LaunchedEffect(Unit) {
                 while (isActive) {
                     delay(15_000)
                     if (state.screen is Screen.Main) {
@@ -87,5 +106,9 @@ class MainActivity : ComponentActivity() {
         appState?.dispose()
         appState = null
         super.onDestroy()
+    }
+
+    private companion object {
+        const val REQUEST_NOTIFICATION_PERMISSION = 0x5652
     }
 }
