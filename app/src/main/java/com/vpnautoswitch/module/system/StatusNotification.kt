@@ -6,8 +6,10 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.graphics.drawable.Icon
 import com.vpnautoswitch.module.BuildConfig
 import com.vpnautoswitch.module.Config
+import com.vpnautoswitch.module.R
 import de.robv.android.xposed.XposedBridge
 
 /**
@@ -64,7 +66,7 @@ internal object StatusNotification {
                 if (detail.isNotEmpty()) append(" · ").append(detail)
             }
             Notification.Builder(ctx, CHANNEL_ID)
-                .setSmallIcon(smallIconRes(ctx))
+                .setSmallIcon(smallIcon(ctx))
                 .setContentTitle("VPN 自动开关")
                 .setContentText(text)
                 // 内容可能在锁屏上被看到，别把 Wi-Fi 名称之类的东西挂上去
@@ -113,18 +115,37 @@ internal object StatusNotification {
     }
 
     /**
-     * 系统自带的小图标。
+     * 通知栏小图标。
      *
-     * `stat_sys_vpn_ic` 是 internal 资源，system_server 里能按名字取到；
-     * 取不到（不同 ROM 改了名字）就退回一个肯定存在的通用图标。
+     * 首选自己画的挂锁（`ic_stat_vpn_lock`）。这里有两个坑：
+     *
+     * 1. 资源 id 属于本应用，必须用**应用的包名**构建 Icon。传 `ctx`（system_server 的）
+     *    会让 pkg 变成 "android"，SystemUI 跑到 framework 的资源表里找这个 id，
+     *    找不到就渲染成空白方块。
+     * 2. 所以先 `createPackageContext` 拿应用上下文，顺便试加载一次 drawable ——
+     *    资源表里真没有这个 id 时会在这里抛异常，能干净地走回退，而不是发出去一个坏通知。
+     *
+     * 回退顺序：系统自带的锁 → 系统 VPN 钥匙 → 通用信息图标。
      */
-    private fun smallIconRes(ctx: Context): Int {
-        val id = try {
-            ctx.resources.getIdentifier("stat_sys_vpn_ic", "drawable", "android")
-        } catch (t: Throwable) {
-            0
+    private fun smallIcon(ctx: Context): Icon {
+        customIcon(ctx)?.let { return it }
+        for (name in FALLBACK_ICONS) {
+            val id = try {
+                ctx.resources.getIdentifier(name, "drawable", "android")
+            } catch (t: Throwable) {
+                0
+            }
+            if (id != 0) return Icon.createWithResource("android", id)
         }
-        return if (id != 0) id else android.R.drawable.ic_dialog_info
+        return Icon.createWithResource("android", android.R.drawable.ic_dialog_info)
+    }
+
+    private fun customIcon(ctx: Context): Icon? = try {
+        val appCtx = ctx.createPackageContext(BuildConfig.APPLICATION_ID, 0)
+        appCtx.resources.getDrawable(R.drawable.ic_stat_vpn_lock, null)
+        Icon.createWithResource(appCtx, R.drawable.ic_stat_vpn_lock)
+    } catch (t: Throwable) {
+        null
     }
 
     private fun openAppIntent(ctx: Context): PendingIntent? = try {
@@ -153,4 +174,12 @@ internal object StatusNotification {
      * 在 system_server 里没有 App 的 classloader。
      */
     private const val MODULE_PACKAGE = "com.vpnautoswitch.module"
+
+    /**
+     * 自定义图标不可用时的候选，按顺序取第一个存在的。
+     *
+     * `ic_lock_lock` 是 framework 里的锁，形状和自定义图标最接近；
+     * `stat_sys_vpn_ic` 是以前一直用的钥匙，保底不改变老用户观感。
+     */
+    private val FALLBACK_ICONS = arrayOf("ic_lock_lock", "stat_sys_vpn_ic", "ic_lock_idle_lock")
 }

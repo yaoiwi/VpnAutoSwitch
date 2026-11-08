@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  通知栏小图标：挂锁。
+
+  通知图标必须是单色（alpha-only）图层，系统会按状态栏前景色统一染色，
+  所以这里只用白色，不要加渐变或彩色。
+
+  形状在 24dp 下描一遍就够：锁身 14.8×10.9，锁梁线宽 1.9dp。
+  再细就糊了，再粗会糊成一坨。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- 锁梁：圆心 (12, 7.7) 的上半圆，两端垂到锁身里 -->
+    <path
+        android:pathData="M8,10.4 L8,7.7 A4,4 0 0 1 16,7.7 L16,10.4"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeWidth="1.9" />
+
+    <!-- 锁身：圆角矩形，圆角 2.7 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M7.3,10.1 L16.7,10.1 A2.7,2.7 0 0 1 19.4,12.8 L19.4,18.3 A2.7,2.7 0 0 1 16.7,21 L7.3,21 A2.7,2.7 0 0 1 4.6,18.3 L4.6,12.8 A2.7,2.7 0 0 1 7.3,10.1 Z" />
+</vector>
