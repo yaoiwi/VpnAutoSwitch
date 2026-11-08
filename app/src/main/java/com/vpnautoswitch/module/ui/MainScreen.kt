@@ -1979,8 +1979,7 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
-    "1.9.5：状态通知改成广播 + 本地快照两路投递，打开应用会补齐没送到的状态；连接后显示\n" +
-        "已连接时长，点通知直接进 VPN 客户端；自检报告新增通知链路检查。\n" +
+    "1.9.5：状态通知改成两路投递，打开应用会补齐没送到的状态；显示已连接时长，点通知进客户端。\n" +
     "1.9.4：状态通知发不出去时，运行日志会直接写明原因（App 被强制停止，或没有通知权限）。\n" +
     "1.9.3：状态通知改由应用自己发，通知栏里终于显示蓝色图标，不再是系统的绿色机器人。"
 
