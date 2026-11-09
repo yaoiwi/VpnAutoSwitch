@@ -52,6 +52,7 @@ import com.vpnautoswitch.module.ui.hyper.SectionTitle
 import com.vpnautoswitch.module.ui.hyper.SettingsActionWithArrow
 import com.vpnautoswitch.module.ui.hyper.SettingsItemMargin
 import com.vpnautoswitch.module.ui.hyper.SettingsSwitch
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Text
@@ -587,8 +588,15 @@ internal fun LazyListScope.settingsItems(
                 val bring = remember { BringIntoViewRequester() }
                 LaunchedEffect(openLogSignal) {
                     if (openLogSignal > 0) {
-                        withFrameNanos { }
-                        runCatching { bring.bringIntoView() }
+                        try {
+                            // 等一帧，让展开后的日志块先完成布局，不然没东西可顶
+                            withFrameNanos { }
+                            bring.bringIntoView()
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            // 顶不动就算了，用户往下滚一下也能看到
+                        }
                     }
                 }
                 Box(modifier = Modifier.bringIntoViewRequester(bring)) {
