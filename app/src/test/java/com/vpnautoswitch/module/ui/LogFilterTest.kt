@@ -40,4 +40,16 @@ class LogFilterTest {
         assertEquals(lines, LogFilter.select(lines, onlyAbnormal = false))
         assertEquals(listOf(lines[2]), LogFilter.select(lines, onlyAbnormal = true))
     }
+
+    @Test
+    fun `the device line survives abnormal-only filtering`() {
+        val device = "11-10 02:41:07  device: OnePlus PKR110 / Android 16 (API 36)"
+        val lines = listOf(
+            device,
+            "11-10 02:41:08  com.twitter.android -> foreground",
+            "11-10 02:42:11  start VPN service rejected: com.v2ray.ang.service.CoreVpnService",
+        )
+        val filtered = LogFilter.select(lines, onlyAbnormal = true)
+        assertEquals(listOf(device, lines[2]), filtered)
+    }
 }

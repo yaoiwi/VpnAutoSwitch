@@ -43,6 +43,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.vpnautoswitch.module.Config
 import com.vpnautoswitch.module.LauncherIcon
 import com.vpnautoswitch.module.RuleConflicts
+import com.vpnautoswitch.module.system.LogPolicy
 import com.vpnautoswitch.module.ui.hyper.SectionTitle
 import com.vpnautoswitch.module.ui.hyper.SettingsActionWithArrow
 import com.vpnautoswitch.module.ui.hyper.SettingsItemMargin
@@ -683,7 +684,7 @@ private fun LogBody(
             text = when {
                 lines.isEmpty() -> "暂无日志。模块加载 / 开关 VPN / 进程结束都会记录在这里。"
                 shown.isEmpty() -> "没有匹配的异常行，点「只看异常」可切回全部日志。"
-                else -> shown.takeLast(60).joinToString("\n")
+                else -> LogPolicy.tailWithHeader(shown, 60).joinToString("\n")
             },
             fontSize = 11.sp,
             lineHeight = 15.sp,

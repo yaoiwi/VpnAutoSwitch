@@ -1,6 +1,11 @@
 package com.vpnautoswitch.module.system
 
+import android.content.Context
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 
 /**
  * 清除「应用已被强制停止」标记。
@@ -74,5 +79,43 @@ internal object Packages {
         } catch (t: Throwable) {
             return false
         }
+    }
+
+    /**
+     * 一行说清这个包当前被系统怎么对待，形如 `未停用 / 未冻结 / 后台受限`。
+     *
+     * 拉起失败时最需要这三项：「服务起不来」到底是包被强停过、被系统冻结、
+     * 还是后台被电池策略掐了，以前全靠人和用户来回问「自启开了吗、省电策略改了吗」。
+     * 查询本身不需要权限，模块在 system_server 里直接读。
+     */
+    fun stateLabel(ctx: Context, pkg: String): String {
+        if (pkg.isEmpty()) return "包状态未知"
+        val pm = ctx.packageManager
+        val info = try {
+            pm.getApplicationInfo(pkg, 0)
+        } catch (t: Throwable) {
+            null
+        } ?: return "查不到包（$pkg）"
+        val stopped = info.flags and ApplicationInfo.FLAG_STOPPED != 0
+        val suspended = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                pm.isPackageSuspended(pkg)
+            } catch (t: Throwable) {
+                false
+            }
+        } else {
+            false
+        }
+        val exempt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val power = ctx.getSystemService(Context.POWER_SERVICE) as? PowerManager
+            power?.isIgnoringBatteryOptimizations(pkg) == true
+        } else {
+            true
+        }
+        return listOf(
+            if (stopped) "被强停过" else "未停用",
+            if (suspended) "被冻结" else "未冻结",
+            if (exempt) "后台豁免" else "后台受限",
+        ).joinToString(" / ")
     }
 }

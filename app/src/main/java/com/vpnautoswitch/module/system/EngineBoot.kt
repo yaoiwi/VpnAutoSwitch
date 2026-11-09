@@ -82,6 +82,9 @@ internal fun Engine.onBoot(attempt: Int) {
             " (${com.vpnautoswitch.module.BuildConfig.VERSION_CODE})" +
             " at uptime ${SystemClock.elapsedRealtime() / 1000}s, death hooks + watchdog",
     )
+    // 日志最顶上钉一行设备指纹，滚动时不会被挤掉：贴日志时经常只剩片段，
+    // 没有这行就看不出是哪个机型、哪个 ROM 的现场
+    ModuleLog.ensureHeader(ctx, DeviceInfo.fingerprintLine())
     startHeartbeat()
     // 先确认配置能拿到，再重放开机期间排队的事件：
     // 拿不到配置就去处理这些事件，会把「已配置」误判成「没配置」

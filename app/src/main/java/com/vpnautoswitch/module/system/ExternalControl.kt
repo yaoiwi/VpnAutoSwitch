@@ -231,6 +231,9 @@ internal object ExternalControl {
     /** 只启动它的 VpnService（完全没有界面） */
     fun startVpnService(ctx: Context, pkg: String): Boolean {
         if (pkg.isEmpty()) return false
+        // 先记下原样：下面的 unstop 会把 stopped 标记抹掉，等失败之后再查就永远
+        // 显示「未停用」，恰好把最有价值的那条线索洗掉了
+        val stateBefore = Packages.stateLabel(ctx, pkg)
         // 被强停过的包处于 stopped 状态，startForegroundService 会「成功」返回，
         // 但系统不会真的把它拉起来 —— 日志里就是「started VPN service」连着打三次、
         // 却一直没有隧道。以前清标记放在写 always-on 的那条路径里，比这里晚十秒，
@@ -260,7 +263,10 @@ internal object ExternalControl {
             // 日志里就会出现「启动了三次、每次都 started，却十几秒没隧道」的假象。
             val started = ctx.startForegroundService(Intent().setComponent(ComponentName(pkg, service)))
             if (started == null) {
-                ModuleLog.append(ctx, "start VPN service rejected: $service（检查 stopped / 后台限制）")
+                ModuleLog.append(
+                    ctx,
+                    "start VPN service rejected: $service（拉起前包状态：$stateBefore）",
+                )
                 false
             } else {
                 ModuleLog.append(ctx, "started VPN service $service")

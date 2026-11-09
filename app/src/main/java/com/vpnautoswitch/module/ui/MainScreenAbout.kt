@@ -90,9 +90,9 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
+    "1.9.9：运行日志固定显示设备型号和 ROM 版本，写满也不会被挤掉；拉起失败时带上客户端的包状态。\n" +
     "1.9.8：自检新增「Hook 挂载」和「配置来源」，能直接看出 hook 有没有挂上、配置是不是旧的。\n" +
-    "1.9.7：修复开机后「指定 Wi-Fi 关 VPN」不生效，网络状态会在启动、解锁和打开应用时各补一次判断。\n" +
-    "1.9.6：代码按职责拆成多个文件，功能和界面完全没变。"
+    "1.9.7：修复开机后「指定 Wi-Fi 关 VPN」不生效，网络状态会在启动、解锁和打开应用时各补一次判断。"
 
 private const val ACK_TIPS =
     "本模块的实现离不开这些开源项目，在此致谢：\n\n" +

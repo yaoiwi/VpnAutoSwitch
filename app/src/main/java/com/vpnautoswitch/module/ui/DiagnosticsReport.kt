@@ -3,7 +3,9 @@ package com.vpnautoswitch.module.ui
 import android.os.Build
 import com.vpnautoswitch.module.BuildConfig
 import com.vpnautoswitch.module.Config
+import com.vpnautoswitch.module.system.DeviceInfo
 import com.vpnautoswitch.module.system.HookHealth
+import com.vpnautoswitch.module.system.LogPolicy
 import com.vpnautoswitch.module.system.hookReport
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -126,7 +128,7 @@ internal object DiagnosticsReport {
             appendLine("VpnAutoSwitch 状态报告")
             appendLine("生成：${fmt.format(Date(now))}")
             appendLine("设备：${Build.MANUFACTURER} ${Build.MODEL} · Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
-            appendLine("ROM：${Build.DISPLAY}")
+            appendLine("ROM：${Build.DISPLAY}${DeviceInfo.romVendor()?.let { " · $it" }.orEmpty()}")
             appendLine("App：${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
             appendLine("模块：v${diagnostics.moduleVersion} · ${moduleStateLabel(diagnostics.moduleState)}")
             appendLine(
@@ -184,7 +186,11 @@ internal object DiagnosticsReport {
             }
             appendLine()
             appendLine("最近日志：")
-            append(diagnostics.log.lines().filter { it.isNotBlank() }.takeLast(20).joinToString("\n"))
+            append(
+                LogPolicy
+                    .tailWithHeader(diagnostics.log.lines().filter { it.isNotBlank() }, 20)
+                    .joinToString("\n")
+            )
         }
     }
 

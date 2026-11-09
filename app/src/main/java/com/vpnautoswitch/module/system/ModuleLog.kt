@@ -14,6 +14,10 @@ import java.util.Locale
  * 等于十几次 SettingsProvider 全量读写，每次写完还会唤醒所有观察者。
  * 现在先在内存里攒着，[FLUSH_DELAY_MS] 内的日志合并成一次写入。
  * 只保留最近 [MAX_LINES] 行，够放下一整轮开关流程，排障时关键信息不会被挤掉。
+ *
+ * 第 0 行是设备指纹，滚动时受保护：日志写满后先被挤掉的本来是最早的行，而那
+ * 一行恰恰是「这台机器是什么型号、什么 ROM」，丢了之后用户贴出来的日志又变成
+ * 无法归属的片段（issue 里多个人混着贴时尤其明显）。
  */
 internal object ModuleLog {
 
@@ -42,7 +46,7 @@ internal object ModuleLog {
         if (ctx == null) return
         ensureLoaded(ctx)
         buffer.add("${format.format(Date())}  $message")
-        while (buffer.size > MAX_LINES) buffer.removeAt(0)
+        LogPolicy.trim(buffer, MAX_LINES)
         pending = ctx
         val handler = flushHandler
         if (handler == null) {
@@ -54,11 +58,35 @@ internal object ModuleLog {
         }
     }
 
+    /**
+     * 写入设备指纹，并保证它永远待在日志最前面。
+     *
+     * 每次模块加载都会调（开机、作用域重载、升级后重启），内容一样就直接返回，
+     * 不重复写 Settings.Secure——那里每次写入都会唤醒所有观察者。
+     */
+    @Synchronized
+    fun ensureHeader(ctx: Context?, line: String) {
+        if (ctx == null || line.isBlank()) return
+        ensureLoaded(ctx)
+        if (buffer.firstOrNull() == line) return
+        // 升级后设备行会变（版本号进了 ROM 串的情况很少，但模块版本会变），
+        // 先把旧的剔掉再加，避免头部长出两行设备指纹
+        buffer.removeAll { LogPolicy.isDeviceLine(it) }
+        buffer.add(0, line)
+        LogPolicy.trim(buffer, MAX_LINES)
+        pending = ctx
+        // 头部只在启动时写一次，直接落盘，不必等 300ms 合批
+        scheduled = false
+        flushHandler?.removeCallbacks(flushTask)
+        flush()
+    }
+
     /** 覆盖写入（App 里删除单条日志时用） */
     @Synchronized
     fun write(ctx: Context, lines: List<String>) {
         buffer.clear()
-        buffer.addAll(lines.filter { it.isNotBlank() }.takeLast(MAX_LINES))
+        buffer.addAll(lines.filter { it.isNotBlank() })
+        LogPolicy.trim(buffer, MAX_LINES)
         loaded = true
         pending = ctx
         scheduled = false
@@ -66,9 +94,12 @@ internal object ModuleLog {
         flush()
     }
 
+    /** 清空日志，但留着设备指纹——它说明的是「这些日志来自哪台机器」，不是日志本身 */
     @Synchronized
     fun clear(ctx: Context) {
+        val header = buffer.firstOrNull()?.takeIf { LogPolicy.isDeviceLine(it) }
         buffer.clear()
+        header?.let { buffer.add(it) }
         loaded = true
         pending = ctx
         scheduled = false
@@ -96,7 +127,7 @@ internal object ModuleLog {
             ""
         }
         old.split('\n').filter { it.isNotBlank() }.forEach { buffer.add(it) }
-        while (buffer.size > MAX_LINES) buffer.removeAt(0)
+        LogPolicy.trim(buffer, MAX_LINES)
     }
 
     @Synchronized
