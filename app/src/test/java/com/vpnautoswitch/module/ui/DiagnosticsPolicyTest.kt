@@ -167,4 +167,54 @@ class DiagnosticsPolicyTest {
         assertEquals("未知", s.actual)
         assertEquals(DiagnosticsPolicy.Tone.MUTED, s.actualTone)
     }
+
+    @Test
+    fun `hook snapshot is usable only when written by the current module version`() {
+        assertTrue(DiagnosticsPolicy.hookSnapshotUsable(128, 128))
+        assertFalse(DiagnosticsPolicy.hookSnapshotUsable(0, 128))
+        assertFalse(DiagnosticsPolicy.hookSnapshotUsable(127, 128))
+        assertFalse(DiagnosticsPolicy.hookSnapshotUsable(129, 128))
+    }
+
+    @Test
+    fun `config source distinguishes live mirror stale missing and unknown`() {
+        assertEquals(DiagnosticsPolicy.ConfigSourceState.FRESH, DiagnosticsPolicy.configSourceStatus("provider", 0L, now))
+        assertEquals(DiagnosticsPolicy.ConfigSourceState.MISSING, DiagnosticsPolicy.configSourceStatus("none", 0L, now))
+        assertEquals(DiagnosticsPolicy.ConfigSourceState.UNKNOWN, DiagnosticsPolicy.configSourceStatus("", 0L, now))
+        assertEquals(DiagnosticsPolicy.ConfigSourceState.UNKNOWN, DiagnosticsPolicy.configSourceStatus("something-else", 0L, now))
+    }
+
+    @Test
+    fun `a recent config mirror is normal but an old one warns`() {
+        val threshold = DiagnosticsPolicy.CONFIG_MIRROR_STALE_MS
+        // 用一个足够大的基准：类里的 now 只有 1_000_000L，减 30 分钟会变成负时间戳，
+        // 被当成无效值，测不到阈值边界。
+        val base = 64 * 60_000L + 100_000L
+        // 开机初期 provider 还没起来，退回刚写下的镜像属于正常
+        assertEquals(
+            DiagnosticsPolicy.ConfigSourceState.MIRROR_RECENT,
+            DiagnosticsPolicy.configSourceStatus("mirror", base - 60_000L, base),
+        )
+        // 刚好到阈值仍算正常，超过才开始提示
+        assertEquals(
+            DiagnosticsPolicy.ConfigSourceState.MIRROR_RECENT,
+            DiagnosticsPolicy.configSourceStatus("mirror", base - threshold, base),
+        )
+        assertEquals(
+            DiagnosticsPolicy.ConfigSourceState.MIRROR_STALE,
+            DiagnosticsPolicy.configSourceStatus("mirror", base - threshold - 1L, base),
+        )
+        // 64 分钟前的镜像：issue #10 里那条线索
+        assertEquals(
+            DiagnosticsPolicy.ConfigSourceState.MIRROR_STALE,
+            DiagnosticsPolicy.configSourceStatus("mirror", base - 64 * 60_000L, base),
+        )
+    }
+
+    @Test
+    fun `config mirror with a bad timestamp is not treated as stale`() {
+        // 没有写入时刻，或时钟回拨（写入时刻在未来）：宁可不报警，也不误报
+        assertEquals(DiagnosticsPolicy.ConfigSourceState.MIRROR_RECENT, DiagnosticsPolicy.configSourceStatus("mirror", 0L, now))
+        assertEquals(DiagnosticsPolicy.ConfigSourceState.MIRROR_RECENT, DiagnosticsPolicy.configSourceStatus("mirror", now + 5_000L, now))
+    }
 }

@@ -61,7 +61,32 @@ internal object ConfigRepo {
     @Volatile
     private var source: String = "none"
 
+    /** 最近一次读到的镜像写入时刻，供 App 侧判断这份配置有多旧 */
+    @Volatile
+    private var mirrorSavedAt = 0L
+
+    /** 已经写进 Secure 的来源快照，用来去重：缓存每 3 秒刷新一次，不该每次都唤醒观察者 */
+    @Volatile
+    private var publishedSource: String? = null
+
+    @Volatile
+    private var publishedMirrorAt = 0L
+
     fun lastSource(): String = source
+
+    /**
+     * 记录本次配置来源，并在「来源或镜像时间变了」时写一次快照给 App。
+     * 开机阶段 provider 起不来而一直用镜像时，App 的自检能直接看到「正在用 N 分钟前的配置」。
+     */
+    private fun noteSource(ctx: Context?, value: String) {
+        source = value
+        if (ctx == null) return
+        val mirrorAt = if (value == "mirror") mirrorSavedAt else 0L
+        if (value == publishedSource && mirrorAt == publishedMirrorAt) return
+        publishedSource = value
+        publishedMirrorAt = mirrorAt
+        RuntimeDiagnostics.publishConfigSource(ctx, value, mirrorAt)
+    }
 
     fun get(ctx: Context?): Config = getOrNull(ctx) ?: Config()
 
@@ -81,10 +106,10 @@ internal object ConfigRepo {
         if (fresh != null) {
             cached = fresh
             cachedAt = now
-            source = "provider"
             // 新的镜像马上就会写下去，之前判的「读坏了」到此为止
             mirrorBadUntil = 0L
             mirror(ctx, fresh)
+            noteSource(ctx, "provider")
             return fresh
         }
 
@@ -94,11 +119,11 @@ internal object ConfigRepo {
             cached = fallback
             // 比正常缓存短一截：隔 2 秒再问候一次 provider，一旦 App 起来了就换成真实值
             cachedAt = now - CACHE_MS + MIRROR_RETRY_MS
-            if (snapshot == null) source = "mirror"
+            if (snapshot == null) noteSource(ctx, "mirror")
             return fallback
         }
 
-        source = "none"
+        noteSource(ctx, "none")
         return null
     }
 
@@ -176,6 +201,7 @@ internal object ConfigRepo {
                 return null
             }
             mirrored = config?.toJson()
+            mirrorSavedAt = savedAt
             ModuleLog.append(
                 ctx,
                 "config from mirror（写入于 ${(System.currentTimeMillis() - savedAt) / 60_000} 分钟前）",

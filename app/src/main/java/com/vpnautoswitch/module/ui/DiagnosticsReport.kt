@@ -3,6 +3,8 @@ package com.vpnautoswitch.module.ui
 import android.os.Build
 import com.vpnautoswitch.module.BuildConfig
 import com.vpnautoswitch.module.Config
+import com.vpnautoswitch.module.system.HookHealth
+import com.vpnautoswitch.module.system.hookReport
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -108,6 +110,8 @@ internal object DiagnosticsReport {
             },
         )
 
+        checks += hookCheck(diagnostics)
+        checks += configSourceCheck(diagnostics, now)
         checks += failureCheck(diagnostics, now)
         checks += notificationCheck(config, diagnostics, now)
         checks += configCheck(config)
@@ -160,6 +164,19 @@ internal object DiagnosticsReport {
                 }
             )
             appendLine("目标应用：${config.targets.size} · 打开即关闭：${config.offTargets.size} · Wi-Fi 开/关：${config.wifiOn.size}/${config.wifiOff.size}")
+            appendLine("配置来源：" + when {
+                diagnostics.configSource.isEmpty() -> "未上报"
+                diagnostics.configSource == "provider" -> "实时（provider）"
+                diagnostics.configSource == "mirror" ->
+                    "镜像（写于 ${ago(diagnostics.configMirrorAt, now)}）"
+                else -> diagnostics.configSource
+            })
+            appendLine("Hook：" + if (diagnostics.hooks == null) {
+                "未上报"
+            } else {
+                diagnostics.hooks.asMap().entries.joinToString(" ") { "${it.key}=${it.value}" } +
+                    "（快照 v${diagnostics.hookSnapshotVersion}）"
+            })
             appendLine()
             appendLine("检查结果：")
             buildChecks(diagnostics, config).forEach {
@@ -338,6 +355,114 @@ internal object DiagnosticsReport {
                 CheckStatus.OK,
                 "目标 ${config.targets.size} 个 · 打开即关闭 ${config.offTargets.size} 个 · " +
                     "Wi-Fi 开 ${config.wifiOn.size} 个 / 关 ${config.wifiOff.size} 个",
+            )
+        }
+    }
+
+    /**
+     * system_server 里各类 hook 有没有真的挂上。
+     *
+     * 「模块已激活」只代表 LSPosed 加载了模块，某些 ROM 上关键方法找不到时，
+     * 模块会静默失效——自动开关完全不工作，但心跳和版本都正常。以前只能翻日志里
+     * 那一行汇总，现在按重要性分级直接摆在自检里。
+     */
+    private fun hookCheck(diagnostics: Diagnostics): CheckItem {
+        val title = "Hook 挂载"
+        if (diagnostics.hooks == null) {
+            return CheckItem(
+                title,
+                CheckStatus.UNKNOWN,
+                "模块还没上报 hook 挂载结果。升级过版本的话，重启手机后才有新数据",
+            )
+        }
+        if (!DiagnosticsPolicy.hookSnapshotUsable(
+                diagnostics.hookSnapshotVersion,
+                BuildConfig.VERSION_CODE,
+            )
+        ) {
+            return CheckItem(
+                title,
+                CheckStatus.UNKNOWN,
+                "这份 hook 快照来自旧版本模块（v${diagnostics.hookSnapshotVersion}），" +
+                    "App 是 v${BuildConfig.VERSION_CODE}。重启手机后重新检测",
+            )
+        }
+        val report = hookReport(diagnostics.hooks)
+        return when (report.health) {
+            HookHealth.BROKEN -> CheckItem(
+                title,
+                CheckStatus.FAIL,
+                "关键 hook 一个都没挂上：${report.missingCritical.joinToString("、")}。" +
+                    "模块收不到应用切换或进程退出，自动开关不会工作。" +
+                    "确认 LSPosed 作用域只勾「系统框架」，并重启手机",
+            )
+            HookHealth.DEGRADED -> CheckItem(
+                title,
+                CheckStatus.WARN,
+                "${report.degraded.joinToString("、")}没挂上。这个功能会降级：" +
+                    "比如划掉任务后要等进程被系统回收才断开 VPN。" +
+                    cosmeticHint(report.cosmetic),
+            )
+            HookHealth.OK -> CheckItem(
+                title,
+                CheckStatus.OK,
+                "前台检测、进程死亡、划掉任务等核心 hook 均已挂载。" +
+                    cosmeticHint(report.cosmetic),
+            )
+            HookHealth.UNKNOWN -> CheckItem(
+                title,
+                CheckStatus.UNKNOWN,
+                "没有可用的 hook 挂载数据，重启手机后重新检测",
+            )
+        }
+    }
+
+    private fun cosmeticHint(cosmetic: List<String>): String =
+        if (cosmetic.isEmpty()) ""
+        else " 可选：${cosmetic.joinToString("、")}未挂载，不影响自动开关。"
+
+    /**
+     * 模块现在用的配置是从哪来的。
+     *
+     * 开机早期 App 进程起不来、只能读上次的镜像是正常的；但如果一直退不回
+     * provider，用户刚改的设置就没同步到 system_server，得提示他打开一次本应用。
+     */
+    private fun configSourceCheck(diagnostics: Diagnostics, now: Long): CheckItem {
+        val title = "配置来源"
+        return when (
+            DiagnosticsPolicy.configSourceStatus(
+                diagnostics.configSource,
+                diagnostics.configMirrorAt,
+                now,
+            )
+        ) {
+            DiagnosticsPolicy.ConfigSourceState.FRESH -> CheckItem(
+                title,
+                CheckStatus.OK,
+                "实时读取模块 App 的配置，改动立即生效",
+            )
+            DiagnosticsPolicy.ConfigSourceState.MIRROR_RECENT -> CheckItem(
+                title,
+                CheckStatus.OK,
+                "模块 App 进程暂时没起来，正在用 ${ago(diagnostics.configMirrorAt, now)}写下的配置镜像。" +
+                    "开机初期属正常，打开一次本应用即可切回实时读取",
+            )
+            DiagnosticsPolicy.ConfigSourceState.MIRROR_STALE -> CheckItem(
+                title,
+                CheckStatus.WARN,
+                "已经连续使用 ${ago(diagnostics.configMirrorAt, now)}写下的配置镜像，" +
+                    "模块 App 进程一直起不来，这期间改的设置可能没生效。" +
+                    "打开一次本应用，或检查它的自启动 / 后台运行限制",
+            )
+            DiagnosticsPolicy.ConfigSourceState.MISSING -> CheckItem(
+                title,
+                CheckStatus.FAIL,
+                "模块读不到配置（连镜像也没有），自动开关不会工作。打开一次本应用",
+            )
+            DiagnosticsPolicy.ConfigSourceState.UNKNOWN -> CheckItem(
+                title,
+                CheckStatus.UNKNOWN,
+                "模块还没上报配置来源；升级过版本的话，重启手机后生效",
             )
         }
     }

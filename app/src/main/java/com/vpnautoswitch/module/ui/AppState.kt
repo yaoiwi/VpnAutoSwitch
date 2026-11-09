@@ -24,8 +24,10 @@ import com.vpnautoswitch.module.RuleConflicts
 import com.vpnautoswitch.module.apps.AppInfo
 import com.vpnautoswitch.module.apps.AppsRepository
 import com.vpnautoswitch.module.system.Engine
+import com.vpnautoswitch.module.system.HookCounts
 import com.vpnautoswitch.module.system.ModuleLog
 import com.vpnautoswitch.module.system.RuntimeDiagnostics
+import com.vpnautoswitch.module.system.hookCountsFromMap
 import com.vpnautoswitch.module.withoutPackages
 import org.json.JSONObject
 import java.util.concurrent.Executors
@@ -87,6 +89,16 @@ data class Diagnostics(
     val notifyText: String = "",
     /** 本应用有没有通知权限（低于 Android 13 恒为 true） */
     val notifyPermission: Boolean = false,
+    /** system_server 加载时各类 hook 挂上的方法数；null 表示没读到快照 */
+    val hooks: HookCounts? = null,
+    /** 快照写入时刻与当时的模块版本，用来判断是不是重启前的旧数据 */
+    val hookSnapshotAt: Long = 0L,
+    val hookSnapshotVersion: Int = 0,
+    /** 模块当前配置来源：provider / mirror / none；空表示没上报 */
+    val configSource: String = "",
+    /** 镜像原文的写入时刻（source 为 mirror 时有效） */
+    val configMirrorAt: Long = 0L,
+    val configSourceAt: Long = 0L,
 ) {
     companion object {
         /**
@@ -103,6 +115,8 @@ data class Diagnostics(
             RuntimeDiagnostics.RUNTIME_KEY,
             RuntimeDiagnostics.FAILURE_KEY,
             RuntimeDiagnostics.TIMING_KEY,
+            RuntimeDiagnostics.HOOKS_KEY,
+            RuntimeDiagnostics.CONFIG_SOURCE_KEY,
             ModuleContract.PAUSED_KEY,
             ModuleContract.STATUS_STATE_KEY,
             "always_on_vpn_app",
@@ -126,6 +140,8 @@ data class Diagnostics(
             val failure = readJson(cr, RuntimeDiagnostics.FAILURE_KEY)
             val timing = readJson(cr, RuntimeDiagnostics.TIMING_KEY)
             val notify = readJson(cr, ModuleContract.STATUS_STATE_KEY)
+            val hooks = readJson(cr, RuntimeDiagnostics.HOOKS_KEY)
+            val configSrc = readJson(cr, RuntimeDiagnostics.CONFIG_SOURCE_KEY)
             val inspection = AppsRepository.inspectVpn(context, config.vpnPackage)
             return Diagnostics(
                 heartbeat = heartbeat,
@@ -187,6 +203,16 @@ data class Diagnostics(
                 notifyPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
                     context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
                     PackageManager.PERMISSION_GRANTED,
+                hooks = hooks?.let { json ->
+                    hookCountsFromMap(
+                        HookCounts().asMap().keys.associateWith { key -> json.optInt(key, 0) }
+                    )
+                },
+                hookSnapshotAt = hooks?.optLong("at", 0L) ?: 0L,
+                hookSnapshotVersion = hooks?.optInt("version", 0) ?: 0,
+                configSource = configSrc?.optString("source").orEmpty(),
+                configMirrorAt = configSrc?.optLong("mirrorAt", 0L) ?: 0L,
+                configSourceAt = configSrc?.optLong("at", 0L) ?: 0L,
             )
         }
 

@@ -82,6 +82,50 @@ object DiagnosticsPolicy {
     fun lastEvent(log: String): String =
         log.lineSequence().lastOrNull { it.isNotBlank() }?.trim().orEmpty()
 
+    // ------------------------------------------------------------ hook 快照
+
+    /**
+     * hook 快照能不能用来描述「当前」的模块。
+     *
+     * 快照只在 system_server 加载时写一次，带着当时的 versionCode。用户升级 App 但还没重启
+     * 手机时，system_server 里跑的还是旧代码，这份快照说明不了新版本挂上了什么，
+     * 只能提示重启。
+     */
+    fun hookSnapshotUsable(snapshotVersion: Int, appVersion: Int): Boolean =
+        snapshotVersion > 0 && snapshotVersion == appVersion
+
+    // ------------------------------------------------------------ 配置来源
+
+    /** 镜像超过这么久还在使用，就提示「改的设置可能没生效」 */
+    const val CONFIG_MIRROR_STALE_MS = 30L * 60 * 1000
+
+    enum class ConfigSourceState {
+        /** 实时从模块 App 的 provider 读到 */
+        FRESH,
+
+        /** 刚退回镜像，属于开机初期的正常状态 */
+        MIRROR_RECENT,
+
+        /** 长时间只能读镜像，App 进程可能一直起不来 */
+        MIRROR_STALE,
+
+        /** 连镜像也没有 */
+        MISSING,
+
+        /** 模块没上报过（旧代码 / 没注入） */
+        UNKNOWN;
+    }
+
+    fun configSourceStatus(source: String, mirrorAt: Long, now: Long): ConfigSourceState = when {
+        source.isEmpty() -> ConfigSourceState.UNKNOWN
+        source == "provider" -> ConfigSourceState.FRESH
+        source == "none" -> ConfigSourceState.MISSING
+        source != "mirror" -> ConfigSourceState.UNKNOWN
+        mirrorAt <= 0L || now < mirrorAt -> ConfigSourceState.MIRROR_RECENT
+        now - mirrorAt > CONFIG_MIRROR_STALE_MS -> ConfigSourceState.MIRROR_STALE
+        else -> ConfigSourceState.MIRROR_RECENT
+    }
+
     enum class Tone { NORMAL, WARN, MUTED }
 
     /** 首页状态卡要显示的四行因果链 */

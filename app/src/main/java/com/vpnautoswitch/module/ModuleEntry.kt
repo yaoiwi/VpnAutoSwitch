@@ -10,7 +10,9 @@ import com.vpnautoswitch.module.system.attach
 import com.vpnautoswitch.module.system.ClientStartGuard
 import com.vpnautoswitch.module.system.ConfigRepo
 import com.vpnautoswitch.module.system.Engine
+import com.vpnautoswitch.module.system.HookCounts
 import com.vpnautoswitch.module.system.ModuleLog
+import com.vpnautoswitch.module.system.RuntimeDiagnostics
 import com.vpnautoswitch.module.system.onAppLaunching
 import com.vpnautoswitch.module.system.onForeground
 import com.vpnautoswitch.module.system.onProcessDied
@@ -65,20 +67,26 @@ class ModuleEntry : IXposedHookLoadPackage {
         ProcessRecords.attach(lpparam.classLoader)
         Engine.attach(ctx)
 
-        val launchHooks = hookActivityStart(lpparam.classLoader)
-        val resumedHooks = hookActivityResumed(lpparam.classLoader)
-        val stateHooks = hookActivityRecordState(lpparam.classLoader)
-        val deathHooks = hookProcessDeath(lpparam.classLoader)
-        val taskHooks = hookTaskRemoved(lpparam.classLoader)
-        val notifHooks = hookVpnNotification(lpparam.classLoader)
-        val startHooks = hookClientStarts(lpparam.classLoader)
+        val counts = HookCounts(
+            startActivity = hookActivityStart(lpparam.classLoader),
+            activityResumed = hookActivityResumed(lpparam.classLoader),
+            setState = hookActivityRecordState(lpparam.classLoader),
+            death = hookProcessDeath(lpparam.classLoader),
+            taskRemoved = hookTaskRemoved(lpparam.classLoader),
+            notif = hookVpnNotification(lpparam.classLoader),
+            blockClientStart = hookClientStarts(lpparam.classLoader),
+        )
 
-        val summary =
-            "hooks: startActivity=$launchHooks, activityResumed=$resumedHooks, setState=$stateHooks, " +
-                "death=$deathHooks, taskRemoved=$taskHooks, notif=$notifHooks, " +
-                "blockClientStart=$startHooks"
+        val summary = "hooks: " + counts.asMap().entries.joinToString(", ") { "${it.key}=${it.value}" }
         XposedBridge.log("[VpnAutoSwitch] $summary")
         ModuleLog.append(ctx, "system_server loaded ($summary)")
+
+        // 每类单独记一行：以前挤在一行里，某类为 0 时很容易一眼扫过去；
+        // 自检里也会按这些计数分级提示，日志这边留个能直接搜到名字的现场。
+        counts.asMap().filterValues { it <= 0 }.forEach { (name, _) ->
+            ModuleLog.append(ctx, "hook $name not installed (0 methods)")
+        }
+        RuntimeDiagnostics.publishHooks(ctx, counts)
     }
 
     // ------------------------------------------------------------ Activity 前台

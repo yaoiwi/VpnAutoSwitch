@@ -2,6 +2,7 @@ package com.vpnautoswitch.module.system
 
 import android.content.Context
 import android.provider.Settings
+import com.vpnautoswitch.module.BuildConfig
 import de.robv.android.xposed.XposedBridge
 import org.json.JSONObject
 
@@ -17,6 +18,12 @@ internal object RuntimeDiagnostics {
 
     /** 最近一次开启 / 关闭花了多久，用来回答「为什么这次这么慢」 */
     const val TIMING_KEY = "vpn_autoswitch_timing"
+
+    /** system_server 加载时各类 hook 实际挂上的方法数（只写一次） */
+    const val HOOKS_KEY = "vpn_autoswitch_hooks"
+
+    /** 模块当前这份配置从哪来、镜像写了多久 */
+    const val CONFIG_SOURCE_KEY = "vpn_autoswitch_config_source"
 
     private const val SCHEMA = 1
     private const val TAG = "VpnAutoSwitch"
@@ -77,6 +84,42 @@ internal object RuntimeDiagnostics {
             Settings.Secure.putString(ctx.contentResolver, TIMING_KEY, json.toString())
         } catch (t: Throwable) {
             XposedBridge.log("[$TAG] timing snapshot failed: $t")
+        }
+    }
+
+    /**
+     * hook 挂载结果只在 system_server 启动时产生一次，之后不会变。
+     * 带上版本号：App 侧看到版本对不上就知道这是重启前的旧快照，不能拿来下结论。
+     */
+    fun publishHooks(ctx: Context?, counts: HookCounts) {
+        if (ctx == null) return
+        try {
+            val json = JSONObject()
+                .put("schema", SCHEMA)
+                .put("at", System.currentTimeMillis())
+                .put("version", BuildConfig.VERSION_CODE)
+            counts.asMap().forEach { (name, count) -> json.put(name, count) }
+            Settings.Secure.putString(ctx.contentResolver, HOOKS_KEY, json.toString())
+        } catch (t: Throwable) {
+            XposedBridge.log("[$TAG] hook snapshot failed: $t")
+        }
+    }
+
+    /**
+     * 配置来源变化时写一次：[source] 为 provider / mirror / none，
+     * [mirrorAt] 是镜像原文里的写入时刻（source 不是 mirror 时为 0）。
+     */
+    fun publishConfigSource(ctx: Context?, source: String, mirrorAt: Long) {
+        if (ctx == null) return
+        try {
+            val json = JSONObject()
+                .put("schema", SCHEMA)
+                .put("at", System.currentTimeMillis())
+                .put("source", source)
+                .put("mirrorAt", mirrorAt)
+            Settings.Secure.putString(ctx.contentResolver, CONFIG_SOURCE_KEY, json.toString())
+        } catch (t: Throwable) {
+            XposedBridge.log("[$TAG] config source snapshot failed: $t")
         }
     }
 
