@@ -564,6 +564,14 @@ internal object Engine {
     internal var taskRecheckToken = 0
 
     /**
+     * 划掉任务被忽略时，每种原因上一次记日志的时刻。
+     *
+     * 用户反复上滑同一个应用会连着触发回调，不节流的话日志会被同一句话刷满。
+     * key 是「包名/原因」，最多几十条，不需要清理。
+     */
+    internal val taskSkipLoggedAt = HashMap<String, Long>()
+
+    /**
      * 上一次「断开」发生的时刻（模块主动关，或检测到用户手动断开）。
      *
      * 断开后一两秒里 VPN 常常又被客户端自己重连、或被「始终开启的 VPN」拉回来；

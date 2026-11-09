@@ -1,5 +1,7 @@
 package com.vpnautoswitch.module.ui
 
+import com.vpnautoswitch.module.system.HookHealth
+
 /** 纯诊断判断，和 UI 分离，便于固定边界行为。 */
 object DiagnosticsPolicy {
 
@@ -212,5 +214,56 @@ object DiagnosticsPolicy {
         ms < 60_000L -> "${ms / 1_000L} 秒"
         ms < 3_600_000L -> "${ms / 60_000L} 分钟"
         else -> "${ms / 3_600_000L} 小时"
+    }
+
+    // ------------------------------------------------------------ 一句话结论
+
+    /**
+     * 报告里已经有十来项检查，但用户最想先知道的是「哪里不对、下一步做什么」。
+     * 逐条读完再自己拼结论，对不熟悉这个模块的人是件难事。
+     */
+    data class VerdictInput(
+        val moduleState: ModuleState,
+        val hookHealth: HookHealth?,
+        val vpnInstalled: Boolean?,
+        val vpnHasService: Boolean?,
+        val vpnConnected: Boolean,
+        val alwaysOnApp: String?,
+        val vpnPackage: String,
+        val failureStreak: Int,
+        val paused: Boolean,
+    )
+
+    /**
+     * 按「越靠前越要先解决」的顺序挑一句。
+     *
+     * 顺序不是随手排的：模块没跑起来时，后面所有状态都不可信；hook 没挂上时，
+     * 界面看着一切正常但功能其实不工作；客户端装不上是配置问题；最后才轮到
+     * 「正在切换，过几秒再看」这种临时状态。
+     */
+    fun conclusion(input: VerdictInput): String = when {
+        input.moduleState == ModuleState.NEVER ->
+            "模块还没运行过。在 LSPosed 里只勾「系统框架」，然后重启手机。"
+        input.moduleState == ModuleState.OLD_CODE ->
+            "系统里跑的还是旧版本模块。重启手机让新版本生效。"
+        input.moduleState == ModuleState.STALE ->
+            "模块心跳停了，可能被系统回收。重启手机；反复出现的话把这份报告发出来。"
+        input.hookHealth == HookHealth.BROKEN ->
+            "模块在跑，但关键 hook 没挂上，自动开关会失效。重启手机；还不行就检查 LSPosed 作用域是不是只有「系统框架」。"
+        input.hookHealth == HookHealth.DEGRADED ->
+            "进程死亡检测正常，但「划掉最近任务」那条 hook 没挂上：上滑清理不会触发断开，按返回键退出仍然有效。"
+        input.vpnInstalled == false ->
+            "选的 VPN 客户端没装。去设置里重新选一个。"
+        input.vpnHasService == false ->
+            "这个客户端没有声明 VpnService，模块拉不起来。换一个客户端。"
+        input.paused ->
+            "自动联动被快捷开关暂停了，恢复后才会自动开关。"
+        !input.vpnConnected && input.failureStreak >= 3 ->
+            "连续 ${input.failureStreak} 次拉不起客户端。看日志里「拉起前包状态」：被强停就要放自启，后台受限就要关电池优化。"
+        !input.vpnConnected && input.vpnPackage.isNotEmpty() && input.alwaysOnApp == input.vpnPackage ->
+            "系统常驻 VPN 已经指向客户端，但隧道没建立。可能还在连；一直这样就在客户端里点一次连接，先确认它自己能连上。"
+        !input.vpnConnected ->
+            "规则要求开启，系统还没指向客户端。模块正在切换，过几秒刷新看看。"
+        else -> "各项正常。"
     }
 }

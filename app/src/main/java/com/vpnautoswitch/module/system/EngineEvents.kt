@@ -207,16 +207,19 @@ internal fun Engine.handleProcessDied(pkg: String, detail: String? = null) {
 internal fun Engine.handleTaskRemoved(pkg: String) {
     val ctx = context() ?: return
     val cfg = ConfigRepo.get(ctx)
-    if (!EnginePolicy.shouldHandleTaskRemoval(
-            enabled = cfg.enabled,
-            featureEnabled = cfg.disconnectOnTaskRemoved,
-            paused = automationPaused,
-            offAppForeground = offAppForeground != null,
-            wifiSuppressed = wifiSuppressed,
-            target = cfg.targets.contains(pkg),
-            aliveTarget = aliveTargets.contains(pkg),
-        )
-    ) return
+    val verdict = EnginePolicy.taskRemovalVerdict(
+        enabled = cfg.enabled,
+        featureEnabled = cfg.disconnectOnTaskRemoved,
+        paused = automationPaused,
+        offAppForeground = offAppForeground != null,
+        wifiSuppressed = wifiSuppressed,
+        target = cfg.targets.contains(pkg),
+        aliveTarget = aliveTargets.contains(pkg),
+    )
+    if (verdict != EnginePolicy.TaskRemovalVerdict.HANDLE) {
+        logTaskRemovalSkip(ctx, pkg, verdict)
+        return
+    }
 
     // 任务刚被移除，可引擎里它还是前台应用 —— 移除的只能是同一应用的**另一条**任务记录：
     // 浏览器每开一个窗口都会新建 task，旧的那条被系统清掉时同样回调 removeTask，
@@ -245,6 +248,28 @@ internal fun Engine.handleTaskRemoved(pkg: String) {
     applyTaskRemoval(ctx, cfg, pkg)
 }
 
+/** 同一包同一原因多久内不重复记：用户反复上滑会连着触发回调，不节流会被刷满 */
+private const val TASK_SKIP_LOG_MS = 60_000L
+
+/**
+ * 划掉任务被跳过时，把原因写出来。
+ *
+ * 以前这里是一串 `&&` 直接 return，日志里什么都没有；用户以为「模块没反应」，
+ * 其实是「划掉任务即断开」没开、或者这个包不在目标列表——都是自己改一下就好。
+ */
+internal fun Engine.logTaskRemovalSkip(
+    ctx: Context,
+    pkg: String,
+    verdict: EnginePolicy.TaskRemovalVerdict,
+) {
+    val now = SystemClock.elapsedRealtime()
+    val key = "$pkg/${verdict.name}"
+    val last = taskSkipLoggedAt[key]
+    if (last != null && now - last < TASK_SKIP_LOG_MS) return
+    taskSkipLoggedAt[key] = now
+    log(ctx, "$pkg -> task removed ignored（${EnginePolicy.taskRemovalSkipReason(verdict)}）")
+}
+
 /** 残留任务记录的复查：两秒后该包仍不在前台，才按划掉处理 */
 internal fun Engine.scheduleTaskRecheck(ctx: Context, cfg: Config, pkg: String) {
     val token = ++taskRecheckToken
@@ -252,16 +277,19 @@ internal fun Engine.scheduleTaskRecheck(ctx: Context, cfg: Config, pkg: String) 
         if (token != taskRecheckToken) return@postDelayed
         // 两秒过去它还在前台：确实是同一应用的另一条任务记录被清掉，什么都不做
         if (lastForeground == pkg) return@postDelayed
-        if (!EnginePolicy.shouldHandleTaskRemoval(
-                enabled = cfg.enabled,
-                featureEnabled = cfg.disconnectOnTaskRemoved,
-                paused = automationPaused,
-                offAppForeground = offAppForeground != null,
-                wifiSuppressed = wifiSuppressed,
-                target = cfg.targets.contains(pkg),
-                aliveTarget = aliveTargets.contains(pkg),
-            )
-        ) return@postDelayed
+        val verdict = EnginePolicy.taskRemovalVerdict(
+            enabled = cfg.enabled,
+            featureEnabled = cfg.disconnectOnTaskRemoved,
+            paused = automationPaused,
+            offAppForeground = offAppForeground != null,
+            wifiSuppressed = wifiSuppressed,
+            target = cfg.targets.contains(pkg),
+            aliveTarget = aliveTargets.contains(pkg),
+        )
+        if (verdict != EnginePolicy.TaskRemovalVerdict.HANDLE) {
+            logTaskRemovalSkip(ctx, pkg, verdict)
+            return@postDelayed
+        }
         log(ctx, "$pkg -> task removed（复查确认已离开前台）")
         applyTaskRemoval(ctx, ConfigRepo.get(ctx), pkg)
     }, TASK_RECHECK_MS)

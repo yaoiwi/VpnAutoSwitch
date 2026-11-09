@@ -1,5 +1,6 @@
 package com.vpnautoswitch.module.ui
 
+import com.vpnautoswitch.module.system.HookHealth
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -216,5 +217,92 @@ class DiagnosticsPolicyTest {
         // 没有写入时刻，或时钟回拨（写入时刻在未来）：宁可不报警，也不误报
         assertEquals(DiagnosticsPolicy.ConfigSourceState.MIRROR_RECENT, DiagnosticsPolicy.configSourceStatus("mirror", 0L, now))
         assertEquals(DiagnosticsPolicy.ConfigSourceState.MIRROR_RECENT, DiagnosticsPolicy.configSourceStatus("mirror", now + 5_000L, now))
+    }
+
+    // ------------------------------------------------------------ 一句话结论
+
+    private fun verdict(
+        moduleState: DiagnosticsPolicy.ModuleState = DiagnosticsPolicy.ModuleState.CURRENT,
+        hookHealth: HookHealth? = HookHealth.OK,
+        vpnInstalled: Boolean? = true,
+        vpnHasService: Boolean? = true,
+        vpnConnected: Boolean = true,
+        alwaysOnApp: String? = null,
+        vpnPackage: String = "com.v2ray.ang",
+        failureStreak: Int = 0,
+        paused: Boolean = false,
+    ) = DiagnosticsPolicy.conclusion(
+        DiagnosticsPolicy.VerdictInput(
+            moduleState = moduleState,
+            hookHealth = hookHealth,
+            vpnInstalled = vpnInstalled,
+            vpnHasService = vpnHasService,
+            vpnConnected = vpnConnected,
+            alwaysOnApp = alwaysOnApp,
+            vpnPackage = vpnPackage,
+            failureStreak = failureStreak,
+            paused = paused,
+        )
+    )
+
+    @Test
+    fun `module not running is the first thing to say`() {
+        val text = verdict(moduleState = DiagnosticsPolicy.ModuleState.NEVER)
+        assertTrue(text.contains("LSPosed"))
+    }
+
+    @Test
+    fun `an old module still in system_server asks for a reboot`() {
+        assertTrue(verdict(moduleState = DiagnosticsPolicy.ModuleState.OLD_CODE).contains("重启"))
+    }
+
+    @Test
+    fun `broken hooks are called out before anything about the tunnel`() {
+        val text = verdict(hookHealth = HookHealth.BROKEN, vpnConnected = false)
+        assertTrue(text.contains("hook"))
+        assertTrue(text.contains("重启"))
+    }
+
+    @Test
+    fun `degraded hooks explain what still works`() {
+        val text = verdict(hookHealth = HookHealth.DEGRADED)
+        assertTrue(text.contains("划掉最近任务"))
+        assertTrue(text.contains("返回键"))
+    }
+
+    @Test
+    fun `a missing or broken client outranks the tunnel state`() {
+        assertTrue(verdict(vpnInstalled = false, vpnConnected = false).contains("没装"))
+        assertTrue(verdict(vpnHasService = false, vpnConnected = false).contains("VpnService"))
+    }
+
+    @Test
+    fun `repeated failures point at the package state line`() {
+        val text = verdict(vpnConnected = false, failureStreak = 7)
+        assertTrue(text.contains("7"))
+        assertTrue(text.contains("包状态"))
+    }
+
+    @Test
+    fun `always-on pointing at the client but no tunnel suggests checking the client`() {
+        val text = verdict(vpnConnected = false, alwaysOnApp = "com.v2ray.ang", failureStreak = 0)
+        assertTrue(text.contains("隧道"))
+        assertTrue(text.contains("点一次连接"))
+    }
+
+    @Test
+    fun `a short failure streak still reports the switch in progress`() {
+        val text = verdict(vpnConnected = false, failureStreak = 1)
+        assertTrue(text.contains("过几秒"))
+    }
+
+    @Test
+    fun `everything fine says so`() {
+        assertEquals("各项正常。", verdict())
+    }
+
+    @Test
+    fun `paused automation is named instead of blamed on the client`() {
+        assertTrue(verdict(paused = true, vpnConnected = false).contains("暂停"))
     }
 }

@@ -393,13 +393,66 @@ internal object EnginePolicy {
         target: Boolean,
         aliveTarget: Boolean,
     ): Boolean =
-        enabled &&
-            featureEnabled &&
-            !paused &&
-            !offAppForeground &&
-            !wifiSuppressed &&
-            target &&
-            aliveTarget
+        taskRemovalVerdict(
+            enabled = enabled,
+            featureEnabled = featureEnabled,
+            paused = paused,
+            offAppForeground = offAppForeground,
+            wifiSuppressed = wifiSuppressed,
+            target = target,
+            aliveTarget = aliveTarget,
+        ) == TaskRemovalVerdict.HANDLE
+
+    /** 划掉任务时可能卡在哪一步 */
+    enum class TaskRemovalVerdict {
+        /** 该关 */
+        HANDLE,
+        DISABLED,
+        FEATURE_OFF,
+        PAUSED,
+        OFF_APP_FOREGROUND,
+        WIFI_SUPPRESSED,
+        NOT_TARGET,
+        NOT_ALIVE,
+    }
+
+    /**
+     * 和 [shouldHandleTaskRemoval] 同一套判定，但说清是哪一条不满足。
+     *
+     * 原来七个条件串成一串 `&&`，任一条不满足就静默 return。issue #16 里用户
+     * 三指上滑关掉应用、VPN 没断开，日志里干干净净，只能靠读代码猜是哪些条件
+     * 没满足——而其中多数是配置问题，用户自己就能改。
+     */
+    fun taskRemovalVerdict(
+        enabled: Boolean,
+        featureEnabled: Boolean,
+        paused: Boolean,
+        offAppForeground: Boolean,
+        wifiSuppressed: Boolean,
+        target: Boolean,
+        aliveTarget: Boolean,
+    ): TaskRemovalVerdict = when {
+        !enabled -> TaskRemovalVerdict.DISABLED
+        !featureEnabled -> TaskRemovalVerdict.FEATURE_OFF
+        paused -> TaskRemovalVerdict.PAUSED
+        offAppForeground -> TaskRemovalVerdict.OFF_APP_FOREGROUND
+        wifiSuppressed -> TaskRemovalVerdict.WIFI_SUPPRESSED
+        !target -> TaskRemovalVerdict.NOT_TARGET
+        !aliveTarget -> TaskRemovalVerdict.NOT_ALIVE
+        else -> TaskRemovalVerdict.HANDLE
+    }
+
+    /** 日志里那句话，说给用户看，不说给代码看 */
+    fun taskRemovalSkipReason(verdict: TaskRemovalVerdict): String = when (verdict) {
+        TaskRemovalVerdict.HANDLE -> ""
+        TaskRemovalVerdict.DISABLED -> "自动开关已关闭"
+        TaskRemovalVerdict.FEATURE_OFF -> "「划掉最近任务即断开」没开"
+        TaskRemovalVerdict.PAUSED -> "自动联动已暂停"
+        TaskRemovalVerdict.OFF_APP_FOREGROUND -> "正在用「打开即关闭」的应用"
+        TaskRemovalVerdict.WIFI_SUPPRESSED -> "当前 Wi-Fi 在关闭列表里"
+        TaskRemovalVerdict.NOT_TARGET -> "不在目标应用列表"
+        TaskRemovalVerdict.NOT_ALIVE -> "已不在存活集合，按正常退出处理"
+    }
 
     /** null 表示进程列表不可信，不能当成全部死亡。 */
     fun shouldEnsureForProcessState(anyTargetAlive: Boolean?): Boolean = anyTargetAlive != false

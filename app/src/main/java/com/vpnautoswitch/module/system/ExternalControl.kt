@@ -55,6 +55,9 @@ internal object ExternalControl {
 
     /** 探测失败结果的保留时长：客户端升级 / 刚装好时 PackageManager 会短暂查不到 */
     private const val SERVICE_PROBE_TTL_MS = 60_000L
+
+    /** 启动服务之后隔多久回来看进程还在不在 */
+    private const val SERVICE_CHECK_DELAY_MS = 2_000L
     private var cachedKnown: MutableSet<String>? = null
 
     /**
@@ -270,6 +273,7 @@ internal object ExternalControl {
                 false
             } else {
                 ModuleLog.append(ctx, "started VPN service $service")
+                scheduleServiceCheck(ctx, pkg, service)
                 true
             }
         } catch (t: Throwable) {
@@ -277,6 +281,31 @@ internal object ExternalControl {
             // 权限瞬时不可用），不代表这个包里没有 VpnService，下次照样要试
             ModuleLog.append(ctx, "start VPN service failed: $t")
             false
+        }
+    }
+
+    /**
+     * 两秒后回来看一眼，确认服务真的活了。
+     *
+     * `startForegroundService` 返回非 null 只说明系统收下了这次调用，客户端进程有
+     * 没有留住服务是另一回事。以前两者在日志里长得一模一样：一行 started，然后什么
+     * 都没有；用户和排查的人只能猜是「系统拦的」还是「客户端自己退的」。
+     */
+    private fun scheduleServiceCheck(ctx: Context, pkg: String, service: String) {
+        try {
+            Engine.handler.postDelayed({
+                val alive = Engine.isProcessAlive(ctx, pkg)
+                ModuleLog.append(
+                    ctx,
+                    if (alive) {
+                        "$service 启动 2s 后进程仍在，等隧道"
+                    } else {
+                        "$service 启动 2s 后进程已退出（请求被接受、进程没留住，客户端自己退了）"
+                    },
+                )
+            }, SERVICE_CHECK_DELAY_MS)
+        } catch (t: Throwable) {
+            // 工作线程还没接上：跳过这次验证，不影响启动本身
         }
     }
 

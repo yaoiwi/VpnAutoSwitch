@@ -838,4 +838,68 @@ class EnginePolicyTest {
             )
         )
     }
+
+    @Test
+    fun `task removal verdict names the condition that blocked it`() {
+        fun verdict(
+            enabled: Boolean = true,
+            featureEnabled: Boolean = true,
+            paused: Boolean = false,
+            offAppForeground: Boolean = false,
+            wifiSuppressed: Boolean = false,
+            target: Boolean = true,
+            aliveTarget: Boolean = true,
+        ) = EnginePolicy.taskRemovalVerdict(
+            enabled = enabled,
+            featureEnabled = featureEnabled,
+            paused = paused,
+            offAppForeground = offAppForeground,
+            wifiSuppressed = wifiSuppressed,
+            target = target,
+            aliveTarget = aliveTarget,
+        )
+
+        assertEquals(EnginePolicy.TaskRemovalVerdict.HANDLE, verdict())
+        assertEquals(EnginePolicy.TaskRemovalVerdict.DISABLED, verdict(enabled = false))
+        assertEquals(EnginePolicy.TaskRemovalVerdict.FEATURE_OFF, verdict(featureEnabled = false))
+        assertEquals(EnginePolicy.TaskRemovalVerdict.PAUSED, verdict(paused = true))
+        assertEquals(
+            EnginePolicy.TaskRemovalVerdict.OFF_APP_FOREGROUND,
+            verdict(offAppForeground = true),
+        )
+        assertEquals(
+            EnginePolicy.TaskRemovalVerdict.WIFI_SUPPRESSED,
+            verdict(wifiSuppressed = true),
+        )
+        assertEquals(EnginePolicy.TaskRemovalVerdict.NOT_TARGET, verdict(target = false))
+        assertEquals(EnginePolicy.TaskRemovalVerdict.NOT_ALIVE, verdict(aliveTarget = false))
+    }
+
+    @Test
+    fun `the first blocking condition wins so the log only names the real cause`() {
+        // 功能没开 + 也不在目标列表：先说「功能没开」，那是用户最该先处理的
+        val verdict = EnginePolicy.taskRemovalVerdict(
+            enabled = true,
+            featureEnabled = false,
+            paused = true,
+            offAppForeground = false,
+            wifiSuppressed = false,
+            target = false,
+            aliveTarget = false,
+        )
+        assertEquals(EnginePolicy.TaskRemovalVerdict.FEATURE_OFF, verdict)
+    }
+
+    @Test
+    fun `every skip reason is a sentence and handle has none`() {
+        assertEquals("", EnginePolicy.taskRemovalSkipReason(EnginePolicy.TaskRemovalVerdict.HANDLE))
+        EnginePolicy.TaskRemovalVerdict.values()
+            .filter { it != EnginePolicy.TaskRemovalVerdict.HANDLE }
+            .forEach {
+                assertTrue(
+                    "$it 应该有说明文案",
+                    EnginePolicy.taskRemovalSkipReason(it).isNotBlank(),
+                )
+            }
+    }
 }

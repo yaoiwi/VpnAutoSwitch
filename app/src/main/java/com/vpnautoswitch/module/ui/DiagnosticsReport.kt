@@ -124,9 +124,33 @@ internal object DiagnosticsReport {
     fun buildText(diagnostics: Diagnostics, config: Config): String {
         val now = System.currentTimeMillis()
         val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA)
+        // 拿不到快照、或者快照是升级前的旧数据时，宁可不判 hook，也不给错的结论
+        val hookHealth = diagnostics.hooks
+            ?.takeIf {
+                DiagnosticsPolicy.hookSnapshotUsable(
+                    diagnostics.hookSnapshotVersion,
+                    BuildConfig.VERSION_CODE,
+                )
+            }
+            ?.let { hookReport(it).health }
         return buildString {
             appendLine("VpnAutoSwitch 状态报告")
             appendLine("生成：${fmt.format(Date(now))}")
+            appendLine(
+                "结论：" + DiagnosticsPolicy.conclusion(
+                    DiagnosticsPolicy.VerdictInput(
+                        moduleState = diagnostics.moduleState,
+                        hookHealth = hookHealth,
+                        vpnInstalled = diagnostics.vpnInstalled,
+                        vpnHasService = diagnostics.vpnHasService,
+                        vpnConnected = diagnostics.vpnConnected,
+                        alwaysOnApp = diagnostics.alwaysOnApp,
+                        vpnPackage = config.vpnPackage,
+                        failureStreak = diagnostics.lastFailureStreak,
+                        paused = diagnostics.paused,
+                    )
+                )
+            )
             appendLine("设备：${Build.MANUFACTURER} ${Build.MODEL} · Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
             appendLine("ROM：${Build.DISPLAY}${DeviceInfo.romVendor()?.let { " · $it" }.orEmpty()}")
             appendLine("App：${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
@@ -188,7 +212,7 @@ internal object DiagnosticsReport {
             appendLine("最近日志：")
             append(
                 LogPolicy
-                    .tailWithHeader(diagnostics.log.lines().filter { it.isNotBlank() }, 20)
+                    .tailWithHeader(diagnostics.log.lines().filter { it.isNotBlank() }, 60)
                     .joinToString("\n")
             )
         }
