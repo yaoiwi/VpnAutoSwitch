@@ -19,50 +19,32 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.vpnautoswitch.module.ui.hyper.SettingsActionWithArrow
-import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Info
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
+/**
+ * 自检弹窗：只放「结论」。
+ *
+ * 原始日志不在这里列，弹窗底部的「完整日志」把用户带回设置页的日志区——
+ * 检查项和日志各归各位，弹窗不会被一大段等宽小字撑开。
+ */
 @Composable
-internal fun SelfCheckSection(state: AppState) {
-    var show by remember { mutableStateOf(false) }
-    AppCard(modifier = Modifier.fillMaxWidth()) {
-        SettingsActionWithArrow(
-            title = "一键自检",
-            icon = MiuixIcons.Info,
-            summary = "检查模块、VPN 客户端、网络规则与最近失败",
-            onClick = {
-                state.refreshDiagnostics()
-                show = true
-            },
-        )
-    }
-    if (show) {
-        SelfCheckDialog(state) { show = false }
-    }
-}
-
-@Composable
-internal fun SelfCheckDialog(state: AppState, onDismiss: () -> Unit) {
+internal fun SelfCheckDialog(
+    state: AppState,
+    onDismiss: () -> Unit,
+    onOpenLog: () -> Unit,
+) {
     val context = LocalContext.current
     val colors = MiuixTheme.colorScheme
     val diagnostics = state.diagnostics
@@ -72,9 +54,6 @@ internal fun SelfCheckDialog(state: AppState, onDismiss: () -> Unit) {
     val ok = checks.count { it.status == CheckStatus.OK }
     val warn = checks.count { it.status == CheckStatus.WARN }
     val fail = checks.count { it.status == CheckStatus.FAIL }
-    val events = remember(diagnostics.log) {
-        diagnostics.log.lines().filter { it.isNotBlank() }.takeLast(6)
-    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -127,31 +106,7 @@ internal fun SelfCheckDialog(state: AppState, onDismiss: () -> Unit) {
                     }
                 }
                 item {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "最近事件",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    if (events.isEmpty()) {
-                        Text(
-                            text = "暂无事件记录",
-                            fontSize = 12.sp,
-                            color = colors.onSurfaceVariantSummary,
-                        )
-                    } else {
-                        events.forEach { line ->
-                            Text(
-                                text = line,
-                                fontSize = 11.sp,
-                                lineHeight = 16.sp,
-                                fontFamily = FontFamily.Monospace,
-                                color = colors.onSurfaceVariantSummary,
-                                modifier = Modifier.padding(vertical = 1.dp),
-                            )
-                        }
-                    }
+                    Spacer(modifier = Modifier.height(6.dp))
                 }
             }
 
@@ -202,6 +157,14 @@ internal fun SelfCheckDialog(state: AppState, onDismiss: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                AppButton(
+                    text = "完整日志",
+                    onClick = {
+                        onDismiss()
+                        onOpenLog()
+                    },
+                    modifier = Modifier.weight(1f),
+                )
                 AppButton(
                     text = "打开 LSPosed",
                     onClick = {

@@ -13,6 +13,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -23,6 +24,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -30,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -128,11 +132,15 @@ private fun SettingsGroup(
 internal fun LazyListScope.settingsItems(
     state: AppState,
     showLog: Boolean,
+    /** 自增计数：变化即表示「从别处要求看日志」，日志区据此把自己滚进视野 */
+    openLogSignal: Int,
     query: String,
     onQueryChange: (String) -> Unit,
     /** null 表示未搜索、显示全部；否则只显示集合内的分组 */
     visibleSections: Set<String>?,
     onToggleLog: () -> Unit,
+    /** 无条件展开日志（自检弹窗的「完整日志」） */
+    onOpenLog: () -> Unit,
     onRefresh: () -> Unit,
     onExport: () -> Unit,
     onImport: () -> Unit,
@@ -551,14 +559,21 @@ internal fun LazyListScope.settingsItems(
         }
     }
 
-    if (visible("状态诊断")) item {
-        SectionTitle("状态诊断")
-        SelfCheckSection(state)
-    }
-
-    if (visible("运行日志")) item {
-        SectionTitle("运行日志")
+    // 自检和日志挤在同一张卡里：先看结论，结论不够再往下翻原始日志。
+    // 分成两个分组时用户会犹豫「发报告该点哪个」，合成一个就没有这个岔路。
+    if (visible("诊断")) item {
+        SectionTitle("诊断")
+        var showSelfCheck by remember { mutableStateOf(false) }
         AppCard(modifier = Modifier.fillMaxWidth()) {
+            SettingsActionWithArrow(
+                title = "一键自检",
+                icon = MiuixIcons.Info,
+                summary = "检查模块、VPN 客户端、网络规则与最近失败",
+                onClick = {
+                    state.refreshDiagnostics()
+                    showSelfCheck = true
+                },
+            )
             val lines = state.diagnostics.log.lines().filter { it.isNotBlank() }
             SettingsActionWithArrow(
                 title = if (showLog) "收起运行日志" else "展开运行日志",
@@ -567,8 +582,26 @@ internal fun LazyListScope.settingsItems(
                 onClick = onToggleLog,
             )
             if (showLog) {
-                LogBody(state = state, lines = lines, context = context, onRefresh = onRefresh)
+                // 从自检弹窗点「完整日志」过来时，日志刚展开、还在屏幕外，
+                // 这里把它顶进视野，不然用户会以为按钮没反应
+                val bring = remember { BringIntoViewRequester() }
+                LaunchedEffect(openLogSignal) {
+                    if (openLogSignal > 0) {
+                        withFrameNanos { }
+                        runCatching { bring.bringIntoView() }
+                    }
+                }
+                Box(modifier = Modifier.bringIntoViewRequester(bring)) {
+                    LogBody(state = state, lines = lines, context = context, onRefresh = onRefresh)
+                }
             }
+        }
+        if (showSelfCheck) {
+            SelfCheckDialog(
+                state = state,
+                onDismiss = { showSelfCheck = false },
+                onOpenLog = onOpenLog,
+            )
         }
     }
 }

@@ -21,6 +21,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -80,6 +81,8 @@ fun MainScreen(state: AppState) {
         }
     }
     var showLog by remember { mutableStateOf(false) }
+    /** 每次自检弹窗点「完整日志」就加一，日志区靠它决定要不要滚进视野 */
+    var openLogSignal by remember { mutableIntStateOf(0) }
     var showClientAdapter by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
     var settingsQuery by remember { mutableStateOf("") }
@@ -245,12 +248,19 @@ fun MainScreen(state: AppState) {
                             settingsItems(
                                 state = state,
                                 showLog = showLog,
+                                openLogSignal = openLogSignal,
                                 query = settingsQuery,
                                 onQueryChange = { settingsQuery = it },
                                 visibleSections = settingsMatches,
                                 onToggleLog = {
                                     showLog = !showLog
                                     if (showLog) state.refreshDiagnostics()
+                                },
+                                onOpenLog = {
+                                    showLog = true
+                                    state.refreshDiagnostics()
+                                    // 已经在展开状态时也要让它滚过去，所以用计数而不是布尔
+                                    openLogSignal++
                                 },
                                 onRefresh = { state.refreshDiagnostics() },
                                 onExport = { exportLauncher.launch("vpnautoswitch-config.json") },

@@ -24,7 +24,16 @@ class SettingsSearchTest {
         assertTrue(SettingsSearch.matchedTitles("深色")!!.contains("外观"))
         assertTrue(SettingsSearch.matchedTitles("锁定")!!.contains("高级"))
         assertTrue(SettingsSearch.matchedTitles("导出")!!.contains("备份与恢复"))
-        assertTrue(SettingsSearch.matchedTitles("日志")!!.contains("运行日志"))
+        assertTrue(SettingsSearch.matchedTitles("日志")!!.contains("诊断"))
+    }
+
+    @Test
+    fun `diagnostics section answers both old names`() {
+        // 自检和运行日志合并成「诊断」后，用户按旧叫法搜也得能找回来
+        assertTrue(SettingsSearch.matchedTitles("自检")!!.contains("诊断"))
+        assertTrue(SettingsSearch.matchedTitles("状态诊断")!!.contains("诊断"))
+        assertTrue(SettingsSearch.matchedTitles("运行日志")!!.contains("诊断"))
+        assertTrue(SettingsSearch.matchedTitles("异常")!!.contains("诊断"))
     }
 
     @Test
