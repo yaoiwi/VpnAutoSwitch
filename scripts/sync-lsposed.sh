@@ -8,7 +8,8 @@
 #   ./scripts/sync-lsposed.sh 1.9.12 --dry-run   # 只打印要做什么，不写远端
 #
 # 需要 token：LSP_REPO_TOKEN 或 GH_TOKEN，对模块仓库有 push 权限即可（public_repo 够）。
-# 主仓库必须已经有 v<版本> 的 Release，正文会整段复制过去（去掉开头的 ## 版本号）。
+# 主仓库必须已经有 v<版本> 的 Release，正文整段复制过去（去掉开头的 ## 版本号）。
+# 主仓库正文为空、或只有一行 compare 链接时，改从 CHANGELOG.md 取对应版本那一段。
 #
 # 模块库的 tag 格式是 [versionCode]-[versionName]，和主仓库的 v1.2.3 不一样。
 # 以前这一步纯手工，1.9.9 之后连漏了三个版本，所以单独成脚本。
@@ -102,14 +103,36 @@ fi
 
 BODY_FILE=$(mktemp)
 trap 'rm -f "$BODY_FILE"' EXIT
-python3 - "$main_release" > "$BODY_FILE" <<'PY'
+python3 - "$main_release" "$VER" > "$BODY_FILE" <<'PY'
 import json, re, sys
 d = json.loads(sys.argv[1])
-body = d.get("body") or ""
+ver = sys.argv[2]
+body = (d.get("body") or "").strip()
 body = re.sub(r"^##\s*[\d.]+\s*\n+", "", body)
-print(body, end="")
+
+# CI 用 generate_release_notes 生成的说明只有一行 compare 链接（tag 推上去时没有
+# PR 关联，GitHub 就只能给这个）。这种情况下模块库也会跟着空，所以退回到
+# CHANGELOG.md 取对应版本那一段。
+if len(body) < 120 or body.startswith("**Full Changelog**"):
+    try:
+        text = open("CHANGELOG.md", encoding="utf-8").read()
+    except OSError:
+        text = ""
+    m = re.search(rf"^## {re.escape(ver)}\b.*?(?=^## |\Z)", text, re.S | re.M)
+    if m:
+        body = "\n".join(m.group(0).strip().split("\n")[1:]).strip()
+        if body:
+            body += (
+                "\n\n**升级后重启手机** —— 模块代码跑在 system_server 里。"
+                "\n\n完整更新日志：https://github.com/yaoiwi/VpnAutoSwitch/blob/main/CHANGELOG.md"
+            )
+print(body + "\n" if body else "", end="")
 PY
-echo "◦ 正文：$(wc -c < "$BODY_FILE") 字节，从 v$VER 复制"
+if [[ $(wc -c < "$BODY_FILE") -lt 120 ]]; then
+    echo "◦ 正文：主仓库 Release 为空，CHANGELOG 里也没有 $VER 那一段，模块库说明会是空的" >&2
+else
+    echo "◦ 正文：$(wc -c < "$BODY_FILE") 字节"
+fi
 
 # ---- 2. 找 APK，并确认它真是这个版本（构建产物可能是上一次留下的）
 apk_version() {
