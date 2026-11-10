@@ -13,7 +13,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -599,7 +598,9 @@ internal fun LazyListScope.settingsItems(
                         }
                     }
                 }
-                Box(modifier = Modifier.bringIntoViewRequester(bring)) {
+                // 必须是 Column 不是 Box：LogBody 的根级元素有好几个，
+                // 放进 Box 会全部叠在同一位置
+                Column(modifier = Modifier.bringIntoViewRequester(bring)) {
                     LogBody(state = state, lines = lines, context = context, onRefresh = onRefresh)
                 }
             }
