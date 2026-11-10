@@ -65,6 +65,7 @@ internal fun Engine.turnOff(reason: String) {
     connectStartedAt = 0L
     flapRetries = 0
     initWaitLogged = false
+    serviceModeHintLogged = false
     lastStartAt = 0L
     stopServiceTried = false
     guardUntil = 0L

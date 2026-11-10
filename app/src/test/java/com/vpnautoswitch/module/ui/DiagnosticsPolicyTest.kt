@@ -305,4 +305,71 @@ class DiagnosticsPolicyTest {
     fun `paused automation is named instead of blamed on the client`() {
         assertTrue(verdict(paused = true, vpnConnected = false).contains("暂停"))
     }
+
+    @Test
+    fun `pinned service mode suggests external control after repeated start failures`() {
+        assertTrue(
+            DiagnosticsPolicy.shouldSuggestExternalControl(
+                stage = "enable",
+                streak = 2,
+                clientMode = "service",
+            )
+        )
+        assertTrue(
+            DiagnosticsPolicy.shouldSuggestExternalControl(
+                stage = "enable",
+                streak = 7,
+                clientMode = "service",
+            )
+        )
+    }
+
+    @Test
+    fun `one swallow does not mean the mode is wrong`() {
+        // 只失败一次可能只是网络慢、客户端还在初始化
+        assertFalse(
+            DiagnosticsPolicy.shouldSuggestExternalControl(
+                stage = "enable",
+                streak = 1,
+                clientMode = "service",
+            )
+        )
+    }
+
+    @Test
+    fun `no suggestion when the mode is not pinned to service`() {
+        assertFalse(
+            DiagnosticsPolicy.shouldSuggestExternalControl(
+                stage = "enable",
+                streak = 5,
+                clientMode = "activity",
+            )
+        )
+        // 还没记过方式：模块会自己按「外部控制 → 服务 → 界面」兜底，不用人操心
+        assertFalse(
+            DiagnosticsPolicy.shouldSuggestExternalControl(
+                stage = "enable",
+                streak = 5,
+                clientMode = "",
+            )
+        )
+    }
+
+    @Test
+    fun `suggestion only applies to the start stage`() {
+        assertFalse(
+            DiagnosticsPolicy.shouldSuggestExternalControl(
+                stage = "stop",
+                streak = 5,
+                clientMode = "service",
+            )
+        )
+        assertFalse(
+            DiagnosticsPolicy.shouldSuggestExternalControl(
+                stage = "forceStop",
+                streak = 5,
+                clientMode = "service",
+            )
+        )
+    }
 }

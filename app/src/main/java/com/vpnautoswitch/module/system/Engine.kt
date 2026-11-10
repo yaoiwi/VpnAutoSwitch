@@ -363,6 +363,14 @@ internal object Engine {
     internal var initWaitLogged = false
 
     /**
+     * 「服务方式拉不起来，去客户端适配换个方式」这一轮是否已经提示过。
+     *
+     * 固定成 service 时模块不会走外部控制兜底，每轮重试都失败，同一个建议
+     * 每次连接都记一条就成了噪音，一轮只记一次。
+     */
+    internal var serviceModeHintLogged = false
+
+    /**
      * 最近一次真正发出启动请求的时刻。
      *
      * 宽限期要按「这次启动」算，不能按整轮算：用户划掉再打开时会先失败一次，

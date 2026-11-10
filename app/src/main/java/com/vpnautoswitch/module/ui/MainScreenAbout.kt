@@ -90,9 +90,9 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
+    "1.9.11：客户端固定成 VpnService 方式又连续失败时，自检会直接告诉你换个启动方式——去「客户端适配」测一次外部控制。\n" +
     "1.9.10：状态报告顶部多了一句结论；日志会写明划掉任务为什么没断开，拉起服务两秒后确认进程还在不在；自检和运行日志合成一个「诊断」分组。\n" +
-    "1.9.9：运行日志固定显示设备型号和 ROM 版本，写满也不会被挤掉；拉起失败时带上客户端的包状态。\n" +
-    "1.9.8：自检新增「Hook 挂载」和「配置来源」，能直接看出 hook 有没有挂上、配置是不是旧的。"
+    "1.9.9：运行日志固定显示设备型号和 ROM 版本，写满也不会被挤掉；拉起失败时带上客户端的包状态。"
 
 private const val ACK_TIPS =
     "本模块的实现离不开这些开源项目，在此致谢：\n\n" +

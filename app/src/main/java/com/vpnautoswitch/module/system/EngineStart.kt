@@ -134,6 +134,7 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
         reapplyCount = 0
         externalAttempts = 0
         initWaitLogged = false
+        serviceModeHintLogged = false
         lastStartAt = 0L
         wasConnected = true
         return
@@ -273,6 +274,7 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
         connectStartedAt = now
         // 新的一轮连接：启动宽限和「已提示过等待」的节流都从这一刻重新算
         initWaitLogged = false
+        serviceModeHintLogged = false
         lastStartAt = 0L
     }
 
@@ -336,6 +338,21 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
         if (externalMode == "service" || (!skipSilent && externalAttempts <= SILENT_START_ATTEMPTS)) {
             pendingExternalMode = "service"
             log(ctx, "external-only: restart VPN service without UI (attempt $externalAttempts)")
+            // 固定成 VpnService 方式时没有外部控制兜底，重试到第三次还在原地打转。
+            // 这时该说的是「换个方式」，不是「再试一次」——issue #18 的 Clash Meta
+            // 就是这么连试三轮、每轮都失败的
+            if (externalMode == "service" &&
+                externalAttempts > SILENT_START_ATTEMPTS &&
+                !serviceModeHintLogged
+            ) {
+                serviceModeHintLogged = true
+                log(
+                    ctx,
+                    // 这条记在第 3 次尝试之前，已经失败的是前两次
+                    "external-only: VpnService 方式试了 ${externalAttempts - 1} 次都没连上。" +
+                        "这个客户端可能只认外部控制，去首页「客户端适配」点一次「测试外部控制」",
+                )
+            }
             scheduleDelayedServiceStart(ctx, cfg)
         } else if (cfg.allowVpnUi) {
             // 两次静默都没连上，才按「外部控制入口 → 服务 → 界面」的顺序兜底。

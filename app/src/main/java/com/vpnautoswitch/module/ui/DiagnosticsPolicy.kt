@@ -96,6 +96,24 @@ object DiagnosticsPolicy {
     fun hookSnapshotUsable(snapshotVersion: Int, appVersion: Int): Boolean =
         snapshotVersion > 0 && snapshotVersion == appVersion
 
+    // ------------------------------------------------------------ 启动方式
+
+    /**
+     * 「最近失败」要不要建议换一种启动方式。
+     *
+     * 只看三个条件：确实是拉起失败、连续失败了至少两次、客户端被固定成 VpnService 方式。
+     * 固定成 service 时模块不会走外部控制兜底，重试再多次也是同一条路；
+     * 而偶发一次失败可能只是网络慢、客户端还在初始化，不该让人去改设置。
+     *
+     * Clash Meta 这类客户端在后台只认 `action.START_CLASH`，VpnService 方式拉起来
+     * 不会建隧道——issue #18 就是这么卡住的。
+     */
+    fun shouldSuggestExternalControl(
+        stage: String,
+        streak: Int,
+        clientMode: String,
+    ): Boolean = stage == "enable" && streak >= 2 && clientMode == "service"
+
     // ------------------------------------------------------------ 配置来源
 
     /** 镜像超过这么久还在使用，就提示「改的设置可能没生效」 */

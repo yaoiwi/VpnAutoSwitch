@@ -24,6 +24,7 @@ import com.vpnautoswitch.module.RuleConflicts
 import com.vpnautoswitch.module.apps.AppInfo
 import com.vpnautoswitch.module.apps.AppsRepository
 import com.vpnautoswitch.module.system.Engine
+import com.vpnautoswitch.module.system.ExternalControl
 import com.vpnautoswitch.module.system.HookCounts
 import com.vpnautoswitch.module.system.ModuleLog
 import com.vpnautoswitch.module.system.RuntimeDiagnostics
@@ -99,6 +100,12 @@ data class Diagnostics(
     /** 镜像原文的写入时刻（source 为 mirror 时有效） */
     val configMirrorAt: Long = 0L,
     val configSourceAt: Long = 0L,
+    /**
+     * 这个客户端被记住的启动方式：service / activity / ui，空表示还没记过。
+     *
+     * 固定成 service 时模块不会走外部控制兜底，失败信息里要据此给出不同的建议。
+     */
+    val clientMode: String = "",
 ) {
     companion object {
         /**
@@ -213,6 +220,12 @@ data class Diagnostics(
                 configSource = configSrc?.optString("source").orEmpty(),
                 configMirrorAt = configSrc?.optLong("mirrorAt", 0L) ?: 0L,
                 configSourceAt = configSrc?.optLong("at", 0L) ?: 0L,
+                clientMode = try {
+                    // 用 Fresh 版本：刚在「客户端适配」里测完并固定，缓存里可能还是旧方式
+                    ExternalControl.modeOfFresh(context, config.vpnPackage).orEmpty()
+                } catch (t: Throwable) {
+                    ""
+                },
             )
         }
 

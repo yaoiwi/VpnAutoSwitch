@@ -387,10 +387,25 @@ internal object DiagnosticsReport {
             return CheckItem("最近失败", CheckStatus.OK, "没有记录到失败")
         }
         val recent = now - diagnostics.lastFailureAt <= TimeUnit.MINUTES.toMillis(10)
+        val base = "${failureLabel(diagnostics)}（${ago(diagnostics.lastFailureAt, now)}）"
+        // 拉起失败且这个客户端只会用 VpnService 方式时，光说「失败了」没有用——
+        // 用户重试一百次也是同一条路，得告诉他去哪儿换个方式
+        val hint = if (
+            DiagnosticsPolicy.shouldSuggestExternalControl(
+                stage = diagnostics.lastFailureStage,
+                streak = diagnostics.lastFailureStreak,
+                clientMode = diagnostics.clientMode,
+            )
+        ) {
+            "这个客户端被固定成 VpnService 方式，模块不会改走外部控制。" +
+                "到首页的「客户端适配」点一次「测试外部控制」，成功后会自动改用这种方式"
+        } else {
+            null
+        }
         return CheckItem(
             "最近失败",
             if (recent) CheckStatus.WARN else CheckStatus.UNKNOWN,
-            "${failureLabel(diagnostics)}（${ago(diagnostics.lastFailureAt, now)}）",
+            if (hint == null) base else "$base\n$hint",
         )
     }
 
