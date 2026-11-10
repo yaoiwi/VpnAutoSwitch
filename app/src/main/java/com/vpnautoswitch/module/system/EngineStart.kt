@@ -352,6 +352,18 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
                     "external-only: VpnService 方式试了 ${externalAttempts - 1} 次都没连上。" +
                         "这个客户端可能只认外部控制，去首页「客户端适配」点一次「测试外部控制」",
                 )
+                // 走到这里就是「确实拉不起来」，得让状态报告知道。
+                // 以前这条路一次都不写 failure：报告只能捡到上一次关闭失败的记录，
+                // 于是 issue #18 那份写着「关闭 VPN 未成功 · 连续 3 次」，
+                // 而眼前真正失败的是拉起。每轮只记一次（同一个 flag 兜住），
+                // 所以 streak 的含义仍然是「连续几轮没拉起来」。
+                noteFailure(
+                    ctx,
+                    cfg,
+                    hint = "已连续多次没能建立 VPN：${cfg.vpnPackage} 被固定成 VpnService 方式，" +
+                        "模块只会直接启动它的服务。这个客户端可能只认外部控制，" +
+                        "去首页「客户端适配」测一次，成功后会改用外部控制",
+                )
             }
             scheduleDelayedServiceStart(ctx, cfg)
         } else if (cfg.allowVpnUi) {
@@ -525,15 +537,17 @@ internal fun Engine.tryQuickTile(ctx: Context, cfg: Config, now: Long): Boolean 
     return QuickTiles.click(ctx, tile)
 }
 
-internal fun Engine.noteFailure(ctx: Context, cfg: Config) {
+internal fun Engine.noteFailure(ctx: Context, cfg: Config, hint: String? = null) {
     failureStreak++
     RuntimeDiagnostics.publishFailure(ctx, "enable", cfg.vpnPackage, failureStreak)
     if (!failureLogged && failureStreak >= FAILURE_HINT_AT) {
         failureLogged = true
+        // 默认那句是给「always-on 拉不起来」写的；固定成 service 方式时
+        // 常驻设置根本没写，提「不响应系统常驻 VPN」「点不了快捷磁贴」会带偏
         log(
             ctx,
-            "已连续 $failureStreak 次没能建立 VPN：${cfg.vpnPackage} 不响应系统常驻 VPN，" +
-                "也点不了它的快捷磁贴。请在客户端里打开「自动连接」，或换用 v2rayNG / Surfboard / WireGuard"
+            hint ?: "已连续 $failureStreak 次没能建立 VPN：${cfg.vpnPackage} 不响应系统常驻 VPN，" +
+                "也点不了它的快捷磁贴。请在客户端里打开「自动连接」，或换用 v2rayNG / Surfboard / WireGuard",
         )
     }
 }

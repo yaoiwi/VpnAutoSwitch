@@ -424,35 +424,38 @@ internal object DiagnosticsReport {
         val base = "${failureLabel(diagnostics)}（${ago(diagnostics.lastFailureAt, now)}）"
         // 拉起失败且这个客户端只会用 VpnService 方式时，光说「失败了」没有用——
         // 用户重试一百次也是同一条路，得告诉他去哪儿换个方式
-        val hints = buildList {
-            if (recent && DiagnosticsPolicy.shouldSuggestExternalControl(
-                    stage = diagnostics.lastFailureStage,
-                    streak = diagnostics.lastFailureStreak,
-                    clientMode = diagnostics.clientMode,
-                )
-            ) {
-                add(
-                    if (diagnostics.lastFailureStage == "stop") {
-                        "这个客户端被固定成 VpnService 方式，模块只能用系统设置去关，关不掉时不会改走外部控制。" +
-                            "到首页的「客户端适配」点一次「测试外部控制」，成功后会自动改用这种方式"
-                    } else {
-                        "这个客户端被固定成 VpnService 方式，模块不会改走外部控制。" +
-                            "到首页的「客户端适配」点一次「测试外部控制」，成功后会自动改用这种方式"
-                    }
-                )
+        val hints = mutableListOf<String>()
+        if (recent && DiagnosticsPolicy.shouldSuggestExternalControl(
+                stage = diagnostics.lastFailureStage,
+                streak = diagnostics.lastFailureStreak,
+                clientMode = diagnostics.clientMode,
+            )
+        ) {
+            hints += if (diagnostics.lastFailureStage == "stop") {
+                "这个客户端被固定成 VpnService 方式，模块只能用系统设置去关，关不掉时不会改走外部控制。" +
+                    "到首页的「客户端适配」点一次「测试外部控制」，成功后会自动改用这种方式"
+            } else {
+                "这个客户端被固定成 VpnService 方式，模块不会改走外部控制。" +
+                    "到首页的「客户端适配」点一次「测试外部控制」，成功后会自动改用这种方式"
             }
-            if (recent && DiagnosticsPolicy.serviceCannotTunnel(
-                    clientMode = diagnostics.clientMode,
-                    vpnPackage = diagnostics.vpnPackage,
-                    alwaysOnApp = diagnostics.alwaysOnApp,
-                    vpnConnected = diagnostics.vpnConnected,
-                    vpnHasService = diagnostics.vpnHasService,
-                )
-            ) {
-                add(
-                    "系统常驻 VPN 已经指向客户端，隧道却一直没建立。" +
-                        "这个客户端可能只认自己的启动广播，到「客户端适配」测一次外部控制"
-                )
+        }
+        // 上一条已经说过「换方式」就不再重复；这里只在还没提过时补一句，
+        // 说明为什么「设置写了/没写」都连不上
+        if (hints.isEmpty() && recent && DiagnosticsPolicy.serviceCannotTunnel(
+                clientMode = diagnostics.clientMode,
+                vpnPackage = diagnostics.vpnPackage,
+                alwaysOnApp = diagnostics.alwaysOnApp,
+                vpnConnected = diagnostics.vpnConnected,
+                vpnHasService = diagnostics.vpnHasService,
+            )
+        ) {
+            hints += if (diagnostics.alwaysOnApp.isNullOrEmpty()) {
+                // 被记过启动方式时模块不写常驻设置，所以这里不能说「常驻 VPN 已指向客户端」
+                "这个客户端被记成 VpnService 方式，模块只会直接启动它的服务（不写常驻设置），" +
+                    "隧道一直没建立。到「客户端适配」测一次外部控制，成功后会自动改用这种方式"
+            } else {
+                "系统常驻 VPN 已经指向客户端，隧道却一直没建立。" +
+                    "这个客户端可能只认自己的启动广播，到「客户端适配」测一次外部控制"
             }
         }
         return CheckItem(

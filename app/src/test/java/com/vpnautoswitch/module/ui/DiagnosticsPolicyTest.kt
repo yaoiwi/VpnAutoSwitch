@@ -450,8 +450,30 @@ class DiagnosticsPolicyTest {
     }
 
     @Test
+    fun `external only mode with no always-on is the same dead end`() {
+        // issue #18：客户端被记过启动方式后模块走 external-only，压根不写常驻设置，
+        // 于是 always-on 一直是「未设置」。旧判据要求它等于客户端，提示永远不出现
+        assertTrue(
+            DiagnosticsPolicy.serviceCannotTunnel(
+                clientMode = "service",
+                vpnPackage = "com.github.metacubex.clash.meta",
+                alwaysOnApp = null,
+                vpnConnected = false,
+                vpnHasService = true,
+            )
+        )
+        assertTrue(
+            verdict(
+                vpnConnected = false,
+                alwaysOnApp = null,
+                clientMode = "service",
+            ).contains("客户端适配")
+        )
+    }
+
+    @Test
     fun `service mode alone is not enough to blame the client`() {
-        // 隧道已经建起来，或者设置还没写下去（可能仍在切换），都不该报
+        // 隧道已经建起来，或者常驻设置指向的是别的 VPN，都不该报
         assertFalse(
             DiagnosticsPolicy.serviceCannotTunnel(
                 clientMode = "service",
@@ -465,7 +487,7 @@ class DiagnosticsPolicyTest {
             DiagnosticsPolicy.serviceCannotTunnel(
                 clientMode = "service",
                 vpnPackage = "com.v2ray.ang",
-                alwaysOnApp = null,
+                alwaysOnApp = "com.other.vpn",
                 vpnConnected = false,
                 vpnHasService = true,
             )
@@ -477,6 +499,16 @@ class DiagnosticsPolicyTest {
                 alwaysOnApp = "com.v2ray.ang",
                 vpnConnected = false,
                 vpnHasService = true,
+            )
+        )
+        // 客户端没声明 VpnService 时走的是另一条提示，别两条一起报
+        assertFalse(
+            DiagnosticsPolicy.serviceCannotTunnel(
+                clientMode = "service",
+                vpnPackage = "com.v2ray.ang",
+                alwaysOnApp = null,
+                vpnConnected = false,
+                vpnHasService = false,
             )
         )
     }

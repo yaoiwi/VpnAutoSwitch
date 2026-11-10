@@ -115,15 +115,17 @@ object DiagnosticsPolicy {
     ): Boolean = (stage == "enable" || stage == "stop") && streak >= 2 && clientMode == "service"
 
     /**
-     * 固定成 service 方式、系统常驻 VPN 也已经指向客户端，隧道却还是没建起来。
+     * 固定成 service 方式、隧道却建不起来。
      *
-     * 这三个条件同时成立，基本就排除了「刚点开、还在连」：设置已经写下去，客户端也
-     * 声明了 VpnService，但 `bindService` 这一路没让它建立隧道。Clash Meta 这类客户端
-     * 只认自己的 `action.START_CLASH`，被固定成 service 后模块不会改走外部控制，
-     * 重试多少次都是同一条路——issue #18 就是这么卡住的。
+     * 判据是「启动方式被固定成 service」+「现在确实没有隧道」，而不是要求系统常驻 VPN
+     * 已经指向客户端——后者只在模块接管常驻设置时才成立。一旦这个客户端被记过启动方式，
+     * 模块走的是 external-only 分支，压根不写 always-on（见 EngineStart 里
+     * `mode != null` 那一段），此时 always-on 为空恰恰是「走的就是这条路」的证据。
      *
-     * 单个信号都不够：只看「未连接」会误报还在连接中的情况，只看「启动方式=service」
-     * 又会冤枉本来就能用 service 正常工作的客户端。
+     * issue #18 就是这么被漏掉的：客户端被记成 service、always-on 一直是「未设置」，
+     * 旧判据要求 always-on 等于客户端，于是永远不成立，提示一次都没出现过。
+     *
+     * 传进来的 always-on 若是**别的**客户端，说明这轮根本不是我们在管，不报。
      */
     fun serviceCannotTunnel(
         clientMode: String,
@@ -135,7 +137,7 @@ object DiagnosticsPolicy {
         vpnPackage.isNotEmpty() &&
         vpnHasService != false &&
         !vpnConnected &&
-        alwaysOnApp == vpnPackage
+        (alwaysOnApp == vpnPackage || alwaysOnApp.isNullOrEmpty())
 
     // ------------------------------------------------------------ 失败时效
 
@@ -326,11 +328,8 @@ object DiagnosticsPolicy {
                 "这个客户端没有声明 VpnService，模块拉不起来。换一个客户端。"
             input.paused ->
                 "自动联动被快捷开关暂停了，恢复后才会自动开关。"
-            recentFailure && streak >= 2 && input.expectsOn && !input.vpnConnected &&
-                input.failureStage == "enable" ->
-                "连续 $streak 次拉不起客户端。看日志里「拉起前包状态」：被强停就要放自启，后台受限就要关电池优化。"
-            recentFailure && !input.expectsOn && input.vpnConnected && input.failureStage == "stop" ->
-                "规则要求断开，但最近 $streak 次都没关掉。到「客户端适配」测一次外部控制，成功后模块会改走这条路关。"
+            // 排在「连续 N 次拉不起客户端」之前：固定成 service 时失败原因不是
+            // 自启或电池优化，而是这条路本身走不通，给的下一步也不一样
             serviceCannotTunnel(
                 clientMode = input.clientMode,
                 vpnPackage = input.vpnPackage,
@@ -338,8 +337,13 @@ object DiagnosticsPolicy {
                 vpnConnected = input.vpnConnected,
                 vpnHasService = input.vpnHasService,
             ) ->
-                "系统常驻 VPN 已经指向客户端，隧道却一直没建立。启动方式被固定成 VpnService，" +
-                    "有些客户端只认自己的启动广播——到「客户端适配」测一次外部控制，成功后模块会自动改用这种方式。"
+                "启动方式被固定成 VpnService，隧道一直没建立。这个客户端可能只认自己的启动广播" +
+                    "——到「客户端适配」测一次外部控制，成功后模块会自动改用这种方式。"
+            recentFailure && streak >= 2 && input.expectsOn && !input.vpnConnected &&
+                input.failureStage == "enable" ->
+                "连续 $streak 次拉不起客户端。看日志里「拉起前包状态」：被强停就要放自启，后台受限就要关电池优化。"
+            recentFailure && !input.expectsOn && input.vpnConnected && input.failureStage == "stop" ->
+                "规则要求断开，但最近 $streak 次都没关掉。到「客户端适配」测一次外部控制，成功后模块会改走这条路关。"
             recentFailure && streak >= 2 && input.expectsOn && !input.vpnConnected ->
                 "最近 $streak 次切换失败（${failureStageLabel(input.failureStage)}）。看日志确认卡在哪一步。"
             input.expectsOn && !input.vpnConnected &&
