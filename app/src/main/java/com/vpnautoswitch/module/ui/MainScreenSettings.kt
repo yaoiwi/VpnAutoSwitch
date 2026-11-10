@@ -61,6 +61,7 @@ import top.yukonga.miuix.kmp.icon.extended.Album
 import top.yukonga.miuix.kmp.icon.extended.Background
 import top.yukonga.miuix.kmp.icon.extended.Blocklist
 import top.yukonga.miuix.kmp.icon.extended.Carrier
+import top.yukonga.miuix.kmp.icon.extended.Copy
 import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.icon.extended.Download
 import top.yukonga.miuix.kmp.icon.extended.GridView
@@ -572,6 +573,29 @@ internal fun LazyListScope.settingsItems(
                 onClick = {
                     state.refreshDiagnostics()
                     showSelfCheck = true
+                },
+            )
+            // 一键拿走：结论、检查项、设备信息和全部日志都在这一份里，
+            // 不用先开弹窗复制、再滚到日志区复制一次
+            SettingsActionWithArrow(
+                title = "复制诊断信息",
+                icon = MiuixIcons.Copy,
+                summary = "自检结论 + 完整日志，一份贴进 issue",
+                onClick = {
+                    state.refreshDiagnostics()
+                    val logCount = state.diagnostics.log.lines().count { it.isNotBlank() }
+                    val text = DiagnosticsReport.buildText(
+                        state.diagnostics,
+                        state.config,
+                        fullLog = true,
+                    )
+                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("VpnAutoSwitch", text))
+                    Toast.makeText(
+                        context,
+                        "已复制报告与 $logCount 行日志",
+                        Toast.LENGTH_SHORT,
+                    ).show()
                 },
             )
             val lines = state.diagnostics.log.lines().filter { it.isNotBlank() }

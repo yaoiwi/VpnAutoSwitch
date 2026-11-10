@@ -93,4 +93,15 @@ class LogPolicyTest {
         assertEquals(listOf("2", "3"), LogPolicy.tailWithHeader(lines, 2))
         assertTrue(LogPolicy.tailWithHeader(emptyList(), 5).isEmpty())
     }
+
+    @Test
+    fun `full log mode keeps every line and still starts with the header`() {
+        // 「复制诊断信息」走全量：limit 传总行数，一行都不能少，设备行仍在最前
+        val lines = mutableListOf("11-10 02:41:07  device: OnePlus PKR110")
+        repeat(500) { lines.add("11-10 02:45:00  line $it") }
+        val shown = LogPolicy.tailWithHeader(lines, lines.size)
+        assertEquals(501, shown.size)
+        assertEquals(lines.first(), shown.first())
+        assertEquals(lines.last(), shown.last())
+    }
 }

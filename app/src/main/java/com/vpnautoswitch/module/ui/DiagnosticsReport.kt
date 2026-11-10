@@ -121,7 +121,17 @@ internal object DiagnosticsReport {
         return checks
     }
 
-    fun buildText(diagnostics: Diagnostics, config: Config): String {
+    /**
+     * 生成可粘贴的纯文本报告。
+     *
+     * [fullLog] 为 true 时带全部日志（日志本身最多 500 行），用于「一键复制」；
+     * 自检弹窗里的复制仍然只带最近 60 行，够说明问题又不至于太长。
+     */
+    fun buildText(
+        diagnostics: Diagnostics,
+        config: Config,
+        fullLog: Boolean = false,
+    ): String {
         val now = System.currentTimeMillis()
         val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA)
         // 拿不到快照、或者快照是升级前的旧数据时，宁可不判 hook，也不给错的结论
@@ -209,12 +219,24 @@ internal object DiagnosticsReport {
                 appendLine("[${it.status.name}] ${it.title}：${it.detail.replace("\n", " / ")}")
             }
             appendLine()
-            appendLine("最近日志：")
-            append(
-                LogPolicy
-                    .tailWithHeader(diagnostics.log.lines().filter { it.isNotBlank() }, 60)
-                    .joinToString("\n")
-            )
+            val logLines = diagnostics.log.lines().filter { it.isNotBlank() }
+            // 两种模式都走 tailWithHeader：设备指纹始终留在第一行，
+            // 否则贴出去的日志看不出是哪个机器
+            if (fullLog) {
+                appendLine("完整日志（${logLines.size} 行，最新在最后）：")
+                append(
+                    LogPolicy
+                        .tailWithHeader(logLines, logLines.size)
+                        .joinToString("\n")
+                )
+            } else {
+                appendLine("最近日志：")
+                append(
+                    LogPolicy
+                        .tailWithHeader(logLines, 60)
+                        .joinToString("\n")
+                )
+            }
         }
     }
 
