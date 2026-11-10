@@ -67,14 +67,16 @@ class ModuleEntry : IXposedHookLoadPackage {
         ProcessRecords.attach(lpparam.classLoader)
         Engine.attach(ctx)
 
+        // 逐类安装：某类在个别 ROM 上抛异常时，只把这一类记成 0，
+        // 后面的几类和 publishHooks 都还能照常执行（见 install 的注释）
         val counts = HookCounts(
-            startActivity = hookActivityStart(lpparam.classLoader),
-            activityResumed = hookActivityResumed(lpparam.classLoader),
-            setState = hookActivityRecordState(lpparam.classLoader),
-            death = hookProcessDeath(lpparam.classLoader),
-            taskRemoved = hookTaskRemoved(lpparam.classLoader),
-            notif = hookVpnNotification(lpparam.classLoader),
-            blockClientStart = hookClientStarts(lpparam.classLoader),
+            startActivity = install(ctx, "startActivity") { hookActivityStart(lpparam.classLoader) },
+            activityResumed = install(ctx, "activityResumed") { hookActivityResumed(lpparam.classLoader) },
+            setState = install(ctx, "setState") { hookActivityRecordState(lpparam.classLoader) },
+            death = install(ctx, "death") { hookProcessDeath(lpparam.classLoader) },
+            taskRemoved = install(ctx, "taskRemoved") { hookTaskRemoved(lpparam.classLoader) },
+            notif = install(ctx, "notif") { hookVpnNotification(lpparam.classLoader) },
+            blockClientStart = install(ctx, "blockClientStart") { hookClientStarts(lpparam.classLoader) },
         )
 
         val summary = "hooks: " + counts.asMap().entries.joinToString(", ") { "${it.key}=${it.value}" }
@@ -87,6 +89,22 @@ class ModuleEntry : IXposedHookLoadPackage {
             ModuleLog.append(ctx, "hook $name not installed (0 methods)")
         }
         RuntimeDiagnostics.publishHooks(ctx, counts)
+    }
+
+    /**
+     * 安装一类 hook，失败时只把这一类记成 0。
+     *
+     * 七类 hook 以前写在同一个 `HookCounts(...)` 构造里：任何一类在某个 ROM 上
+     * 抛 `NoSuchMethodError` / `ClassNotFoundError`，后面的几类就都不会执行，
+     * `publishHooks` 也走不到——结果 on 界面上表现为「模块心跳正常、hook 一栏永远未上报」，
+     * 而日志里连 `system_server loaded` 都没有，看不出断在哪一类。
+     */
+    private fun install(ctx: Context?, name: String, block: () -> Int): Int = try {
+        block()
+    } catch (t: Throwable) {
+        ModuleLog.append(ctx, "hook $name failed: ${t.javaClass.simpleName}: ${t.message}")
+        XposedBridge.log("[VpnAutoSwitch] hook $name failed: $t")
+        0
     }
 
     // ------------------------------------------------------------ Activity 前台

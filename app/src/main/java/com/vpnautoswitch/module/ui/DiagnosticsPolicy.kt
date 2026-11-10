@@ -112,7 +112,43 @@ object DiagnosticsPolicy {
         stage: String,
         streak: Int,
         clientMode: String,
-    ): Boolean = stage == "enable" && streak >= 2 && clientMode == "service"
+    ): Boolean = (stage == "enable" || stage == "stop") && streak >= 2 && clientMode == "service"
+
+    /**
+     * 固定成 service 方式、系统常驻 VPN 也已经指向客户端，隧道却还是没建起来。
+     *
+     * 这三个条件同时成立，基本就排除了「刚点开、还在连」：设置已经写下去，客户端也
+     * 声明了 VpnService，但 `bindService` 这一路没让它建立隧道。Clash Meta 这类客户端
+     * 只认自己的 `action.START_CLASH`，被固定成 service 后模块不会改走外部控制，
+     * 重试多少次都是同一条路——issue #18 就是这么卡住的。
+     *
+     * 单个信号都不够：只看「未连接」会误报还在连接中的情况，只看「启动方式=service」
+     * 又会冤枉本来就能用 service 正常工作的客户端。
+     */
+    fun serviceCannotTunnel(
+        clientMode: String,
+        vpnPackage: String,
+        alwaysOnApp: String?,
+        vpnConnected: Boolean,
+        vpnHasService: Boolean?,
+    ): Boolean = clientMode == "service" &&
+        vpnPackage.isNotEmpty() &&
+        vpnHasService != false &&
+        !vpnConnected &&
+        alwaysOnApp == vpnPackage
+
+    // ------------------------------------------------------------ 失败时效
+
+    /**
+     * 超过这么久之前的失败，不再拿来当「现在的问题」。
+     *
+     * 失败记录跟着模块一起跨天保留：早上关 VPN 没成功一次，晚上再开报告还写着
+     * 「连续 3 次拉不起客户端」，用户照着去改自启和电池优化，白折腾。
+     * 十分钟足够覆盖一轮「打开应用 → 重试几次」的真实卡壳。
+     */
+    const val FAILURE_RECENT_MS = 10L * 60 * 1000
+
+    fun failureIsRecent(ageMs: Long): Boolean = ageMs in 0..FAILURE_RECENT_MS
 
     // ------------------------------------------------------------ 配置来源
 
@@ -250,6 +286,14 @@ object DiagnosticsPolicy {
         val vpnPackage: String,
         val failureStreak: Int,
         val paused: Boolean,
+        /** 最近一次失败发生在哪个阶段：enable / stop / forceStop */
+        val failureStage: String = "",
+        /** 距今多久；超出 [FAILURE_RECENT_MS] 就不再当作「现在的问题」 */
+        val failureAgeMs: Long = Long.MAX_VALUE,
+        /** 当前规则是否要求连上 VPN；规则不强制时为 true，避免把「没连」说成正常 */
+        val expectsOn: Boolean = true,
+        /** 这个客户端被记住的启动方式：service / activity / "" */
+        val clientMode: String = "",
     )
 
     /**
@@ -258,30 +302,62 @@ object DiagnosticsPolicy {
      * 顺序不是随手排的：模块没跑起来时，后面所有状态都不可信；hook 没挂上时，
      * 界面看着一切正常但功能其实不工作；客户端装不上是配置问题；最后才轮到
      * 「正在切换，过几秒再看」这种临时状态。
+     *
+     * 失败相关的几条必须先校验阶段和时效：失败记录会跨天留着，六小时前「关闭 VPN
+     * 没成功」的 streak 如果直接套进「拉不起客户端」的文案，用户会去改一堆用不上的设置。
      */
-    fun conclusion(input: VerdictInput): String = when {
-        input.moduleState == ModuleState.NEVER ->
-            "模块还没运行过。在 LSPosed 里只勾「系统框架」，然后重启手机。"
-        input.moduleState == ModuleState.OLD_CODE ->
-            "系统里跑的还是旧版本模块。重启手机让新版本生效。"
-        input.moduleState == ModuleState.STALE ->
-            "模块心跳停了，可能被系统回收。重启手机；反复出现的话把这份报告发出来。"
-        input.hookHealth == HookHealth.BROKEN ->
-            "模块在跑，但关键 hook 没挂上，自动开关会失效。重启手机；还不行就检查 LSPosed 作用域是不是只有「系统框架」。"
-        input.hookHealth == HookHealth.DEGRADED ->
-            "进程死亡检测正常，但「划掉最近任务」那条 hook 没挂上：上滑清理不会触发断开，按返回键退出仍然有效。"
-        input.vpnInstalled == false ->
-            "选的 VPN 客户端没装。去设置里重新选一个。"
-        input.vpnHasService == false ->
-            "这个客户端没有声明 VpnService，模块拉不起来。换一个客户端。"
-        input.paused ->
-            "自动联动被快捷开关暂停了，恢复后才会自动开关。"
-        !input.vpnConnected && input.failureStreak >= 3 ->
-            "连续 ${input.failureStreak} 次拉不起客户端。看日志里「拉起前包状态」：被强停就要放自启，后台受限就要关电池优化。"
-        !input.vpnConnected && input.vpnPackage.isNotEmpty() && input.alwaysOnApp == input.vpnPackage ->
-            "系统常驻 VPN 已经指向客户端，但隧道没建立。可能还在连；一直这样就在客户端里点一次连接，先确认它自己能连上。"
-        !input.vpnConnected ->
-            "规则要求开启，系统还没指向客户端。模块正在切换，过几秒刷新看看。"
-        else -> "各项正常。"
+    fun conclusion(input: VerdictInput): String {
+        val streak = input.failureStreak
+        val recentFailure = streak > 0 && failureIsRecent(input.failureAgeMs)
+        return when {
+            input.moduleState == ModuleState.NEVER ->
+                "模块还没运行过。在 LSPosed 里只勾「系统框架」，然后重启手机。"
+            input.moduleState == ModuleState.OLD_CODE ->
+                "系统里跑的还是旧版本模块。重启手机让新版本生效。"
+            input.moduleState == ModuleState.STALE ->
+                "模块心跳停了，可能被系统回收。重启手机；反复出现的话把这份报告发出来。"
+            input.hookHealth == HookHealth.BROKEN ->
+                "模块在跑，但关键 hook 没挂上，自动开关会失效。重启手机；还不行就检查 LSPosed 作用域是不是只有「系统框架」。"
+            input.hookHealth == HookHealth.DEGRADED ->
+                "进程死亡检测正常，但「划掉最近任务」那条 hook 没挂上：上滑清理不会触发断开，按返回键退出仍然有效。"
+            input.vpnInstalled == false ->
+                "选的 VPN 客户端没装。去设置里重新选一个。"
+            input.vpnHasService == false ->
+                "这个客户端没有声明 VpnService，模块拉不起来。换一个客户端。"
+            input.paused ->
+                "自动联动被快捷开关暂停了，恢复后才会自动开关。"
+            recentFailure && streak >= 2 && input.expectsOn && !input.vpnConnected &&
+                input.failureStage == "enable" ->
+                "连续 $streak 次拉不起客户端。看日志里「拉起前包状态」：被强停就要放自启，后台受限就要关电池优化。"
+            recentFailure && !input.expectsOn && input.vpnConnected && input.failureStage == "stop" ->
+                "规则要求断开，但最近 $streak 次都没关掉。到「客户端适配」测一次外部控制，成功后模块会改走这条路关。"
+            serviceCannotTunnel(
+                clientMode = input.clientMode,
+                vpnPackage = input.vpnPackage,
+                alwaysOnApp = input.alwaysOnApp,
+                vpnConnected = input.vpnConnected,
+                vpnHasService = input.vpnHasService,
+            ) ->
+                "系统常驻 VPN 已经指向客户端，隧道却一直没建立。启动方式被固定成 VpnService，" +
+                    "有些客户端只认自己的启动广播——到「客户端适配」测一次外部控制，成功后模块会自动改用这种方式。"
+            recentFailure && streak >= 2 && input.expectsOn && !input.vpnConnected ->
+                "最近 $streak 次切换失败（${failureStageLabel(input.failureStage)}）。看日志确认卡在哪一步。"
+            input.expectsOn && !input.vpnConnected &&
+                input.vpnPackage.isNotEmpty() && input.alwaysOnApp == input.vpnPackage ->
+                "系统常驻 VPN 已经指向客户端，但隧道没建立。可能还在连；一直这样就在客户端里点一次连接，先确认它自己能连上。"
+            !input.expectsOn && input.vpnConnected ->
+                "规则要求断开，系统里仍有 VPN 隧道。可能是别的 VPN，也可能关闭还没完成。"
+            input.expectsOn && !input.vpnConnected ->
+                "规则要求开启，系统还没指向客户端。模块正在切换，过几秒刷新看看。"
+            else -> "各项正常。"
+        }
+    }
+
+    private fun failureStageLabel(stage: String): String = when (stage) {
+        "enable" -> "拉起客户端"
+        "stop" -> "关闭 VPN"
+        "forceStop" -> "强制停止客户端"
+        else -> "开关 VPN"
     }
 }
+

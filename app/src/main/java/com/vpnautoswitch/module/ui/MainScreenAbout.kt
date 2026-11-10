@@ -90,9 +90,9 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
+    "1.9.13：状态报告的结论不再把十分钟之前的旧失败当成现在的问题，并按「拉起客户端 / 关闭 VPN / 强制停止」分开说；hook 安装改成逐类兜底，一类失败不再连累其他。\n" +
     "1.9.12：「划掉后何时断开」多了「所有目标都退出后才断」这一档；状态报告固定显示客户端启动方式。\n" +
-    "1.9.11：客户端固定成 VpnService 方式又连续失败时，自检会直接告诉你换个启动方式——去「客户端适配」测一次外部控制。\n" +
-    "1.9.10：状态报告顶部多了一句结论；日志会写明划掉任务为什么没断开，拉起服务两秒后确认进程还在不在；自检和运行日志合成一个「诊断」分组。"
+    "1.9.11：客户端固定成 VpnService 方式又连续失败时，自检会直接告诉你换个启动方式——去「客户端适配」测一次外部控制。"
 
 private const val ACK_TIPS =
     "本模块的实现离不开这些开源项目，在此致谢：\n\n" +

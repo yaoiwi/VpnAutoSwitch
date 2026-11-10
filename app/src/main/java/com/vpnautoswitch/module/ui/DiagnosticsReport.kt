@@ -99,6 +99,12 @@ internal object DiagnosticsReport {
         checks += CheckItem(
             "始终开启的 VPN",
             when {
+                // 模块没在接管、规则也不要求连 VPN 时，系统没有常驻 VPN 是正常状态，
+                // 以前一律判 UNKNOWN，用户看到「未知」反而以为哪儿坏了。
+                // 规则还没上报（空）时仍留 UNKNOWN，不能替模块许诺。
+                diagnostics.alwaysOnApp.isNullOrEmpty() &&
+                    diagnostics.activeRule.isNotEmpty() &&
+                    !diagnostics.takenByModule && !needsAlwaysOn -> CheckStatus.OK
                 diagnostics.alwaysOnApp.isNullOrEmpty() -> CheckStatus.UNKNOWN
                 needsAlwaysOn && diagnostics.alwaysOnApp != config.vpnPackage -> CheckStatus.WARN
                 else -> CheckStatus.OK
@@ -106,6 +112,12 @@ internal object DiagnosticsReport {
             buildString {
                 append("系统当前指向：")
                 append(diagnostics.alwaysOnApp?.takeIf { it.isNotEmpty() } ?: "未设置")
+                if (diagnostics.alwaysOnApp.isNullOrEmpty() &&
+                    diagnostics.activeRule.isNotEmpty() &&
+                    !diagnostics.takenByModule && !needsAlwaysOn
+                ) {
+                    append("\n模块未接管，当前规则也不需要常驻 VPN，属于正常状态")
+                }
                 if (needsAlwaysOn && diagnostics.alwaysOnApp != config.vpnPackage) {
                     append("\n规则要求开启 VPN，但设置尚未指向 ${config.vpnPackage}，可能正在切换")
                 }
@@ -158,6 +170,16 @@ internal object DiagnosticsReport {
                         vpnPackage = config.vpnPackage,
                         failureStreak = diagnostics.lastFailureStreak,
                         paused = diagnostics.paused,
+                        failureStage = diagnostics.lastFailureStage,
+                        failureAgeMs = if (diagnostics.lastFailureAt > 0L) {
+                            (now - diagnostics.lastFailureAt).coerceAtLeast(0L)
+                        } else {
+                            Long.MAX_VALUE
+                        },
+                        // 规则要求断开时，「没连上」本来就是对的，不能算异常
+                        expectsOn = DiagnosticsPolicy.expectedVpn(diagnostics.activeRule) !=
+                            DiagnosticsPolicy.ExpectedVpn.OFF,
+                        clientMode = diagnostics.clientMode,
                     )
                 )
             )
@@ -395,26 +417,52 @@ internal object DiagnosticsReport {
         if (diagnostics.lastFailureAt <= 0L) {
             return CheckItem("最近失败", CheckStatus.OK, "没有记录到失败")
         }
-        val recent = now - diagnostics.lastFailureAt <= TimeUnit.MINUTES.toMillis(10)
+        val age = (now - diagnostics.lastFailureAt).coerceAtLeast(0L)
+        // 失败记录跨天保留，太旧的只能当参考——否则「六小时前关 VPN 没成功」
+        // 会被当成现在拉不起客户端，用户照着去改自启和电池优化，白折腾
+        val recent = DiagnosticsPolicy.failureIsRecent(age)
         val base = "${failureLabel(diagnostics)}（${ago(diagnostics.lastFailureAt, now)}）"
         // 拉起失败且这个客户端只会用 VpnService 方式时，光说「失败了」没有用——
         // 用户重试一百次也是同一条路，得告诉他去哪儿换个方式
-        val hint = if (
-            DiagnosticsPolicy.shouldSuggestExternalControl(
-                stage = diagnostics.lastFailureStage,
-                streak = diagnostics.lastFailureStreak,
-                clientMode = diagnostics.clientMode,
-            )
-        ) {
-            "这个客户端被固定成 VpnService 方式，模块不会改走外部控制。" +
-                "到首页的「客户端适配」点一次「测试外部控制」，成功后会自动改用这种方式"
-        } else {
-            null
+        val hints = buildList {
+            if (recent && DiagnosticsPolicy.shouldSuggestExternalControl(
+                    stage = diagnostics.lastFailureStage,
+                    streak = diagnostics.lastFailureStreak,
+                    clientMode = diagnostics.clientMode,
+                )
+            ) {
+                add(
+                    if (diagnostics.lastFailureStage == "stop") {
+                        "这个客户端被固定成 VpnService 方式，模块只能用系统设置去关，关不掉时不会改走外部控制。" +
+                            "到首页的「客户端适配」点一次「测试外部控制」，成功后会自动改用这种方式"
+                    } else {
+                        "这个客户端被固定成 VpnService 方式，模块不会改走外部控制。" +
+                            "到首页的「客户端适配」点一次「测试外部控制」，成功后会自动改用这种方式"
+                    }
+                )
+            }
+            if (recent && DiagnosticsPolicy.serviceCannotTunnel(
+                    clientMode = diagnostics.clientMode,
+                    vpnPackage = diagnostics.vpnPackage,
+                    alwaysOnApp = diagnostics.alwaysOnApp,
+                    vpnConnected = diagnostics.vpnConnected,
+                    vpnHasService = diagnostics.vpnHasService,
+                )
+            ) {
+                add(
+                    "系统常驻 VPN 已经指向客户端，隧道却一直没建立。" +
+                        "这个客户端可能只认自己的启动广播，到「客户端适配」测一次外部控制"
+                )
+            }
         }
         return CheckItem(
             "最近失败",
-            if (recent) CheckStatus.WARN else CheckStatus.UNKNOWN,
-            if (hint == null) base else "$base\n$hint",
+            if (recent) CheckStatus.WARN else CheckStatus.OK,
+            buildString {
+                append(base)
+                if (!recent) append("，是较早前的记录，仅供参考")
+                hints.forEach { append("\n").append(it) }
+            },
         )
     }
 

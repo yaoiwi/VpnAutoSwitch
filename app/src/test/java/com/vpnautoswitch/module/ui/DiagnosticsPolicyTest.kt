@@ -231,6 +231,10 @@ class DiagnosticsPolicyTest {
         vpnPackage: String = "com.v2ray.ang",
         failureStreak: Int = 0,
         paused: Boolean = false,
+        failureStage: String = "enable",
+        failureAgeMs: Long = 0L,
+        expectsOn: Boolean = true,
+        clientMode: String = "",
     ) = DiagnosticsPolicy.conclusion(
         DiagnosticsPolicy.VerdictInput(
             moduleState = moduleState,
@@ -242,6 +246,10 @@ class DiagnosticsPolicyTest {
             vpnPackage = vpnPackage,
             failureStreak = failureStreak,
             paused = paused,
+            failureStage = failureStage,
+            failureAgeMs = failureAgeMs,
+            expectsOn = expectsOn,
+            clientMode = clientMode,
         )
     )
 
@@ -356,8 +364,9 @@ class DiagnosticsPolicyTest {
     }
 
     @Test
-    fun `suggestion only applies to the start stage`() {
-        assertFalse(
+    fun `suggestion only applies to the start and stop stages`() {
+        // 关闭失败同样值得换个方式：固定成 service 时模块只会改系统设置去关
+        assertTrue(
             DiagnosticsPolicy.shouldSuggestExternalControl(
                 stage = "stop",
                 streak = 5,
@@ -371,5 +380,114 @@ class DiagnosticsPolicyTest {
                 clientMode = "service",
             )
         )
+    }
+
+    @Test
+    fun `an old failure is not reported as a current problem`() {
+        // issue 现场：六小时前关 VPN 没成功，规则要求断开、现在也确实断开了，
+        // 结论却写着「连续 3 次拉不起客户端」
+        val text = verdict(
+            vpnConnected = false,
+            expectsOn = false,
+            failureStreak = 3,
+            failureStage = "stop",
+            failureAgeMs = 6 * 60 * 60 * 1000L,
+        )
+        assertEquals("各项正常。", text)
+    }
+
+    @Test
+    fun `a recent stop failure says the rule wants it off`() {
+        val text = verdict(
+            vpnConnected = true,
+            expectsOn = false,
+            failureStreak = 3,
+            failureStage = "stop",
+            failureAgeMs = 30_000L,
+        )
+        assertTrue(text.contains("断开"))
+        assertTrue(text.contains("外部控制"))
+    }
+
+    @Test
+    fun `stop failures are not blamed on starting the client`() {
+        val text = verdict(
+            vpnConnected = false,
+            expectsOn = true,
+            failureStreak = 4,
+            failureStage = "stop",
+            failureAgeMs = 30_000L,
+        )
+        assertFalse(text.contains("拉不起客户端"))
+        assertTrue(text.contains("关闭 VPN"))
+    }
+
+    @Test
+    fun `a rule that wants the vpn off does not report a missing tunnel`() {
+        // 期望断开时「没连上」是对的，不该提示去客户端点一次连接
+        val text = verdict(vpnConnected = false, expectsOn = false, alwaysOnApp = "com.v2ray.ang")
+        assertEquals("各项正常。", text)
+    }
+
+    @Test
+    fun `pinned service mode with always-on set but no tunnel points at the client adapter`() {
+        assertTrue(
+            DiagnosticsPolicy.serviceCannotTunnel(
+                clientMode = "service",
+                vpnPackage = "com.github.metacubex.clash.meta",
+                alwaysOnApp = "com.github.metacubex.clash.meta",
+                vpnConnected = false,
+                vpnHasService = true,
+            )
+        )
+        assertTrue(
+            verdict(
+                vpnConnected = false,
+                alwaysOnApp = "com.v2ray.ang",
+                clientMode = "service",
+            ).contains("客户端适配")
+        )
+    }
+
+    @Test
+    fun `service mode alone is not enough to blame the client`() {
+        // 隧道已经建起来，或者设置还没写下去（可能仍在切换），都不该报
+        assertFalse(
+            DiagnosticsPolicy.serviceCannotTunnel(
+                clientMode = "service",
+                vpnPackage = "com.v2ray.ang",
+                alwaysOnApp = "com.v2ray.ang",
+                vpnConnected = true,
+                vpnHasService = true,
+            )
+        )
+        assertFalse(
+            DiagnosticsPolicy.serviceCannotTunnel(
+                clientMode = "service",
+                vpnPackage = "com.v2ray.ang",
+                alwaysOnApp = null,
+                vpnConnected = false,
+                vpnHasService = true,
+            )
+        )
+        assertFalse(
+            DiagnosticsPolicy.serviceCannotTunnel(
+                clientMode = "activity",
+                vpnPackage = "com.v2ray.ang",
+                alwaysOnApp = "com.v2ray.ang",
+                vpnConnected = false,
+                vpnHasService = true,
+            )
+        )
+    }
+
+    @Test
+    fun `failure freshness has a ten minute window`() {
+        assertTrue(DiagnosticsPolicy.failureIsRecent(0L))
+        assertTrue(DiagnosticsPolicy.failureIsRecent(DiagnosticsPolicy.FAILURE_RECENT_MS))
+        assertFalse(DiagnosticsPolicy.failureIsRecent(DiagnosticsPolicy.FAILURE_RECENT_MS + 1))
+        // 时钟回拨时不算「最近」，免得把未来时间戳当成刚发生
+        assertFalse(DiagnosticsPolicy.failureIsRecent(-1_000L))
+        assertFalse(DiagnosticsPolicy.failureIsRecent(Long.MAX_VALUE))
     }
 }
