@@ -193,6 +193,9 @@ internal fun Engine.handleProcessDied(pkg: String, detail: String? = null) {
             if (wasForeground) "other targets only in background -> end session"
             else "a background target left -> end session",
         )
+    } else if (dismissMode == Config.DISMISS_ALL && aliveTargets.isNotEmpty()) {
+        // 「全部退出才断」最难理解的地方就是「为什么没断」，这一行替用户回答
+        log(ctx, "session kept: ${aliveTargets.size} target(s) still alive（全部退出才断）")
     }
     if (!EnginePolicy.shouldScheduleOffAfterDeath(true, aliveTargets.size)) return
     // 应用有时只是进程重启（被系统回收后立刻恢复），等一下再决定要不要关，
@@ -317,6 +320,8 @@ internal fun Engine.applyTaskRemoval(ctx: Context, cfg: Config, pkg: String) {
             if (wasForeground) "other targets only in background -> end session"
             else "a background target was dismissed -> end session",
         )
+    } else if (cfg.dismissMode == Config.DISMISS_ALL && aliveTargets.isNotEmpty()) {
+        log(ctx, "session kept: ${aliveTargets.size} target(s) still alive（全部退出才断）")
     }
     if (EnginePolicy.shouldScheduleOffAfterDeath(true, aliveTargets.size)) {
         scheduleOff(ctx, "$pkg task removed")
