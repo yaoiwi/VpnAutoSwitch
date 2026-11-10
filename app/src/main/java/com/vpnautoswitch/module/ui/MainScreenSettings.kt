@@ -578,9 +578,9 @@ internal fun LazyListScope.settingsItems(
             // 一键拿走：结论、检查项、设备信息和全部日志都在这一份里，
             // 不用先开弹窗复制、再滚到日志区复制一次
             SettingsActionWithArrow(
-                title = "复制诊断信息",
+                title = "复制报告 + 全部日志",
                 icon = MiuixIcons.Copy,
-                summary = "自检结论 + 完整日志，一份贴进 issue",
+                summary = "结论、检查项、设备信息和全部日志，一份贴进 issue",
                 onClick = {
                     state.refreshDiagnostics()
                     val logCount = state.diagnostics.log.lines().count { it.isNotBlank() }
@@ -590,10 +590,21 @@ internal fun LazyListScope.settingsItems(
                         fullLog = true,
                     )
                     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    cm.setPrimaryClip(ClipData.newPlainText("VpnAutoSwitch", text))
+                    // 剪贴板偶尔会被系统拒绝（个别 ROM 在后台限制），
+                    // 失败时别让用户以为已经复制好了
+                    val copied = try {
+                        cm.setPrimaryClip(ClipData.newPlainText("VpnAutoSwitch", text))
+                        true
+                    } catch (t: Throwable) {
+                        false
+                    }
                     Toast.makeText(
                         context,
-                        "已复制报告与 $logCount 行日志",
+                        if (copied) {
+                            "已复制：报告 + 全部日志（$logCount 行）"
+                        } else {
+                            "复制失败，可以改用日志区的导出"
+                        },
                         Toast.LENGTH_SHORT,
                     ).show()
                 },
@@ -602,7 +613,9 @@ internal fun LazyListScope.settingsItems(
             SettingsActionWithArrow(
                 title = if (showLog) "收起运行日志" else "展开运行日志",
                 icon = MiuixIcons.Notes,
-                summary = if (lines.isEmpty()) "暂无记录" else "最近 ${lines.size} 条",
+                // 这个数字是日志总行数，不是界面上能看到的行数——写「最近」会被理解成
+                // 「只显示这么多」，和「复制了全部」对不上
+                summary = if (lines.isEmpty()) "暂无记录" else "共 ${lines.size} 条",
                 onClick = onToggleLog,
             )
             if (showLog) {

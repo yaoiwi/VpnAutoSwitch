@@ -127,7 +127,7 @@ internal fun SelfCheckDialog(
                                 DiagnosticsReport.buildText(state.diagnostics, state.config),
                             )
                         )
-                        Toast.makeText(context, "报告已复制", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "已复制，日志为最近 60 行", Toast.LENGTH_SHORT).show()
                     },
                     modifier = Modifier.weight(1f),
                 )
