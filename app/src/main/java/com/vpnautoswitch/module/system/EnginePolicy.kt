@@ -238,20 +238,27 @@ internal object EnginePolicy {
         uiShownAt != 0L && now - uiShownAt in 0..windowMs
 
     /**
-     * 离开的是不是「刚在用的那个」，并且还有别的目标挂在后台。
+     * 离开一个目标后，是不是该把整段会话收掉。
      *
-     * 这种情况要结束整段会话：否则后台残留的进程会让 VPN 一直连着，
-     * 用户划掉当前应用却看不到断开。
+     * 三种口径：
+     * - [Config.DISMISS_CURRENT] 只认「刚在用的那个」，后台残留的进程不影响会话；
+     * - [Config.DISMISS_ANY] 目标都在后台时，划掉任意一个也算会话结束；
+     * - [Config.DISMISS_ALL] 不收，等最后一个目标也走掉，由 reconcile 关闭。
      *
-     * [dismissAny] 打开时，只要目标都在后台，划掉任意一个也算会话结束；
-     * 关掉时只认「划掉正在用的那个」，后台目标被回收不影响会话。
+     * 不管哪种口径，只要有别的目标还停在前台就不收——那是用户正在用的那个。
      */
     fun shouldEndSessionOnLeave(
         removedWasForeground: Boolean,
         remainingTargets: Int,
-        dismissAny: Boolean = false,
+        dismissMode: String = Config.DISMISS_CURRENT,
         anotherTargetInForeground: Boolean = false,
-    ): Boolean = remainingTargets > 0 && (removedWasForeground || (dismissAny && !anotherTargetInForeground))
+    ): Boolean = when {
+        remainingTargets <= 0 -> false
+        anotherTargetInForeground -> false
+        dismissMode == Config.DISMISS_ALL -> false
+        dismissMode == Config.DISMISS_ANY -> true
+        else -> removedWasForeground
+    }
 
     /**
      * 关后守卫是否继续观察。

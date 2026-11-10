@@ -1,5 +1,6 @@
 package com.vpnautoswitch.module.system
 
+import com.vpnautoswitch.module.Config
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -79,7 +80,7 @@ class EngineSessionFlowTest {
             EnginePolicy.shouldEndSessionOnLeave(
                 removedWasForeground = false,
                 remainingTargets = 1,
-                dismissAny = true,
+                dismissMode = Config.DISMISS_ANY,
                 anotherTargetInForeground = true,
             )
         )
@@ -88,7 +89,7 @@ class EngineSessionFlowTest {
             EnginePolicy.shouldEndSessionOnLeave(
                 removedWasForeground = false,
                 remainingTargets = 1,
-                dismissAny = true,
+                dismissMode = Config.DISMISS_ANY,
                 anotherTargetInForeground = false,
             )
         )

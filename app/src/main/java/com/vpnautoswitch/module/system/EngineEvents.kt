@@ -177,13 +177,13 @@ internal fun Engine.handleProcessDied(pkg: String, detail: String? = null) {
     log(ctx, "$pkg -> process died${detail?.let { " ($it)" } ?: ""}")
     if (lastForeground == pkg) lastForeground = null
     if (wasForeground) lastForegroundTarget = null
-    // 死的是刚才在用的那个，或者开着「划掉任意目标即断开」：其它目标只是挂在后台的残留进程，
-    // 算这次会话结束。如果它只是被系统回收后重启，下面的 1.5 秒防抖里会重新回到前台并取消这次关闭。
-    val dismissAny = ctx != null && ConfigRepo.get(ctx).disconnectOnAnyDismiss
+    // 按用户选的口径判断要不要收会话（只断当前 / 任意一个 / 全部退出）。
+    // 如果它只是被系统回收后重启，下面的 1.5 秒防抖里会重新回到前台并取消这次关闭。
+    val dismissMode = ctx?.let { ConfigRepo.get(it).dismissMode } ?: Config.DISMISS_CURRENT
     if (EnginePolicy.shouldEndSessionOnLeave(
             removedWasForeground = wasForeground,
             remainingTargets = aliveTargets.size,
-            dismissAny = dismissAny,
+            dismissMode = dismissMode,
             anotherTargetInForeground = anotherInFront,
         )
     ) {
@@ -307,7 +307,7 @@ internal fun Engine.applyTaskRemoval(ctx: Context, cfg: Config, pkg: String) {
     if (EnginePolicy.shouldEndSessionOnLeave(
             removedWasForeground = wasForeground,
             remainingTargets = aliveTargets.size,
-            dismissAny = cfg.disconnectOnAnyDismiss,
+            dismissMode = cfg.dismissMode,
             anotherTargetInForeground = anotherInFront,
         )
     ) {

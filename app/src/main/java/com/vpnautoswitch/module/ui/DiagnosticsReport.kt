@@ -174,6 +174,15 @@ internal object DiagnosticsReport {
             )
             appendLine("网络：${diagnostics.network} · SSID=${ssidLabel(diagnostics)}")
             appendLine("VPN 包：${config.vpnPackage.ifEmpty { "未选择" }}")
+            // 固定写一行：排查「拉不起来」时第一个要看的就是它，
+            // 以前只能从 external-only: restart VPN service 这类日志反推
+            appendLine(
+                "启动方式：" + when (diagnostics.clientMode) {
+                    "activity" -> "外部控制（activity）"
+                    "service" -> "VpnService（service）"
+                    else -> "未记忆，按顺序尝试"
+                }
+            )
             appendLine("安装：${yesNo(diagnostics.vpnInstalled)} · 启用：${yesNo(diagnostics.vpnEnabled)} · VpnService：${yesNo(diagnostics.vpnHasService)}")
             appendLine("隧道：${if (diagnostics.vpnConnected) "已连接" else "未连接"}")
             appendLine("always-on：${diagnostics.alwaysOnApp ?: "未设置"} · 接管：${if (diagnostics.takenByModule) "是" else "否"}")

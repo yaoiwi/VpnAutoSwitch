@@ -28,6 +28,14 @@ class SettingsSearchTest {
     }
 
     @Test
+    fun `dismiss timing is searchable by the words users use`() {
+        // 三档断开口径藏在「高级」里，用户不会知道分组名，得按自己的说法搜到
+        assertTrue(SettingsSearch.matchedTitles("全部退出")!!.contains("高级"))
+        assertTrue(SettingsSearch.matchedTitles("划掉")!!.contains("高级"))
+        assertTrue(SettingsSearch.matchedTitles("任意")!!.contains("高级"))
+    }
+
+    @Test
     fun `diagnostics section answers both old names`() {
         // 自检和运行日志合并成「诊断」后，用户按旧叫法搜也得能找回来
         assertTrue(SettingsSearch.matchedTitles("自检")!!.contains("诊断"))

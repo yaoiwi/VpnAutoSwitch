@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/Kotlin-2.4-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin" />
   <img src="https://img.shields.io/badge/Compose-1.12-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white" alt="Compose" />
   <img src="https://img.shields.io/badge/Miuix-0.9.4-FF6B00?style=flat-square" alt="Miuix" />
-  <img src="https://img.shields.io/badge/Release-1.9.11-brightgreen?style=flat-square" alt="Release" />
+  <img src="https://img.shields.io/badge/Release-1.9.12-brightgreen?style=flat-square" alt="Release" />
   <img src="https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square" alt="License" />
 </p>
 
@@ -46,7 +46,7 @@
 
 ## 📖 Usage
 
-1. Open [Releases](https://github.com/yaoiwi/VpnAutoSwitch/releases/latest) and download `VpnAutoSwitch-1.9.11.apk` (upgrading in place keeps your settings).
+1. Open [Releases](https://github.com/yaoiwi/VpnAutoSwitch/releases/latest) and download `VpnAutoSwitch-1.9.12.apk` (upgrading in place keeps your settings).
 2. Open **LSPosed Manager → Modules**, enable this module, **select only the "System Framework" scope**, then reboot.
 3. Open the app:
    - Pick the apps that should turn the VPN on under **Target apps**;
@@ -85,6 +85,7 @@ Output: `app/build/outputs/apk/release/app-release.apk`
 | The client must be startable in background | System always-on is preferred; Clash-style clients use external control, a VpnService restart or a quick-settings tile. Otherwise enable auto-connect inside the client; use **Client adapter** to test the available modes |
 | Manually connected tunnels need a force stop | Clearing always-on does not tear down a tunnel you started by hand. If it is still up after 1.2 s, the client process is stopped (can be disabled in Advanced) |
 | Swiping a task disconnects by default | Removing a target app from recents disconnects even if a foreground service keeps its process alive. Disable **Disconnect on task removal** in Advanced to require the main process to die. If the task callback is unavailable, process death still triggers disconnect |
+| Choose when a swipe disconnects | With several targets selected, pick one of three: only the one in use, any target (default), or only after the last target exits. A target still in the foreground never closes the session |
 | Shares the system always-on VPN setting | While active, that setting points to your client and is restored on exit. Main user only; heavily customized ROMs may need log-based adjustments |
 
 ---

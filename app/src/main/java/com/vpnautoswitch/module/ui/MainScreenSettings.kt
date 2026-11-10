@@ -393,17 +393,31 @@ internal fun LazyListScope.settingsItems(
                         state.save(state.config.copy(disconnectOnTaskRemoved = it))
                     },
                 )
-                SettingsSwitch(
-                    title = "划掉任意目标即断开",
-                    summary = "目标应用都在后台时，划掉其中任意一个就断开 VPN，不必是刚才在用的那个；" +
-                        "关掉后只有划掉正在用的那个才断开",
+                // 原来是「划掉任意目标即断开」一个开关，只有「任意」和「只认当前」两档，
+                // 没法表达「全杀完才断」——issue 里抱怨划掉一个就断的，要的正是第三档。
+                var showDismissPicker by remember { mutableStateOf(false) }
+                SettingsActionWithArrow(
+                    title = "划掉后何时断开",
+                    summary = if (state.config.disconnectOnTaskRemoved) {
+                        dismissModeLabel(state.config.dismissMode)
+                    } else {
+                        "先打开上面的开关 · ${dismissModeLabel(state.config.dismissMode)}"
+                    },
                     icon = MiuixIcons.GridView,
-                    checked = state.config.disconnectOnAnyDismiss,
-                    enabled = state.config.disconnectOnTaskRemoved,
-                    onCheckedChange = {
-                        state.save(state.config.copy(disconnectOnAnyDismiss = it))
+                    onClick = {
+                        if (state.config.disconnectOnTaskRemoved) showDismissPicker = true
                     },
                 )
+                if (showDismissPicker) {
+                    DismissModeDialog(
+                        current = state.config.dismissMode,
+                        onPick = {
+                            state.save(state.config.copy(dismissMode = it))
+                            showDismissPicker = false
+                        },
+                        onDismiss = { showDismissPicker = false },
+                    )
+                }
                 SettingsSwitch(
                     title = "关闭后继续抑制",
                     summary = "外部控制模式下关闭 VPN 后观察 8 秒，客户端自己又把 VPN 拉起来时再关一次",
@@ -891,6 +905,86 @@ internal fun SsidRuleDialog(mode: String, state: AppState, onDismiss: () -> Unit
                 horizontalArrangement = Arrangement.End,
             ) {
                 AppButton(text = "关闭", onClick = onDismiss)
+            }
+        }
+    }
+}
+
+/** 三档断开口径的显示名，设置页和对话框共用一份，免得两处措辞漂移 */
+internal fun dismissModeLabel(mode: String): String = when (mode) {
+    Config.DISMISS_CURRENT -> "只断正在用的那个"
+    Config.DISMISS_ALL -> "所有目标都退出后才断"
+    else -> "划掉任意目标就断"
+}
+
+/**
+ * 划掉任务后什么时候断开。
+ *
+ * 三档摆在一起选，比原来两个互相依赖的开关清楚：之前那个「划掉任意目标即断开」
+ * 要依赖上面「划掉任务即断开」才有意义，关掉后又只剩一种行为，用户很难判断
+ * 「还剩一个目标时会不会断」。
+ */
+@Composable
+private fun DismissModeDialog(
+    current: String,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = MiuixTheme.colorScheme
+    val options = listOf(
+        Config.DISMISS_CURRENT to "后台挂着的目标不理会，只有划掉当前正在用的那个才断开",
+        Config.DISMISS_ANY to "目标都在后台时，划掉其中任何一个都断开",
+        Config.DISMISS_ALL to "少一个目标不断，直到一个目标都不剩",
+    )
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .clip(RoundedCornerShape(24.dp))
+                .background(colors.surface)
+                .padding(horizontal = 20.dp, vertical = 18.dp),
+        ) {
+            Text("划掉后何时断开", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "同时选了多个目标时才有区别。单个目标这三种选法都一样。",
+                fontSize = 12.sp,
+                color = colors.onSurfaceVariantSummary,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            options.forEach { (mode, desc) ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable { onPick(mode) }
+                        .padding(horizontal = 6.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = dismissModeLabel(mode), fontSize = 15.sp)
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = desc,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp,
+                            color = colors.onSurfaceVariantSummary,
+                        )
+                    }
+                    if (mode == current) {
+                        Text("当前", fontSize = 12.sp, color = colors.primary)
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                AppButton(text = "取消", onClick = onDismiss)
             }
         }
     }

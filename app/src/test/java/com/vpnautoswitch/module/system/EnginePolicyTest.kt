@@ -265,7 +265,7 @@ class EnginePolicyTest {
             EnginePolicy.shouldEndSessionOnLeave(
                 removedWasForeground = false,
                 remainingTargets = 1,
-                dismissAny = true,
+                dismissMode = Config.DISMISS_ANY,
                 anotherTargetInForeground = false,
             )
         )
@@ -274,7 +274,7 @@ class EnginePolicyTest {
             EnginePolicy.shouldEndSessionOnLeave(
                 removedWasForeground = false,
                 remainingTargets = 1,
-                dismissAny = true,
+                dismissMode = Config.DISMISS_ANY,
                 anotherTargetInForeground = true,
             )
         )
@@ -283,7 +283,7 @@ class EnginePolicyTest {
             EnginePolicy.shouldEndSessionOnLeave(
                 removedWasForeground = false,
                 remainingTargets = 1,
-                dismissAny = false,
+                dismissMode = Config.DISMISS_CURRENT,
                 anotherTargetInForeground = false,
             )
         )
@@ -292,9 +292,50 @@ class EnginePolicyTest {
             EnginePolicy.shouldEndSessionOnLeave(
                 removedWasForeground = false,
                 remainingTargets = 0,
-                dismissAny = true,
+                dismissMode = Config.DISMISS_ANY,
             )
         )
+    }
+
+    @Test
+    fun `all-gone mode waits for the last target`() {
+        // 还有目标活着：哪怕划掉的是正在用的那个，也不在这里收会话
+        assertFalse(
+            EnginePolicy.shouldEndSessionOnLeave(
+                removedWasForeground = true,
+                remainingTargets = 2,
+                dismissMode = Config.DISMISS_ALL,
+            )
+        )
+        // 一个都不剩：也不在这里 clear，交给「最后一个」那条路径去关
+        assertFalse(
+            EnginePolicy.shouldEndSessionOnLeave(
+                removedWasForeground = true,
+                remainingTargets = 0,
+                dismissMode = Config.DISMISS_ALL,
+            )
+        )
+        assertTrue(EnginePolicy.shouldScheduleOffAfterDeath(removedTarget = true, remainingTargets = 0))
+    }
+
+    @Test
+    fun `a target still in front keeps the session in every mode`() {
+        // 三种口径都不能把用户正在用的另一个目标一起断掉
+        listOf(
+            Config.DISMISS_CURRENT,
+            Config.DISMISS_ANY,
+            Config.DISMISS_ALL,
+        ).forEach { mode ->
+            assertFalse(
+                mode,
+                EnginePolicy.shouldEndSessionOnLeave(
+                    removedWasForeground = true,
+                    remainingTargets = 2,
+                    dismissMode = mode,
+                    anotherTargetInForeground = true,
+                )
+            )
+        }
     }
 
     @Test

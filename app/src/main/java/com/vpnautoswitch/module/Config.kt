@@ -26,11 +26,13 @@ data class Config(
     /** 从最近任务划掉应用时，即使进程仍在运行也断开 VPN */
     val disconnectOnTaskRemoved: Boolean = true,
     /**
-     * 目标都在后台时，划掉其中任意一个也断开 VPN。
+     * 划掉任务时什么时候断开。
      *
-     * 关掉时只在划掉「正在用的那个」才断开；后台残留的目标会被忽略。
+     * [DISMISS_CURRENT] 只认「正在用的那个」，后台残留的目标被忽略；
+     * [DISMISS_ANY] 目标都在后台时，划掉任意一个就断；
+     * [DISMISS_ALL] 所有目标都退出（或都划掉）之后才断。
      */
-    val disconnectOnAnyDismiss: Boolean = true,
+    val dismissMode: String = DISMISS_ANY,
     /** 无法用后台方式拉起时，是否允许短暂打开 VPN 客户端界面（默认不允许） */
     val allowVpnUi: Boolean = false,
     /** 关闭后继续观察几秒，客户端自己把 VPN 拉回来时再关一次 */
@@ -121,7 +123,9 @@ data class Config(
         o.put("toast", toastEnabled)
         o.put("forceStop", forceStopVpn)
         o.put("taskRemoved", disconnectOnTaskRemoved)
-        o.put("anyDismiss", disconnectOnAnyDismiss)
+        o.put("dismissMode", dismissMode)
+        // 旧版模块只认这个布尔：留着，免得它把「任意目标」读成「只断当前应用」
+        o.put("anyDismiss", dismissMode != DISMISS_CURRENT)
         o.put("allowVpnUi", allowVpnUi)
         o.put("offGuard", offGuard)
         o.put("hideVpnNotif", hideVpnNotification)
@@ -173,6 +177,26 @@ data class Config(
         /** 应用网络条件：任何网络下都生效（即便全局关了某种网络） */
         const val NET_ANY = "any"
 
+        /** 划掉任务时：只断「正在用的那个」 */
+        const val DISMISS_CURRENT = "current"
+
+        /** 划掉任务时：目标都在后台，划掉任意一个就断 */
+        const val DISMISS_ANY = "any"
+
+        /** 划掉任务时：所有目标都退出后才断 */
+        const val DISMISS_ALL = "all"
+
+        /**
+         * 把配置里的两个键归到一个档位上。
+         *
+         * 新键认得出就用新键；认不出（老配置、手改成乱码）就退回 [legacyAny]，
+         * 不要直接吞成默认值——那会让用户明明关过「任意目标」却又被打开。
+         */
+        fun dismissModeOf(raw: String?, legacyAny: Boolean): String = when (raw) {
+            DISMISS_CURRENT, DISMISS_ANY, DISMISS_ALL -> raw
+            else -> if (legacyAny) DISMISS_ANY else DISMISS_CURRENT
+        }
+
         private val NET_MODES = setOf(NET_WIFI, NET_MOBILE, NET_ANY)
 
         fun parse(raw: String?): Config? {
@@ -193,7 +217,11 @@ data class Config(
                     toastEnabled = o.optBoolean("toast", true),
                     forceStopVpn = o.optBoolean("forceStop", true),
                     disconnectOnTaskRemoved = o.optBoolean("taskRemoved", true),
-                    disconnectOnAnyDismiss = o.optBoolean("anyDismiss", true),
+                    dismissMode = dismissModeOf(
+                        raw = o.optString("dismissMode", ""),
+                        // 老配置没这个键，按原来的布尔还原，别把用户的设置读丢
+                        legacyAny = o.optBoolean("anyDismiss", true),
+                    ),
                     allowVpnUi = o.optBoolean("allowVpnUi", false),
                     offGuard = o.optBoolean("offGuard", true),
                     hideVpnNotification = o.optBoolean("hideVpnNotif", true),

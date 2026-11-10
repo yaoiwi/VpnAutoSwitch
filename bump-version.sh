@@ -7,8 +7,8 @@
 #   ./bump-version.sh --code                        版本名不变，只把 versionCode +1
 #   ./bump-version.sh --set 1.6.0 --note "……"       直接指定版本名（仅用于归位）
 #
-# 版本号规则：三段十进制，每段只能是 0-9，满 9 进位。
-#   1.6.9 --patch--> 1.7.0      1.6.9 --minor--> 1.7.0      1.9.9 --> 2.0.0
+# 版本号规则：三段十进制，每段 0-99，满 99 进位。
+#   1.6.9 --patch--> 1.6.10     1.6.99 --minor--> 1.7.0     1.99.99 --> 2.0.0
 #
 # 每次都会做的事：
 #   1. app/build.gradle.kts 的 appVersionCode +1（必做，LSPosed 靠它判断有没有新版本）
@@ -57,17 +57,17 @@ NAME=$(grep -oP 'val appVersionName = "\K[0-9.]+' app/build.gradle.kts)
 IFS='.' read -r MAJOR MINOR PATCH <<< "$NAME"
 NEW_CODE=$((CODE + 1))
 
-# 每段只允许 0-9，满 9 就往前一位进位
+# 每段允许 0-99，满 99 就往前一位进位
 case "$PART" in
     code)  NEW_NAME="$NAME" ;;
     patch)
         P=$((PATCH + 1)); M=$MINOR; J=$MAJOR
-        if (( P > 9 )); then P=0; M=$((M + 1)); fi
-        if (( M > 9 )); then M=0; J=$((J + 1)); fi
+        if (( P > 99 )); then P=0; M=$((M + 1)); fi
+        if (( M > 99 )); then M=0; J=$((J + 1)); fi
         NEW_NAME="$J.$M.$P" ;;
     minor)
         M=$((MINOR + 1)); P=0; J=$MAJOR
-        if (( M > 9 )); then M=0; J=$((J + 1)); fi
+        if (( M > 99 )); then M=0; J=$((J + 1)); fi
         NEW_NAME="$J.$M.$P" ;;
     major)
         NEW_NAME="$((MAJOR + 1)).0.0" ;;
@@ -77,8 +77,8 @@ case "$PART" in
             exit 1
         fi
         IFS='.' read -r SJ SM SP <<< "$SET_NAME"
-        if (( SJ > 9 || SM > 9 || SP > 9 )); then
-            echo "每段只能是 0-9：$SET_NAME（满 9 要进位）" >&2
+        if (( SJ > 99 || SM > 99 || SP > 99 )); then
+            echo "每段只能是 0-99：$SET_NAME（满 99 要进位）" >&2
             exit 1
         fi
         NEW_NAME="$SET_NAME" ;;
