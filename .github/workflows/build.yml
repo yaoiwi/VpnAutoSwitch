@@ -187,3 +187,18 @@ jobs:
             app/build/outputs/apk/release/*.apk
             app/build/outputs/apk/release/apk-sha256.txt
           generate_release_notes: true
+
+      # 模块库的 release 和主仓库是两套 tag（134-1.9.12 vs v1.9.12），
+      # 以前靠手工同步，1.9.9 之后连漏三个版本。这里补上，没配 secret 就跳过。
+      - name: Sync to LSPosed module repo
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          LSP_REPO_TOKEN: ${{ secrets.LSP_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${LSP_REPO_TOKEN:-}" ]; then
+            echo "LSP_REPO_TOKEN 未配置，跳过模块库同步"
+            exit 0
+          fi
+          chmod +x scripts/sync-lsposed.sh
+          ./scripts/sync-lsposed.sh

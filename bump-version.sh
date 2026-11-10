@@ -153,9 +153,13 @@ if [[ -n "$NOTE" ]]; then
 fi
 echo
 echo "还需要手改一处（改漏了 assembleRelease 会直接报错）："
-echo "  app/src/main/java/com/vpnautoswitch/module/ui/MainScreen.kt"
+echo "  app/src/main/java/com/vpnautoswitch/module/ui/MainScreenAbout.kt"
 echo "    CHANGELOG_TIPS 首条改成 \"$NEW_NAME：……\"，只保留最近 3 条"
 echo
 echo "发版用的两个 tag："
 echo "  主仓库 GitHub  : v$NEW_NAME"
 echo "  LSPosed 模块库 : $NEW_CODE-$NEW_NAME"
+echo
+echo "模块库同步（主仓库 Release 发完之后）："
+echo "  ./scripts/sync-lsposed.sh          # 读 build.gradle.kts 的版本"
+echo "  ./scripts/sync-lsposed.sh --dry-run"
