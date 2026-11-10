@@ -179,6 +179,16 @@ jobs:
             app/build/outputs/apk/release/apk-sha256.txt
           if-no-files-found: error
 
+      # generate_release_notes 只对带 PR 的推送有用。tag 是直接推上去的，
+      # 没东西可汇总，GitHub 就只填一行 compare 链接，release 页看着像没写说明。
+      # 说明本来就在 CHANGELOG 里，取那一段。
+      - name: Compose release notes
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          python3 scripts/release-notes.py "${GITHUB_REF_NAME#v}" > "$RUNNER_TEMP/release-notes.md"
+          echo "release notes: $(wc -c < "$RUNNER_TEMP/release-notes.md") bytes"
+
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
@@ -186,7 +196,7 @@ jobs:
           files: |
             app/build/outputs/apk/release/*.apk
             app/build/outputs/apk/release/apk-sha256.txt
-          generate_release_notes: true
+          body_path: ${{ runner.temp }}/release-notes.md
 
       # 模块库的 release 和主仓库是两套 tag（134-1.9.12 vs v1.9.12），
       # 以前靠手工同步，1.9.9 之后连漏三个版本。这里补上，没配 secret 就跳过。

@@ -103,31 +103,19 @@ fi
 
 BODY_FILE=$(mktemp)
 trap 'rm -f "$BODY_FILE"' EXIT
-python3 - "$main_release" "$VER" > "$BODY_FILE" <<'PY'
+# 主仓库的正文如果是手写的（够长），照搬；空着或只剩一行 compare 链接就用
+# release-notes.py 从 CHANGELOG 生成，跟 CI 那边同一套逻辑。
+main_body=$(printf '%s' "$main_release" | python3 -c '
 import json, re, sys
-d = json.loads(sys.argv[1])
-ver = sys.argv[2]
-body = (d.get("body") or "").strip()
+body = (json.load(sys.stdin).get("body") or "").strip()
 body = re.sub(r"^##\s*[\d.]+\s*\n+", "", body)
-
-# CI 用 generate_release_notes 生成的说明只有一行 compare 链接（tag 推上去时没有
-# PR 关联，GitHub 就只能给这个）。这种情况下模块库也会跟着空，所以退回到
-# CHANGELOG.md 取对应版本那一段。
-if len(body) < 120 or body.startswith("**Full Changelog**"):
-    try:
-        text = open("CHANGELOG.md", encoding="utf-8").read()
-    except OSError:
-        text = ""
-    m = re.search(rf"^## {re.escape(ver)}\b.*?(?=^## |\Z)", text, re.S | re.M)
-    if m:
-        body = "\n".join(m.group(0).strip().split("\n")[1:]).strip()
-        if body:
-            body += (
-                "\n\n**升级后重启手机** —— 模块代码跑在 system_server 里。"
-                "\n\n完整更新日志：https://github.com/yaoiwi/VpnAutoSwitch/blob/main/CHANGELOG.md"
-            )
-print(body + "\n" if body else "", end="")
-PY
+sys.stdout.write(body)
+')
+if [[ $(printf '%s' "$main_body" | wc -c) -ge 120 && "$main_body" != "**Full Changelog**"* ]]; then
+    printf '%s\n' "$main_body" > "$BODY_FILE"
+else
+    python3 scripts/release-notes.py "$VER" > "$BODY_FILE"
+fi
 if [[ $(wc -c < "$BODY_FILE") -lt 120 ]]; then
     echo "◦ 正文：主仓库 Release 为空，CHANGELOG 里也没有 $VER 那一段，模块库说明会是空的" >&2
 else
