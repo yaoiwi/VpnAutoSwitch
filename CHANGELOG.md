@@ -3,10 +3,16 @@
 应用内「关于 → 更新日志」只显示最近 3 条，完整历史留在这里。
 每版控制在 3–5 行，只写改了什么；来龙去脉和排查过程记在 issue 与 commit 里。
 
+## 1.9.16 — 2026-11-11
+
+- hook 快照写不进去时会重试，最多 6 次、约 40 秒，不再一次性放弃
+- 注入早期拿不到 system context、或 `Settings.Secure` 还没就绪，都能补上
+- 日志里 `system_server loaded` 会注明是第几次重试才写成
+
 ## 1.9.15 — 2026-11-11
 
 - 常驻 VPN 为空不再一律报未知：外部控制方式，或隧道已经连上，都算正常
-- `ActivityRecords` / `ProcessRecords` / `Engine` 加载失败不再中断后续，hook 报告一定能写出来
+- `ActivityRecords` / `ProcessRecords` / `Engine` 加载失败不再中断后面的 hook 安装
 - 日志新增 `system_server load start`，能看出卡在哪一步
 
 ## 1.9.14 — 2026-11-10

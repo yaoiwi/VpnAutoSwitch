@@ -3,7 +3,9 @@ package com.vpnautoswitch.module
 import android.app.Notification
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.SystemClock
 import com.vpnautoswitch.module.system.ActivityRecords
 import com.vpnautoswitch.module.system.attach
@@ -39,6 +41,9 @@ class ModuleEntry : IXposedHookLoadPackage {
     private var blockedStarts = 0
 
     private companion object {
+        /** 拿不到 system context 时的重试次数，间隔依次 2/4/6/8/10/12 秒 */
+        const val HOOKS_RETRY = 6
+
         val PROCESS_HOLDERS = arrayOf(
             "com.android.server.am.ActivityManagerService",
             "com.android.server.am.ProcessList",
@@ -86,14 +91,52 @@ class ModuleEntry : IXposedHookLoadPackage {
 
         val summary = "hooks: " + counts.asMap().entries.joinToString(", ") { "${it.key}=${it.value}" }
         XposedBridge.log("[VpnAutoSwitch] $summary")
-        ModuleLog.append(ctx, "system_server loaded ($summary)")
+        publishHooks(ctx, counts, summary)
+    }
 
-        // 每类单独记一行：以前挤在一行里，某类为 0 时很容易一眼扫过去；
-        // 自检里也会按这些计数分级提示，日志这边留个能直接搜到名字的现场。
-        counts.asMap().filterValues { it <= 0 }.forEach { (name, _) ->
-            ModuleLog.append(ctx, "hook $name not installed (0 methods)")
+    /**
+     * 写 hook 快照，拿不到上下文或写失败就隔一会儿再来。
+     *
+     * 注入 system_server 时 AMS 往往还没注册：`systemContext()` 返回 null，
+     * 就算拿到了，`Settings.Secure` 写入也会抛 NPE（EngineBoot 里 onBoot 每 2 秒
+     * 重试是同一个原因）。以前这里只写一次，失败就永远空着 —— 自检里「Hook 挂载」
+     * 一直显示未知、日志里连 `system_server loaded` 都没有，就是这么来的。
+     */
+    private fun publishHooks(
+        ctx: Context?,
+        counts: HookCounts,
+        summary: String,
+        attempt: Int = 0,
+    ) {
+        val ready = ctx ?: systemContext()
+        if (ready != null && RuntimeDiagnostics.publishHooks(ready, counts)) {
+            val late = if (attempt > 0) "，第 $attempt 次重试才写成" else ""
+            ModuleLog.append(ready, "system_server loaded ($summary)$late")
+            // 每类单独记一行：以前挤在一行里，某类为 0 时很容易一眼扫过去；
+            // 自检里也会按这些计数分级提示，日志这边留个能直接搜到名字的现场。
+            counts.asMap().filterValues { it <= 0 }.forEach { (name, _) ->
+                ModuleLog.append(ready, "hook $name not installed (0 methods)")
+            }
+            return
         }
-        RuntimeDiagnostics.publishHooks(ctx, counts)
+        if (attempt >= HOOKS_RETRY) {
+            XposedBridge.log("[VpnAutoSwitch] hooks snapshot gave up after $attempt retries")
+            return
+        }
+        try {
+            // 主线程 Looper 在 system_server 早期不一定已经建好，退回到当前线程的
+            val looper = Looper.getMainLooper() ?: Looper.myLooper()
+            if (looper == null) {
+                XposedBridge.log("[VpnAutoSwitch] hooks retry skipped: no looper yet")
+                return
+            }
+            Handler(looper).postDelayed(
+                { publishHooks(null, counts, summary, attempt + 1) },
+                2_000L * (attempt + 1),
+            )
+        } catch (t: Throwable) {
+            XposedBridge.log("[VpnAutoSwitch] hooks retry cannot be scheduled: $t")
+        }
     }
 
     /** 加载阶段的一步。失败只记一行，不打断后面的 hook 安装与快照写入。 */

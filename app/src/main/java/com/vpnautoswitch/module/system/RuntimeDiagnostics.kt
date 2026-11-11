@@ -91,17 +91,31 @@ internal object RuntimeDiagnostics {
      * hook 挂载结果只在 system_server 启动时产生一次，之后不会变。
      * 带上版本号：App 侧看到版本对不上就知道这是重启前的旧快照，不能拿来下结论。
      */
-    fun publishHooks(ctx: Context?, counts: HookCounts) {
-        if (ctx == null) return
-        try {
+    /**
+     * 写 hook 快照，返回是否真的写进去了。
+     *
+     * 要能重试：注入 system_server 时 AMS 可能还没注册，`Settings.Secure` 读写会抛
+     * NPE —— 和 EngineBoot 里 onBoot 每 2 秒重试是同一个原因。以前这里把异常吞掉、
+     * 只打一行 XposedBridge 日志，快照就永远空着，自检里「Hook 挂载」一直显示未知。
+     */
+    fun publishHooks(ctx: Context?, counts: HookCounts): Boolean {
+        if (ctx == null) return false
+        return try {
             val json = JSONObject()
                 .put("schema", SCHEMA)
                 .put("at", System.currentTimeMillis())
                 .put("version", BuildConfig.VERSION_CODE)
             counts.asMap().forEach { (name, count) -> json.put(name, count) }
             Settings.Secure.putString(ctx.contentResolver, HOOKS_KEY, json.toString())
+            true
         } catch (t: Throwable) {
             XposedBridge.log("[$TAG] hook snapshot failed: $t")
+            try {
+                ModuleLog.append(ctx, "hook snapshot failed: ${t.javaClass.simpleName}: ${t.message}")
+            } catch (_: Throwable) {
+                // 同一个通道刚失败过，再写一次多半也失败，别把调用方带崩
+            }
+            false
         }
     }
 
