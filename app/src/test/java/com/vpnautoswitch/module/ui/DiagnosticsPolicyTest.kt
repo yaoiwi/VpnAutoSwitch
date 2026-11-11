@@ -522,4 +522,59 @@ class DiagnosticsPolicyTest {
         assertFalse(DiagnosticsPolicy.failureIsRecent(-1_000L))
         assertFalse(DiagnosticsPolicy.failureIsRecent(Long.MAX_VALUE))
     }
+
+    // ------------------------------------------------------------ 常驻设置
+
+    @Test
+    fun `external control never writes always-on`() {
+        assertTrue(
+            DiagnosticsPolicy.alwaysOnNotNeeded(
+                clientMode = "activity",
+                vpnConnected = false,
+                activeRule = "target",
+                takenByModule = true,
+                needsAlwaysOn = true,
+            )
+        )
+    }
+
+    @Test
+    fun `an established tunnel makes a missing always-on harmless`() {
+        assertTrue(
+            DiagnosticsPolicy.alwaysOnNotNeeded(
+                clientMode = "service",
+                vpnConnected = true,
+                activeRule = "target",
+                takenByModule = true,
+                needsAlwaysOn = true,
+            )
+        )
+    }
+
+    @Test
+    fun `no takeover and no rule asking for the vpn is fine`() {
+        assertTrue(
+            DiagnosticsPolicy.alwaysOnNotNeeded(
+                clientMode = "",
+                vpnConnected = false,
+                activeRule = "off",
+                takenByModule = false,
+                needsAlwaysOn = false,
+            )
+        )
+    }
+
+    @Test
+    fun `a service client that cannot connect is still reported`() {
+        // 接管中、规则要求连、隧道没起来：这才是要人看的组合
+        assertFalse(
+            DiagnosticsPolicy.alwaysOnNotNeeded(
+                clientMode = "service",
+                vpnConnected = false,
+                activeRule = "target",
+                takenByModule = true,
+                needsAlwaysOn = true,
+            )
+        )
+    }
 }

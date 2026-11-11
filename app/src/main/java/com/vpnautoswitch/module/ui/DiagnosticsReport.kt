@@ -96,29 +96,39 @@ internal object DiagnosticsReport {
         checks += timingCheck(diagnostics, now)
 
         val needsAlwaysOn = diagnostics.activeRule == "target" || diagnostics.activeRule == "wifiOn"
+        val alwaysOnAbsent = diagnostics.alwaysOnApp.isNullOrEmpty()
+        // 空着不等于坏事：外部控制方式不写这项，隧道已经连着时也用不上
+        val alwaysOnExcused = alwaysOnAbsent && DiagnosticsPolicy.alwaysOnNotNeeded(
+            clientMode = diagnostics.clientMode,
+            vpnConnected = diagnostics.vpnConnected,
+            activeRule = diagnostics.activeRule,
+            takenByModule = diagnostics.takenByModule,
+            needsAlwaysOn = needsAlwaysOn,
+        )
         checks += CheckItem(
             "始终开启的 VPN",
             when {
-                // 模块没在接管、规则也不要求连 VPN 时，系统没有常驻 VPN 是正常状态，
-                // 以前一律判 UNKNOWN，用户看到「未知」反而以为哪儿坏了。
-                // 规则还没上报（空）时仍留 UNKNOWN，不能替模块许诺。
-                diagnostics.alwaysOnApp.isNullOrEmpty() &&
-                    diagnostics.activeRule.isNotEmpty() &&
-                    !diagnostics.takenByModule && !needsAlwaysOn -> CheckStatus.OK
-                diagnostics.alwaysOnApp.isNullOrEmpty() -> CheckStatus.UNKNOWN
+                alwaysOnExcused -> CheckStatus.OK
+                // 规则还没上报（空）时仍留 UNKNOWN，不能替模块许诺
+                alwaysOnAbsent -> CheckStatus.UNKNOWN
                 needsAlwaysOn && diagnostics.alwaysOnApp != config.vpnPackage -> CheckStatus.WARN
                 else -> CheckStatus.OK
             },
             buildString {
                 append("系统当前指向：")
                 append(diagnostics.alwaysOnApp?.takeIf { it.isNotEmpty() } ?: "未设置")
-                if (diagnostics.alwaysOnApp.isNullOrEmpty() &&
-                    diagnostics.activeRule.isNotEmpty() &&
-                    !diagnostics.takenByModule && !needsAlwaysOn
-                ) {
-                    append("\n模块未接管，当前规则也不需要常驻 VPN，属于正常状态")
+                if (alwaysOnAbsent) {
+                    when {
+                        diagnostics.clientMode == "activity" ->
+                            append("\n启动方式是外部控制，模块不写系统常驻设置，属于正常状态")
+                        diagnostics.vpnConnected && needsAlwaysOn ->
+                            append("\n隧道已经建立，常驻设置没写入不影响当前连接")
+                        diagnostics.activeRule.isNotEmpty() &&
+                            !diagnostics.takenByModule && !needsAlwaysOn ->
+                            append("\n模块未接管，当前规则也不需要常驻 VPN，属于正常状态")
+                    }
                 }
-                if (needsAlwaysOn && diagnostics.alwaysOnApp != config.vpnPackage) {
+                if (needsAlwaysOn && diagnostics.alwaysOnApp != config.vpnPackage && !alwaysOnExcused) {
                     append("\n规则要求开启 VPN，但设置尚未指向 ${config.vpnPackage}，可能正在切换")
                 }
             },

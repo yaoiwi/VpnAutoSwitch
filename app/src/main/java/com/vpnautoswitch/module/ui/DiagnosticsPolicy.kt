@@ -139,6 +139,28 @@ object DiagnosticsPolicy {
         !vpnConnected &&
         (alwaysOnApp == vpnPackage || alwaysOnApp.isNullOrEmpty())
 
+    // ------------------------------------------------------------ 常驻设置
+
+    /**
+     * 系统常驻 VPN 为空时，什么情况下不算问题。
+     *
+     * 常驻设置是模块记「该连哪个客户端」的地方，但有两种情况本来就不会写：
+     * 客户端被记成外部控制方式（模块直接发广播，用不上这项），或者隧道已经
+     * 建立（常驻只决定以后能不能自动恢复，不影响当前连接）。
+     *
+     * 以前只认「模块未接管 + 规则不要常驻」这一种，于是 external-only 的机器
+     * 永远显示「未知」，下面还跟着一句「可能正在切换」——而它其实已经连着。
+     */
+    fun alwaysOnNotNeeded(
+        clientMode: String,
+        vpnConnected: Boolean,
+        activeRule: String,
+        takenByModule: Boolean,
+        needsAlwaysOn: Boolean,
+    ): Boolean = clientMode == "activity" ||
+        (vpnConnected && needsAlwaysOn) ||
+        (activeRule.isNotEmpty() && !takenByModule && !needsAlwaysOn)
+
     // ------------------------------------------------------------ 失败时效
 
     /**

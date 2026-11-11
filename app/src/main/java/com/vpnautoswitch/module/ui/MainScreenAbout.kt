@@ -90,9 +90,9 @@ private const val REPO_URL = "https://github.com/yaoiwi/VpnAutoSwitch"
 private const val DEV_URL = "https://github.com/yaoiwi"
 
 private const val CHANGELOG_TIPS =
+    "1.9.15：「始终开启的 VPN」在隧道已连、或客户端走外部控制方式时不再显示未知；hook 报告不会再因为加载阶段某一步失败而整段缺失。\n" +
     "1.9.14：客户端固定成 VpnService 方式、隧道一直建不起来时，状态报告终于会说清楚并指去「客户端适配」——以前这条路失败根本没被记录。\n" +
-    "1.9.13：状态报告的结论不再把十分钟之前的旧失败当成现在的问题，并按「拉起客户端 / 关闭 VPN / 强制停止」分开说；hook 安装改成逐类兜底，一类失败不再连累其他。\n" +
-    "1.9.12：「划掉后何时断开」多了「所有目标都退出后才断」这一档；状态报告固定显示客户端启动方式。"
+    "1.9.13：状态报告的结论不再把十分钟之前的旧失败当成现在的问题，并按「拉起客户端 / 关闭 VPN / 强制停止」分开说；hook 安装改成逐类兜底，一类失败不再连累其他。"
 
 private const val ACK_TIPS =
     "本模块的实现离不开这些开源项目，在此致谢：\n\n" +

@@ -62,10 +62,15 @@ class ModuleEntry : IXposedHookLoadPackage {
 
         val ctx = systemContext()
         XposedBridge.log("[VpnAutoSwitch] hooked system_server (${lpparam.processName})")
+        // 先写一行「开始加载」：后面任何一步抛异常，日志里至少能看出走到过这里，
+        // 自检的「Hook 挂载」也就不会只剩一句「还没上报」而无从定位
+        ModuleLog.append(ctx, "system_server load start (v${BuildConfig.VERSION_CODE})")
 
-        ActivityRecords.attach(lpparam.classLoader)
-        ProcessRecords.attach(lpparam.classLoader)
-        Engine.attach(ctx)
+        // 这三步以前没有兜底：任一抛异常就跳过后面的 hook 安装和快照写入，
+        // 界面表现为「hook 一栏永远未上报」，日志里也看不出断在哪一步
+        step(ctx, "ActivityRecords") { ActivityRecords.attach(lpparam.classLoader) }
+        step(ctx, "ProcessRecords") { ProcessRecords.attach(lpparam.classLoader) }
+        step(ctx, "Engine") { Engine.attach(ctx) }
 
         // 逐类安装：某类在个别 ROM 上抛异常时，只把这一类记成 0，
         // 后面的几类和 publishHooks 都还能照常执行（见 install 的注释）
@@ -89,6 +94,16 @@ class ModuleEntry : IXposedHookLoadPackage {
             ModuleLog.append(ctx, "hook $name not installed (0 methods)")
         }
         RuntimeDiagnostics.publishHooks(ctx, counts)
+    }
+
+    /** 加载阶段的一步。失败只记一行，不打断后面的 hook 安装与快照写入。 */
+    private fun step(ctx: Context?, name: String, block: () -> Unit) {
+        try {
+            block()
+        } catch (t: Throwable) {
+            ModuleLog.append(ctx, "attach $name failed: ${t.javaClass.simpleName}: ${t.message}")
+            XposedBridge.log("[VpnAutoSwitch] attach $name failed: $t")
+        }
     }
 
     /**
