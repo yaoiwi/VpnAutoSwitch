@@ -72,13 +72,33 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         debug {
-            isMinifyEnabled = false
+            // 默认不压缩，改一行代码重编最快。传 -PminifyDebug 时走 R8 压缩（不改名），
+            // 用来产出体积可控、可直接发人的包：不开压缩时 Compose + miuix 铺成两个
+            // 十几 MB 的 dex，13MB 的 apk 在很多客户端里连预览都渲染不出来。
+            val minifyDebug = providers.gradleProperty("minifyDebug").isPresent
+            isMinifyEnabled = minifyDebug
+            if (minifyDebug) {
+                proguardFiles(
+                    getDefaultProguardFile("proguard-android-optimize.txt"),
+                    "proguard-rules.pro",
+                    "proguard-debug.pro",
+                )
+            }
         }
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    packaging {
+        // debug 变体默认把 dex 原样塞进包里（为了增量安装快），压缩包里 10MB 的 dex
+        // 就原封不动占了 10MB。只在使用 -PminifyDebug 出「发人用」的包时改成压缩存储，
+        // 日常开发构建不受影响。
+        if (providers.gradleProperty("minifyDebug").isPresent) {
+            dex.useLegacyPackaging = true
+        }
     }
 
     kotlin {
