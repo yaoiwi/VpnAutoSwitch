@@ -250,9 +250,16 @@ internal object DiagnosticsReport {
                 }
             )
             appendLine("安装：${yesNo(diagnostics.vpnInstalled)} · 启用：${yesNo(diagnostics.vpnEnabled)} · VpnService：${yesNo(diagnostics.vpnHasService)}")
+            if (diagnostics.readiness.isNotEmpty() && diagnostics.readiness != "READY") {
+                appendLine("客户端状态：${readinessLabel(diagnostics.readiness)}")
+            }
             appendLine("隧道：${if (diagnostics.vpnConnected) "已连接" else "未连接"}")
             appendLine("always-on：${diagnostics.alwaysOnApp ?: "未设置"} · 接管：${if (diagnostics.takenByModule) "是" else "否"}")
             appendLine("当前规则：${ruleLabel(diagnostics.activeRule)} · ${diagnostics.ruleDetail}")
+            // 规则命中却没连上时，这一行比后面十几项检查都先被看到
+            if (diagnostics.blocked.isNotBlank()) {
+                appendLine("卡在：${diagnostics.blocked}")
+            }
             appendLine("规则更新时间：${if (diagnostics.ruleUpdatedAt > 0) fmt.format(Date(diagnostics.ruleUpdatedAt)) else "未上报"}")
             appendLine("最近失败：${failureLabel(diagnostics)}")
             appendLine(
@@ -369,8 +376,34 @@ internal object DiagnosticsReport {
 
     private fun vpnClientCheck(diagnostics: Diagnostics): CheckItem {
         val pkg = diagnostics.vpnPackage
+        if (pkg.isEmpty()) {
+            return CheckItem("VPN 客户端", CheckStatus.FAIL, "还没有选择 VPN 客户端")
+        }
+        // 模块报的就绪状态比 App 自己查的两三个布尔更全（多一项「被冻结 / 被强停过」），
+        // 而且它是在真正动手前后观察的，和失败记录对得上
+        val readiness = diagnostics.readiness
+        if (readiness.isNotEmpty() && readiness != "READY") {
+            val advice = DiagnosticsPolicy.readinessAdvice(readiness)
+            return CheckItem(
+                "VPN 客户端",
+                when (readiness) {
+                    "NOT_INSTALLED", "NO_VPN_SERVICE" -> CheckStatus.FAIL
+                    // 被强停是模块自己会清的，不算问题，只是解释一下
+                    "STOPPED" -> CheckStatus.OK
+                    else -> CheckStatus.WARN
+                },
+                buildString {
+                    append(pkg).append(" · ").append(readinessLabel(readiness))
+                    if (advice.isNotEmpty()) append("\n").append(advice)
+                },
+                when (readiness) {
+                    "DISABLED", "SUSPENDED" -> CheckAction.OpenAppDetails(pkg)
+                    "NO_VPN_SERVICE" -> CheckAction.OpenClientAdapter
+                    else -> null
+                },
+            )
+        }
         return when {
-            pkg.isEmpty() -> CheckItem("VPN 客户端", CheckStatus.FAIL, "还没有选择 VPN 客户端")
             diagnostics.vpnInstalled != true -> CheckItem(
                 "VPN 客户端",
                 CheckStatus.FAIL,
@@ -396,6 +429,16 @@ internal object DiagnosticsReport {
         }
     }
 
+    private fun readinessLabel(name: String): String = when (name) {
+        "NOT_INSTALLED" -> "未安装"
+        "DISABLED" -> "被系统禁用"
+        "NO_VPN_SERVICE" -> "没有声明 VpnService"
+        "STOPPED" -> "被强停过（模块会在启动前自动清掉）"
+        "SUSPENDED" -> "被系统冻结"
+        "UNKNOWN" -> "状态未知"
+        else -> name
+    }
+
     private fun vpnTunnelCheck(diagnostics: Diagnostics): CheckItem {
         val actual = if (diagnostics.vpnConnected) "已连接" else "未连接"
         if (diagnostics.activeRule.isEmpty()) {
@@ -405,10 +448,16 @@ internal object DiagnosticsReport {
             DiagnosticsPolicy.ExpectedVpn.ON -> CheckItem(
                 "隧道状态",
                 if (diagnostics.vpnConnected) CheckStatus.OK else CheckStatus.WARN,
-                if (diagnostics.vpnConnected) {
-                    "规则要求开启，系统 VPN transport 已存在"
-                } else {
-                    "规则要求开启，但系统没有 VPN transport。可能仍在连接，或客户端没有建立隧道"
+                buildString {
+                    if (diagnostics.vpnConnected) {
+                        append("规则要求开启，系统 VPN transport 已存在")
+                    } else {
+                        append("规则要求开启，但系统没有 VPN transport。可能仍在连接，或客户端没有建立隧道")
+                        // 模块报的卡点比这句更具体：是在冷却、在等客户端，还是要用户动手
+                        if (diagnostics.blocked.isNotBlank()) {
+                            append("\n卡在：").append(diagnostics.blocked)
+                        }
+                    }
                 },
                 // 没连上时最有用的下一步是去适配页确认启动方式
                 if (diagnostics.vpnConnected) null else CheckAction.OpenClientAdapter,
@@ -470,10 +519,13 @@ internal object DiagnosticsReport {
         // 会被当成现在拉不起客户端，用户照着去改自启和电池优化，白折腾
         val recent = DiagnosticsPolicy.failureIsRecent(age)
         val base = "${failureLabel(diagnostics)}（${ago(diagnostics.lastFailureAt, now)}）"
-        // 拉起失败且这个客户端只会用 VpnService 方式时，光说「失败了」没有用——
-        // 用户重试一百次也是同一条路，得告诉他去哪儿换个方式
         val hints = mutableListOf<String>()
-        if (recent && DiagnosticsPolicy.shouldSuggestExternalControl(
+        // 模块算出来的归因优先：它能看到 startForegroundService 的返回值、两秒后进程还在不在，
+        // 以及这个客户端有没有成功连上过。App 只能从「阶段 + 次数」猜，猜出来必然更粗
+        val moduleHint = diagnostics.lastFailureHint.takeIf { recent && it.isNotBlank() }
+        if (moduleHint != null) {
+            hints += moduleHint
+        } else if (recent && DiagnosticsPolicy.shouldSuggestExternalControl(
                 stage = diagnostics.lastFailureStage,
                 streak = diagnostics.lastFailureStreak,
                 clientMode = diagnostics.clientMode,
@@ -515,13 +567,21 @@ internal object DiagnosticsReport {
                 hints.forEach { append("\n").append(it) }
             },
             when {
-                // 提示里已经在说「换个启动方式」，按钮就把它送到那儿
+                // 归因里说了「换启动方式」，按钮就把它送到那儿
+                recent && diagnostics.lastFailureCause == "NO_TUNNEL" &&
+                    diagnostics.clientMode == "service" -> CheckAction.OpenClientAdapter
+                // 被系统挡住的，下一步是去应用信息放开自启动 / 后台限制
+                recent && diagnostics.lastFailureCause in SELF_START_CAUSES ->
+                    CheckAction.OpenAppDetails(diagnostics.lastFailurePackage)
                 recent && hints.isNotEmpty() -> CheckAction.OpenClientAdapter
                 recent -> CheckAction.OpenLog
                 else -> null
             },
         )
     }
+
+    /** 这两类失败的解法和「自启动 / 后台活动」有关，按钮直接送到应用信息页 */
+    private val SELF_START_CAUSES = setOf("REJECTED", "PROCESS_GONE", "NOT_READY")
 
     private fun configCheck(config: Config): CheckItem {
         val empty = config.targets.isEmpty() &&

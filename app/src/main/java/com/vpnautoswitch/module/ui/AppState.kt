@@ -67,6 +67,19 @@ data class Diagnostics(
     /** 模块上报的当前命中规则与说明 */
     val activeRule: String = "",
     val ruleDetail: String = "",
+    /**
+     * 规则要求连上、但隧道还没起来的这一刻，卡在哪一步。
+     *
+     * 「命中规则」和「实际状态」都是「未连接」时，光看这两行分不出是模块在动手、
+     * 在等客户端、还是在冷却，用户只能反复刷新碰运气。
+     */
+    val blocked: String = "",
+    /** [blocked] 那句话是不是必须用户动手才能过；只有这类在界面标黄 */
+    val blockNeedsUser: Boolean = false,
+    /** 客户端就绪状态名：READY / STOPPED / DISABLED / NO_VPN_SERVICE / SUSPENDED … */
+    val readiness: String = "",
+    /** 本轮已经发出的启动请求次数 */
+    val attempt: Int = 0,
     /** 最近一次进入前台的目标应用（模块上报，可能为空） */
     val foreground: String = "",
     val ruleUpdatedAt: Long = 0L,
@@ -74,6 +87,10 @@ data class Diagnostics(
     val lastFailureStage: String = "",
     val lastFailurePackage: String = "",
     val lastFailureStreak: Int = 0,
+    /** 最近一次失败的归因枚举名，见 system.FailureCause */
+    val lastFailureCause: String = "",
+    /** 模块给出的那句归因与下一步；比 App 自己按阶段拼的话准得多 */
+    val lastFailureHint: String = "",
     /** 最近一次成功开启 / 关闭花了多久（毫秒），0 表示还没记录到 */
     val lastOnMs: Long = 0L,
     val lastOnAt: Long = 0L,
@@ -182,12 +199,18 @@ data class Diagnostics(
                 vpnConnected = hasVpnTransport(context),
                 activeRule = runtime?.optString("activeRule").orEmpty(),
                 ruleDetail = runtime?.optString("detail").orEmpty(),
+                blocked = runtime?.optString("blocked").orEmpty(),
+                blockNeedsUser = runtime?.optBoolean("blockNeedsUser", false) ?: false,
+                readiness = runtime?.optString("readiness").orEmpty(),
+                attempt = runtime?.optInt("attempt", 0) ?: 0,
                 foreground = runtime?.optString("foreground").orEmpty(),
                 ruleUpdatedAt = runtime?.optLong("updatedAt", 0L) ?: 0L,
                 lastFailureAt = failure?.optLong("at", 0L) ?: 0L,
                 lastFailureStage = failure?.optString("stage").orEmpty(),
                 lastFailurePackage = failure?.optString("vpnPackage").orEmpty(),
                 lastFailureStreak = failure?.optInt("failureStreak", 0) ?: 0,
+                lastFailureCause = failure?.optString("cause").orEmpty(),
+                lastFailureHint = failure?.optString("hint").orEmpty(),
                 lastOnMs = timing?.optLong("onMs", 0L) ?: 0L,
                 lastOnAt = timing?.optLong("onAt", 0L) ?: 0L,
                 lastOffMs = timing?.optLong("offMs", 0L) ?: 0L,
@@ -357,6 +380,40 @@ class AppState(private val context: Context) {
             // 忽略，界面仍然先清空
         }
         diagnostics = diagnostics.copy(log = "")
+    }
+
+    /**
+     * 取完整日志（最多 1500 行，比界面能看到的 500 行多）。
+     *
+     * 普通应用写不进 Settings.Secure，所以流程是：发广播请模块代写 → 等一下读回来 →
+     * 读完请模块清空。700 毫秒是给它排队写设置的余量，模块那边是同步写。
+     *
+     * @param onReady 回调在主线程；拿不到时给空字符串，由调用方提示「模块没响应」
+     */
+    fun requestFullLog(onReady: (String) -> Unit) {
+        try {
+            context.sendBroadcast(Intent(Engine.ACTION_DUMP_LOG).setPackage("android"))
+        } catch (t: Throwable) {
+            onReady("")
+            return
+        }
+        mainHandler.postDelayed({
+            val text = try {
+                Settings.Secure.getString(context.contentResolver, ModuleLog.FULL_KEY).orEmpty()
+            } catch (t: Throwable) {
+                ""
+            }
+            if (text.isNotEmpty()) {
+                try {
+                    context.sendBroadcast(
+                        Intent(Engine.ACTION_CLEAR_LOG_FULL).setPackage("android")
+                    )
+                } catch (t: Throwable) {
+                    // 清不掉只是多占一点设置空间
+                }
+            }
+            onReady(text)
+        }, 700L)
     }
 
     fun refreshDiagnostics() {

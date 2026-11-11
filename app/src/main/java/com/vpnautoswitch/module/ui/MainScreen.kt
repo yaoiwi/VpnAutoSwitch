@@ -391,6 +391,9 @@ private fun HeroStatusCard(state: AppState) {
         network = state.diagnostics.network,
         log = state.diagnostics.log,
         now = now,
+        blocked = state.diagnostics.blocked,
+        readiness = state.diagnostics.readiness,
+        blockNeedsUser = state.diagnostics.blockNeedsUser,
     )
 
     AppCard(modifier = Modifier.fillMaxWidth()) {
@@ -411,6 +414,11 @@ private fun HeroStatusCard(state: AppState) {
             StatusRow(label = "前台应用", value = summary.foreground)
             StatusRow(label = "命中规则", value = summary.rule)
             StatusRow(label = "实际状态", value = summary.actual, tone = summary.actualTone)
+            // 规则命中但没连上时，最容易困惑的就是「为什么」。这一行只说卡点，
+            // 有就显示、没有就不占位置
+            if (summary.blocked.isNotEmpty()) {
+                StatusRow(label = "卡在", value = summary.blocked, tone = summary.blockedTone)
+            }
             StatusRow(label = "上次动作", value = summary.lastAction, tone = DiagnosticsPolicy.Tone.MUTED)
             Spacer(modifier = Modifier.height(10.dp))
             Text(

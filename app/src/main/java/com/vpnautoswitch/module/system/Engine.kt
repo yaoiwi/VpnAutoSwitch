@@ -61,6 +61,12 @@ internal object Engine {
     /** App 通过这个 action 请求重启（受 signature 权限保护） */
     /** App 请求清空运行日志（App 没有 WRITE_SECURE_SETTINGS，只能让 system_server 代删） */
     const val ACTION_CLEAR_LOG = "com.vpnautoswitch.module.action.CLEAR_LOG"
+
+    /** App 请求导出完整日志：模块把内存里的那一份写进 [ModuleLog.FULL_KEY] */
+    const val ACTION_DUMP_LOG = "com.vpnautoswitch.module.action.DUMP_LOG"
+
+    /** App 读走完整日志之后请求清空，避免一百多 KB 常驻在设置里 */
+    const val ACTION_CLEAR_LOG_FULL = "com.vpnautoswitch.module.action.CLEAR_LOG_FULL"
     /** 跟随 applicationId，和清单里的 signature 权限保持一致 */
     internal val REBOOT_PERMISSION = "${BuildConfig.APPLICATION_ID}.permission.REBOOT"
 
@@ -621,6 +627,31 @@ internal object Engine {
 
     internal var failureStreak = 0
     internal var failureLogged = false
+
+    /**
+     * 最近一次启动请求的观察结果，取值见 [ExternalControl.OUTCOME_REJECTED] 等。
+     *
+     * 失败归因要靠它区分「系统拒绝了」「进程没留住」「进程在但没隧道」——
+     * 这三种情况在日志里原本都是「restart VPN service」加一片空白。
+     */
+    internal var lastStartOutcome = ""
+    internal var lastStartOutcomeAt = 0L
+
+    /** 观察结果的有效期：超过十秒就是上一轮的事了，不能拿来解释现在这次失败 */
+    internal const val START_OUTCOME_TTL_MS = 10_000L
+
+    internal fun noteStartOutcome(outcome: String) {
+        lastStartOutcome = outcome
+        lastStartOutcomeAt = SystemClock.elapsedRealtime()
+    }
+
+    /** 十秒内的观察结果才算数；过时或没观察过返回空串 */
+    internal fun freshStartOutcome(now: Long): String =
+        if (lastStartOutcomeAt != 0L && now - lastStartOutcomeAt <= START_OUTCOME_TTL_MS) {
+            lastStartOutcome
+        } else {
+            ""
+        }
 
     /** 当前连着的 Wi-Fi 名称（不带引号）；非 Wi-Fi 时为 null */
     internal var currentSsid: String? = null

@@ -82,6 +82,47 @@ internal object Packages {
     }
 
     /**
+     * 一次性把这个包的几项关键事实取出来，给启动前的就绪判断用。
+     *
+     * 和 [stateLabel] 查的是同一批东西，区别是这个返回结构化的值：诊断要拿它下结论，
+     * 不能再从「未停用 / 未冻结 / 后台受限」这种给人看的字符串里反解析。
+     */
+    fun factsOf(ctx: Context, pkg: String): ClientFacts {
+        if (pkg.isEmpty()) return ClientFacts(installed = null, enabled = null, hasVpnService = null)
+        val pm = ctx.packageManager
+        val info = try {
+            pm.getApplicationInfo(pkg, 0)
+        } catch (t: Throwable) {
+            // 查不到就是没装（或正在安装，PackageManager 会短暂报 NameNotFound）
+            return ClientFacts(installed = false, enabled = null, hasVpnService = null)
+        }
+        val suspended = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                pm.isPackageSuspended(pkg)
+            } catch (t: Throwable) {
+                false
+            }
+        } else {
+            false
+        }
+        // 服务查不到和「没有服务」要分开：查包抛异常时不能断言它没有 VpnService
+        val hasService: Boolean? = try {
+            pm.getPackageInfo(pkg, PackageManager.GET_SERVICES)?.services?.any {
+                it.permission == "android.permission.BIND_VPN_SERVICE"
+            }
+        } catch (t: Throwable) {
+            null
+        }
+        return ClientFacts(
+            installed = true,
+            enabled = info.enabled,
+            hasVpnService = hasService,
+            stopped = info.flags and ApplicationInfo.FLAG_STOPPED != 0,
+            suspended = suspended,
+        )
+    }
+
+    /**
      * 一行说清这个包当前被系统怎么对待，形如 `未停用 / 未冻结 / 后台受限`。
      *
      * 拉起失败时最需要这三项：「服务起不来」到底是包被强停过、被系统冻结、

@@ -64,6 +64,92 @@ internal object ExternalControl {
     private const val SERVICE_CHECK_DELAY_MS = 2_000L
     private var cachedKnown: MutableSet<String>? = null
 
+    // ------------------------------------------------------------ 一次启动请求的观察结果
+
+    /**
+     * `startForegroundService` 明确被系统拒绝（返回 null）。
+     *
+     * 和「发出去了但没连上」是两件事：前者说明包状态或后台限制把它挡住了，
+     * 后者说明请求被接受、问题在客户端内部。以前两者在日志里都只有一行 started/restart，
+     * 失败归因只能靠猜。
+     */
+    const val OUTCOME_REJECTED = "rejected"
+
+    /** 请求被接受，两秒后进程已经不在（客户端自己退了） */
+    const val OUTCOME_GONE = "gone"
+
+    /** 请求被接受，两秒后进程还在（在等隧道建立） */
+    const val OUTCOME_ALIVE = "alive"
+
+    /** 请求刚发出，还没到复查时间 */
+    const val OUTCOME_ACCEPTED = "accepted"
+
+    // ------------------------------------------------------------ 成功连上过的记录
+
+    /**
+     * 哪些客户端成功建立过隧道，形如 `包=时刻`。
+     *
+     * 这是「第一次使用必须手动授权」唯一可靠的判据。系统没有持久化的 VPN 授权表可查，
+     * `VpnService.prepare` 又只能查调用方自己，所以换个角度：模块只在真正看到隧道之后
+     * 才记一笔。没这条记录 + 现在拉不起来，结论就是「还没授权过，先手动连一次」——
+     * issue #3 那句「必须自己手动打开连接一次才会判定」正是这个。
+     */
+    private const val CONNECTED_KEY = "vpn_autoswitch_connected_pkgs"
+
+    /** 最多记几台客户端的连通时间，够判断「有没有成功过」就行 */
+    private const val CONNECTED_MAX_ENTRIES = 6
+
+    /** 同一个包这么多秒内只写一次，避免连接窗口里每 900ms 都写设置 */
+    private const val CONNECTED_WRITE_GUARD_MS = 60_000L
+
+    private val connectedWrittenAt = HashMap<String, Long>()
+
+    /** 记一笔「这个客户端确实连上过」；连上后每次 ensureVpn 都会调，内部有节流 */
+    fun markConnected(ctx: Context, pkg: String) {
+        if (pkg.isEmpty()) return
+        val now = SystemClock.elapsedRealtime()
+        val last = connectedWrittenAt[pkg] ?: 0L
+        if (last != 0L && now - last < CONNECTED_WRITE_GUARD_MS) return
+        connectedWrittenAt[pkg] = now
+        val map = readConnected(ctx)
+        map[pkg] = System.currentTimeMillis()
+        // 只留最近几条：这张表只回答「有没有成功过」，不需要完整历史
+        val kept = map.entries.sortedByDescending { it.value }.take(CONNECTED_MAX_ENTRIES)
+        try {
+            Settings.Secure.putString(
+                ctx.contentResolver,
+                CONNECTED_KEY,
+                kept.joinToString(",") { "${it.key}=${it.value}" },
+            )
+        } catch (t: Throwable) {
+            // 写不进去只影响「从未连上」的判断，最多多给一次手动连接提示
+        }
+    }
+
+    /** 这个客户端最后一次成功连上的时刻；0 表示模块没见过它连上 */
+    fun lastConnectedAt(ctx: Context, pkg: String): Long {
+        if (pkg.isEmpty()) return 0L
+        return readConnected(ctx)[pkg] ?: 0L
+    }
+
+    fun everConnected(ctx: Context, pkg: String): Boolean = lastConnectedAt(ctx, pkg) > 0L
+
+    private fun readConnected(ctx: Context): MutableMap<String, Long> {
+        val map = HashMap<String, Long>()
+        try {
+            Settings.Secure.getString(ctx.contentResolver, CONNECTED_KEY)
+                ?.split(',')
+                ?.forEach { entry ->
+                    val pkg = entry.substringBefore('=', "").trim()
+                    val at = entry.substringAfter('=', "").trim().toLongOrNull()
+                    if (pkg.isNotEmpty() && at != null && at > 0L) map[pkg] = at
+                }
+        } catch (t: Throwable) {
+            // 读不到当作没连过
+        }
+        return map
+    }
+
     /**
      * 已确认的启动方式："activity"（客户端导出的外部控制界面）或 "service"（直接启 VpnService）。
      * 只有**确实靠外部手段连上**过才会记录，避免把 always-on 能连上的客户端误判成外部控制。
@@ -383,12 +469,14 @@ internal object ExternalControl {
             // 日志里就会出现「启动了三次、每次都 started，却十几秒没隧道」的假象。
             val started = ctx.startForegroundService(Intent().setComponent(ComponentName(pkg, service)))
             if (started == null) {
+                Engine.noteStartOutcome(OUTCOME_REJECTED)
                 ModuleLog.append(
                     ctx,
                     "start VPN service rejected: $service（拉起前包状态：$stateBefore）",
                 )
                 false
             } else {
+                Engine.noteStartOutcome(OUTCOME_ACCEPTED)
                 ModuleLog.append(ctx, "started VPN service $service")
                 scheduleServiceCheck(ctx, pkg, service)
                 true
@@ -412,6 +500,7 @@ internal object ExternalControl {
         try {
             Engine.handler.postDelayed({
                 val alive = Engine.isProcessAlive(ctx, pkg)
+                Engine.noteStartOutcome(if (alive) OUTCOME_ALIVE else OUTCOME_GONE)
                 ModuleLog.append(
                     ctx,
                     if (alive) {
@@ -584,9 +673,27 @@ internal object ExternalControl {
      * @return "activity"（外部控制入口）/ "service"（VpnService）/ "ui"（界面）/ null
      */
     fun startModeWithUi(ctx: Context, pkg: String): String? {
-        if (launch(ctx, pkg, "action.START_CLASH", unsupportedStart)) return "activity"
-        if (startVpnService(ctx, pkg)) return "service"
+        if (prefersService(ctx, pkg)) {
+            if (startVpnService(ctx, pkg)) return "service"
+            if (launch(ctx, pkg, "action.START_CLASH", unsupportedStart)) return "activity"
+        } else {
+            if (launch(ctx, pkg, "action.START_CLASH", unsupportedStart)) return "activity"
+            if (startVpnService(ctx, pkg)) return "service"
+        }
         return if (openUi(ctx, pkg)) "ui" else null
+    }
+
+    /**
+     * 这条客户端该不该先试 VpnService。
+     *
+     * 用户固定过就听固定的；没固定过才看配方——v2rayNG 这类从来没有外部控制入口的客户端，
+     * 以前每次冷启动都要先发一次注定失败的 `START_CLASH`，多一次跨进程查询、
+     * 多一行「没有 action.START_CLASH 入口，改用备用方式」，把真正的原因埋掉。
+     */
+    private fun prefersService(ctx: Context, pkg: String): Boolean {
+        val pinned = pinnedMode(ctx, pkg)
+        if (pinned != null) return pinned == ClientRecipes.MODE_SERVICE
+        return ClientRecipes.of(pkg)?.preferredMode == ClientRecipes.MODE_SERVICE
     }
 
     /**
@@ -600,6 +707,10 @@ internal object ExternalControl {
      * @return "activity"（客户端导出的外部控制入口）/ "service"（直接启动 VpnService）/ null
      */
     fun startMode(ctx: Context, pkg: String): String? {
+        if (prefersService(ctx, pkg)) {
+            if (startVpnService(ctx, pkg)) return "service"
+            return if (launch(ctx, pkg, "action.START_CLASH", unsupportedStart)) "activity" else null
+        }
         if (launch(ctx, pkg, "action.START_CLASH", unsupportedStart)) return "activity"
         return if (startVpnService(ctx, pkg)) "service" else null
     }

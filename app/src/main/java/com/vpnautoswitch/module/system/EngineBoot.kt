@@ -299,6 +299,12 @@ internal fun Engine.registerRebootReceiver(ctx: Context): Boolean {
                     // 不写日志，否则刚清完又冒出一行
                     ModuleLog.clear(ctx)
                 }
+                ACTION_DUMP_LOG -> {
+                    // 只在用户点了「导出完整日志」时才写这一大串：常驻会把设置撑大
+                    val lines = ModuleLog.dump(ctx)
+                    if (lines < 0) log(ctx, "dump full log failed")
+                }
+                ACTION_CLEAR_LOG_FULL -> ModuleLog.clearFull(ctx)
                 ModuleContract.ACTION_TOGGLE_PAUSE -> togglePause(ctx)
                 ModuleContract.ACTION_TEST_CLIENT -> testClient(
                     ctx,
@@ -320,6 +326,8 @@ internal fun Engine.registerRebootReceiver(ctx: Context): Boolean {
     try {
         val filter = IntentFilter().apply {
             addAction(ACTION_CLEAR_LOG)
+            addAction(ACTION_DUMP_LOG)
+            addAction(ACTION_CLEAR_LOG_FULL)
             addAction(ModuleContract.ACTION_TOGGLE_PAUSE)
             addAction(ModuleContract.ACTION_TEST_CLIENT)
             addAction(ModuleContract.ACTION_FORGET_CLIENT)

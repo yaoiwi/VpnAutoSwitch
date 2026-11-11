@@ -13,7 +13,14 @@ import java.util.Locale
  * 以前每条日志都是「读全部 → 追加一行 → 全量写回」：一次开关流程要走十几个 log()，
  * 等于十几次 SettingsProvider 全量读写，每次写完还会唤醒所有观察者。
  * 现在先在内存里攒着，[FLUSH_DELAY_MS] 内的日志合并成一次写入。
- * 只保留最近 [MAX_LINES] 行，够放下一整轮开关流程，排障时关键信息不会被挤掉。
+ *
+ * 容量分两层：
+ *   - 内存留 [MAX_MEMORY_LINES] 行，够覆盖好几轮开关流程，按需导出时用这一份；
+ *   - Settings 里只留最近 [MAX_SETTINGS_LINES] 行，界面日志区读的就是它。
+ *
+ * 分层的理由：Settings 每次写入都是全量替换 + 唤醒观察者，两千行（约 150KB）
+ * 每 300 毫秒写一遍会明显拖慢 system_server；而 500 行又常常在用户报问题之前
+ * 就被后续心跳挤掉——issue #15 里那份只有 3 行的日志就是这么来的。
  *
  * 第 0 行是设备指纹，滚动时受保护：日志写满后先被挤掉的本来是最早的行，而那
  * 一行恰恰是「这台机器是什么型号、什么 ROM」，丢了之后用户贴出来的日志又变成
@@ -23,12 +30,23 @@ internal object ModuleLog {
 
     const val KEY = "vpn_autoswitch_log"
 
-    private const val MAX_LINES = 500
+    /** 按需导出的完整日志；App 读走之后会请模块清空，不常驻 */
+    const val FULL_KEY = "vpn_autoswitch_log_full"
+
+    /** 内存里保留的行数：约等于普通用户两三轮开关流程，够定位一次失败 */
+    private const val MAX_MEMORY_LINES = 2000
+
+    /** 写进 Settings 的行数：界面日志区只显示这么多，读得快 */
+    private const val MAX_SETTINGS_LINES = 500
+
+    /** 单次导出上限：再多就超过 Settings 单值写入的合理体积了 */
+    private const val MAX_DUMP_LINES = 1500
+
     private const val FLUSH_DELAY_MS = 300L
 
     // 带日期：跨天排障时只有 HH:mm:ss 无法对齐（用户贴日志常常跨了零点）
     private val format = SimpleDateFormat("MM-dd HH:mm:ss", Locale.US)
-    private val buffer = ArrayList<String>(MAX_LINES)
+    private val buffer = ArrayList<String>(MAX_MEMORY_LINES)
     private var loaded = false
     private var scheduled = false
     private var pending: Context? = null
@@ -46,7 +64,7 @@ internal object ModuleLog {
         if (ctx == null) return
         ensureLoaded(ctx)
         buffer.add("${format.format(Date())}  $message")
-        LogPolicy.trim(buffer, MAX_LINES)
+        LogPolicy.trim(buffer, MAX_MEMORY_LINES)
         pending = ctx
         val handler = flushHandler
         if (handler == null) {
@@ -73,7 +91,7 @@ internal object ModuleLog {
         // 先把旧的剔掉再加，避免头部长出两行设备指纹
         buffer.removeAll { LogPolicy.isDeviceLine(it) }
         buffer.add(0, line)
-        LogPolicy.trim(buffer, MAX_LINES)
+        LogPolicy.trim(buffer, MAX_MEMORY_LINES)
         pending = ctx
         // 头部只在启动时写一次，直接落盘，不必等 300ms 合批
         scheduled = false
@@ -86,7 +104,7 @@ internal object ModuleLog {
     fun write(ctx: Context, lines: List<String>) {
         buffer.clear()
         buffer.addAll(lines.filter { it.isNotBlank() })
-        LogPolicy.trim(buffer, MAX_LINES)
+        LogPolicy.trim(buffer, MAX_MEMORY_LINES)
         loaded = true
         pending = ctx
         scheduled = false
@@ -127,7 +145,38 @@ internal object ModuleLog {
             ""
         }
         old.split('\n').filter { it.isNotBlank() }.forEach { buffer.add(it) }
-        LogPolicy.trim(buffer, MAX_LINES)
+        LogPolicy.trim(buffer, MAX_MEMORY_LINES)
+    }
+
+    /**
+     * 按需导出完整日志。
+     *
+     * App 侧点「导出完整日志」时由模块代写：普通应用没有 WRITE_SECURE_SETTINGS，
+     * 自己写不进来。写的是内存里那一份（最多 [MAX_MEMORY_LINES] 行），
+     * 比界面能看到的 500 行多出三倍，足够覆盖「打开应用 → 连不上 → 又试了几轮」的全过程。
+     *
+     * @return 写入的行数；-1 表示写入失败
+     */
+    @Synchronized
+    fun dump(ctx: Context): Int {
+        ensureLoaded(ctx)
+        val lines = LogPolicy.tailWithHeader(buffer, MAX_DUMP_LINES)
+        return try {
+            Settings.Secure.putString(ctx.contentResolver, FULL_KEY, lines.joinToString("\n"))
+            lines.size
+        } catch (t: Throwable) {
+            -1
+        }
+    }
+
+    /** App 把完整日志读走之后请模块清掉，别让一百多 KB 常驻在设置里 */
+    @Synchronized
+    fun clearFull(ctx: Context) {
+        try {
+            Settings.Secure.putString(ctx.contentResolver, FULL_KEY, "")
+        } catch (t: Throwable) {
+            // 清不掉只影响设置体积，不影响功能
+        }
     }
 
     @Synchronized
@@ -135,7 +184,10 @@ internal object ModuleLog {
         scheduled = false
         val ctx = pending ?: return
         try {
-            Settings.Secure.putString(ctx.contentResolver, KEY, buffer.joinToString("\n"))
+            // 只落最近 500 行：两千行（约 150KB）每 300 毫秒全量写一次会把 SettingsProvider 拖住。
+            // 设备指纹由 tailWithHeader 单独保留在第一行
+            val lines = LogPolicy.tailWithHeader(buffer, MAX_SETTINGS_LINES)
+            Settings.Secure.putString(ctx.contentResolver, KEY, lines.joinToString("\n"))
         } catch (t: Throwable) {
             // 忽略：写日志失败绝不影响主流程
         }

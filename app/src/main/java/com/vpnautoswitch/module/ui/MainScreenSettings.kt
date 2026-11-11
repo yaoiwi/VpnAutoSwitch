@@ -715,24 +715,36 @@ private fun LogBody(
         cm.setPrimaryClip(ClipData.newPlainText("VpnAutoSwitch", copyText))
         Toast.makeText(context, "已复制 ${shown.size} 条", Toast.LENGTH_SHORT).show()
     }
-    // 导出走系统的「新建文档」：不需要存储权限，位置由用户自己选
+    // 导出走系统的「新建文档」：不需要存储权限，位置由用户自己选。
+    // 导出的是模块内存里的完整日志（最多 1500 行），不是界面上这 60 条——
+    // 「打开应用 → 连不上 → 又试了几轮」的全过程往往前面几十行才是关键，
+    // 只导界面这一屏，等于让用户把最重要的部分截掉再发出来。
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/plain")
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        val ok = try {
-            context.contentResolver.openOutputStream(uri)?.use { out ->
-                out.write(copyText.toByteArray())
+        state.requestFullLog { full ->
+            // 模块没响应（没注入 / 旧版本）时退回界面这一份，别让用户什么都没拿到
+            val text = full.ifBlank { copyText }
+            val ok = try {
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    out.write(text.toByteArray())
+                }
+                true
+            } catch (t: Throwable) {
+                false
             }
-            true
-        } catch (t: Throwable) {
-            false
+            val count = text.lines().count { it.isNotBlank() }
+            Toast.makeText(
+                context,
+                when {
+                    !ok -> "导出失败"
+                    full.isBlank() -> "模块未响应，已导出界面上这 $count 条"
+                    else -> "已导出完整日志（$count 条）"
+                },
+                Toast.LENGTH_SHORT,
+            ).show()
         }
-        Toast.makeText(
-            context,
-            if (ok) "日志已导出（${shown.size} 条）" else "导出失败",
-            Toast.LENGTH_SHORT,
-        ).show()
     }
     Row(
         modifier = Modifier
@@ -759,7 +771,7 @@ private fun LogBody(
             modifier = Modifier.weight(1f),
         )
         AppButton(
-            text = "导出",
+            text = "导出全部",
             onClick = { exportLauncher.launch("vpn-autoswitch-log.txt") },
             modifier = Modifier.weight(1f),
         )

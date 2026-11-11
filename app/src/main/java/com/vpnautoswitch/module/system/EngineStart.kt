@@ -73,6 +73,9 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
         val adopted = VpnSwitcher.adopt(ctx)
         // 已经连上了，说明用户「保持关闭」的意图已经结束（例如他自己又手动连上了）
         userOff = false
+        // 记一笔「这个客户端确实能在这台机器上连上」。之后如果一直拉不起来，
+        // 有这条记录就不该再劝用户「先手动连一次」——他已经连上过了
+        ExternalControl.markConnected(ctx, cfg.vpnPackage)
         val nowUp = SystemClock.elapsedRealtime()
         // 这一次是不是「从断开变为连通」，用来决定要不要留一条记录
         val firstUp = connectedAt == 0L
@@ -575,18 +578,49 @@ internal fun Engine.tryQuickTile(ctx: Context, cfg: Config, now: Long): Boolean 
     return QuickTiles.click(ctx, tile)
 }
 
+/**
+ * 记一次「这一轮没能把 VPN 弄起来」。
+ *
+ * 除了计数，还要在第一次攒够次数时给出**归因**：系统拒绝、进程没留住、
+ * 进程在但没隧道、还是这个客户端从没成功连过。以前只有一句「不响应系统常驻 VPN，
+ * 也点不了快捷磁贴」，用户照那句去放开自启和电池优化，实际原因却可能是
+ * 「从来没授权过」——方向完全错了。
+ *
+ * 归因查询（PackageManager + Settings）只在提示那一刻做一次，不进重试循环。
+ */
 internal fun Engine.noteFailure(ctx: Context, cfg: Config, hint: String? = null) {
     failureStreak++
-    RuntimeDiagnostics.publishFailure(ctx, "enable", cfg.vpnPackage, failureStreak)
     if (!failureLogged && failureStreak >= FAILURE_HINT_AT) {
         failureLogged = true
-        // 默认那句是给「always-on 拉不起来」写的；固定成 service 方式时
-        // 常驻设置根本没写，提「不响应系统常驻 VPN」「点不了快捷磁贴」会带偏
-        log(
-            ctx,
-            hint ?: "已连续 $failureStreak 次没能建立 VPN：${cfg.vpnPackage} 不响应系统常驻 VPN，" +
-                "也点不了它的快捷磁贴。请在客户端里打开「自动连接」，或换用 v2rayNG / Surfboard / WireGuard",
+        val now = SystemClock.elapsedRealtime()
+        val facts = Packages.factsOf(ctx, cfg.vpnPackage)
+        val readiness = ReadinessPolicy.assess(facts)
+        val outcome = freshStartOutcome(now)
+        val everConnected = ExternalControl.everConnected(ctx, cfg.vpnPackage)
+        val cause = FailureCausePolicy.classify(readiness, outcome, everConnected)
+        val text = FailureCausePolicy.describe(
+            cause,
+            CauseContext(
+                label = ClientRecipes.labelOf(cfg.vpnPackage),
+                readiness = readiness,
+                attempts = maxOf(externalAttempts, reapplyCount),
+                clientMode = ExternalControl.modeOf(ctx, cfg.vpnPackage).orEmpty(),
+                outcome = outcome,
+                everConnected = everConnected,
+            ),
         )
+        RuntimeDiagnostics.publishFailure(
+            ctx = ctx,
+            stage = "enable",
+            vpnPackage = cfg.vpnPackage,
+            failureStreak = failureStreak,
+            cause = cause.name,
+            hint = hint ?: text,
+        )
+        log(ctx, hint ?: "已连续 $failureStreak 次没能建立 VPN：$text")
+    } else {
+        // 每轮都要留一条记录：自检里「最近失败」的时间和次数靠它
+        RuntimeDiagnostics.publishFailure(ctx, "enable", cfg.vpnPackage, failureStreak)
     }
 }
 

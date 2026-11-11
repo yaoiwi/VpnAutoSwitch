@@ -217,6 +217,12 @@ object DiagnosticsPolicy {
         val actual: String,
         val actualTone: Tone,
         val lastAction: String,
+        /**
+         * 「卡在哪一步」：规则要求连上、隧道却没起来时，模块自己报的阻断原因。
+         * 空字符串表示这一刻没什么可解释的，界面不显示这一行。
+         */
+        val blocked: String = "",
+        val blockedTone: Tone = Tone.MUTED,
     )
 
     fun summarize(
@@ -231,6 +237,9 @@ object DiagnosticsPolicy {
         network: String,
         log: String,
         now: Long,
+        blocked: String = "",
+        readiness: String = "",
+        blockNeedsUser: Boolean = false,
     ): StatusSummary {
         val state = moduleState(heartbeat, moduleVersion, appVersion, now)
         val fresh = state == ModuleState.CURRENT || state == ModuleState.OLD_CODE
@@ -284,7 +293,32 @@ object DiagnosticsPolicy {
                 else -> Tone.MUTED
             },
             lastAction = lastEvent(log).ifBlank { "暂无记录" },
+            // 「命中规则 + 未连接」时补一句卡在哪：模块自己报的优先，
+            // 老版本模块不上报这一项，就退回用客户端就绪状态兜一句
+            blocked = when {
+                !fresh || vpnConnected -> ""
+                blocked.isNotBlank() -> blocked
+                else -> readinessAdvice(readiness)
+            },
+            blockedTone = when {
+                !fresh || vpnConnected -> Tone.MUTED
+                blockNeedsUser -> Tone.WARN
+                // 客户端本身不可用，即便模块没细说也值得标出来
+                readinessAdvice(readiness).isNotEmpty() -> Tone.WARN
+                else -> Tone.MUTED
+            },
         )
+    }
+
+    /** 就绪状态的文案复用模块侧那一份，避免同一个原因在 App 和日志里两种说法 */
+    fun readinessAdvice(name: String): String {
+        if (name.isEmpty() || name == "READY") return ""
+        val policy = com.vpnautoswitch.module.system.ReadinessPolicy
+        val state = com.vpnautoswitch.module.system.ClientReadiness.values()
+            .firstOrNull { it.name == name } ?: return ""
+        // STOPPED 模块每次启动前都会自己清掉，不算卡住；UNKNOWN 说不清，都不占这一行
+        if (!policy.needsUser(state)) return ""
+        return policy.advice(state)
     }
 
     private fun formatAge(ms: Long): String = when {

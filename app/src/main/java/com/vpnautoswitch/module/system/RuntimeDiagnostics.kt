@@ -34,6 +34,14 @@ internal object RuntimeDiagnostics {
         detail: String,
         transport: Int,
         foreground: String? = null,
+        /** 规则要求连上却没连上时，当前卡在哪一步；空表示没有可说的 */
+        blocked: String = "",
+        /** 上面那句话是不是必须用户动手才能过（决定界面标不标黄） */
+        blockNeedsUser: Boolean = false,
+        /** 客户端就绪状态（READY / STOPPED / DISABLED …），供诊断单独取用 */
+        readiness: String = "",
+        /** 本轮已经发出的启动请求次数 */
+        attempt: Int = 0,
     ) {
         try {
             val json = JSONObject()
@@ -43,13 +51,28 @@ internal object RuntimeDiagnostics {
                 .put("detail", detail)
                 .put("transport", transport)
                 .put("foreground", foreground.orEmpty())
+                .put("blocked", blocked)
+                .put("blockNeedsUser", blockNeedsUser)
+                .put("readiness", readiness)
+                .put("attempt", attempt)
             Settings.Secure.putString(ctx.contentResolver, RUNTIME_KEY, json.toString())
         } catch (t: Throwable) {
             XposedBridge.log("[$TAG] runtime snapshot failed: $t")
         }
     }
 
-    fun publishFailure(ctx: Context, stage: String, vpnPackage: String, failureStreak: Int) {
+    /**
+     * @param cause 归因枚举名（见 [FailureCause]），App 侧要按它决定给什么按钮
+     * @param hint 一句人话的归因与下一步；调用方有更具体的说法时会覆盖自动生成的那句
+     */
+    fun publishFailure(
+        ctx: Context,
+        stage: String,
+        vpnPackage: String,
+        failureStreak: Int,
+        cause: String = "",
+        hint: String = "",
+    ) {
         try {
             val json = JSONObject()
                 .put("schema", SCHEMA)
@@ -57,6 +80,8 @@ internal object RuntimeDiagnostics {
                 .put("stage", stage)
                 .put("vpnPackage", vpnPackage)
                 .put("failureStreak", failureStreak)
+                .put("cause", cause)
+                .put("hint", hint)
             Settings.Secure.putString(ctx.contentResolver, FAILURE_KEY, json.toString())
         } catch (t: Throwable) {
             XposedBridge.log("[$TAG] failure snapshot failed: $t")
