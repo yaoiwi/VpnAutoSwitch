@@ -561,6 +561,35 @@ class AppState(private val context: Context) {
         return true
     }
 
+    /** 系统「设置 → VPN」；极少数 ROM 没有这个页面，退回设置首页 */
+    fun openVpnSettings(): Boolean = try {
+        context.startActivity(
+            Intent(Settings.ACTION_VPN_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+        true
+    } catch (t: Throwable) {
+        try {
+            context.startActivity(
+                Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            true
+        } catch (t2: Throwable) {
+            false
+        }
+    }
+
+    /** 应用详情页：自启动、电池优化、强制停止都在这一页里 */
+    fun openAppDetails(pkg: String): Boolean = try {
+        context.startActivity(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(Uri.parse("package:$pkg"))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+        true
+    } catch (t: Throwable) {
+        false
+    }
+
     fun labelOf(packageName: String): String =
         apps.firstOrNull { it.packageName == packageName }?.label
             ?: AppsRepository.labelOf(context, packageName)

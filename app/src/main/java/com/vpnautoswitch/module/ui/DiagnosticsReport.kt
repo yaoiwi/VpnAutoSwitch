@@ -14,10 +14,34 @@ import java.util.concurrent.TimeUnit
 
 internal enum class CheckStatus { OK, WARN, FAIL, UNKNOWN }
 
+/**
+ * 一条检查项后面能点的动作。
+ *
+ * 诊断以前只会「说」，用户读完还得自己找设置在哪。能点一步到位的，就不要写成
+ * 「请到设置里……」——这类文案在这个 App 里已经堆得太多了。
+ */
+internal sealed class CheckAction {
+    /** 跳到系统「设置 → VPN」 */
+    data object OpenVpnSettings : CheckAction()
+
+    /** 打开客户端的系统应用详情页（自启动、电池优化都在里面） */
+    data class OpenAppDetails(val pkg: String) : CheckAction()
+
+    /** 打开本机的 LSPosed 管理器 */
+    data object OpenLsposed : CheckAction()
+
+    /** 打开「客户端适配」，测一次启动方式 */
+    data object OpenClientAdapter : CheckAction()
+
+    /** 滚到下面的运行日志 */
+    data object OpenLog : CheckAction()
+}
+
 internal data class CheckItem(
     val title: String,
     val status: CheckStatus,
     val detail: String,
+    val action: CheckAction? = null,
 )
 
 internal object DiagnosticsReport {
@@ -43,17 +67,20 @@ internal object DiagnosticsReport {
                 CheckStatus.WARN,
                 "App 是 v${BuildConfig.VERSION_CODE}，system_server 仍加载 v${diagnostics.moduleVersion}。" +
                     "重启手机后新代码才会生效",
+                CheckAction.OpenLsposed,
             )
             DiagnosticsPolicy.ModuleState.STALE -> CheckItem(
                 "模块运行",
                 CheckStatus.FAIL,
                 "上次心跳在 ${ago(diagnostics.heartbeat, now)}，超过 90 秒没有新心跳。" +
                     "检查 LSPosed 是否启用模块、作用域是否只有「系统框架」",
+                CheckAction.OpenLsposed,
             )
             DiagnosticsPolicy.ModuleState.NEVER -> CheckItem(
                 "模块运行",
                 CheckStatus.FAIL,
                 "从未收到心跳。请在 LSPosed 中启用模块，作用域只勾「系统框架」，然后重启手机",
+                CheckAction.OpenLsposed,
             )
         }
 
@@ -65,6 +92,7 @@ internal object DiagnosticsReport {
                 CheckStatus.UNKNOWN
             },
             "只能通过系统框架心跳推断；请在 LSPosed 里确认本模块只勾选了「系统框架」",
+            CheckAction.OpenLsposed,
         )
 
         checks += vpnClientCheck(diagnostics)
@@ -131,6 +159,12 @@ internal object DiagnosticsReport {
                 if (needsAlwaysOn && diagnostics.alwaysOnApp != config.vpnPackage && !alwaysOnExcused) {
                     append("\n规则要求开启 VPN，但设置尚未指向 ${config.vpnPackage}，可能正在切换")
                 }
+            },
+            // 设置没指向客户端时，下一步就是去系统设置里改它
+            if (needsAlwaysOn && !alwaysOnAbsent && diagnostics.alwaysOnApp != config.vpnPackage) {
+                CheckAction.OpenVpnSettings
+            } else {
+                null
             },
         )
 
@@ -346,11 +380,13 @@ internal object DiagnosticsReport {
                 "VPN 客户端",
                 CheckStatus.WARN,
                 "$pkg 已被系统禁用，请在应用信息里启用",
+                CheckAction.OpenAppDetails(pkg),
             )
             diagnostics.vpnHasService == false -> CheckItem(
                 "VPN 客户端",
                 CheckStatus.WARN,
                 "$pkg 没有声明 VpnService，系统无法用它建立隧道",
+                CheckAction.OpenClientAdapter,
             )
             else -> CheckItem(
                 "VPN 客户端",
@@ -374,6 +410,8 @@ internal object DiagnosticsReport {
                 } else {
                     "规则要求开启，但系统没有 VPN transport。可能仍在连接，或客户端没有建立隧道"
                 },
+                // 没连上时最有用的下一步是去适配页确认启动方式
+                if (diagnostics.vpnConnected) null else CheckAction.OpenClientAdapter,
             )
             DiagnosticsPolicy.ExpectedVpn.OFF -> CheckItem(
                 "隧道状态",
@@ -476,6 +514,12 @@ internal object DiagnosticsReport {
                 if (!recent) append("，是较早前的记录，仅供参考")
                 hints.forEach { append("\n").append(it) }
             },
+            when {
+                // 提示里已经在说「换个启动方式」，按钮就把它送到那儿
+                recent && hints.isNotEmpty() -> CheckAction.OpenClientAdapter
+                recent -> CheckAction.OpenLog
+                else -> null
+            },
         )
     }
 
@@ -510,6 +554,7 @@ internal object DiagnosticsReport {
                 title,
                 CheckStatus.UNKNOWN,
                 "模块还没上报 hook 挂载结果。升级过版本的话，重启手机后才有新数据",
+                CheckAction.OpenLog,
             )
         }
         if (!DiagnosticsPolicy.hookSnapshotUsable(
@@ -522,6 +567,7 @@ internal object DiagnosticsReport {
                 CheckStatus.UNKNOWN,
                 "这份 hook 快照来自旧版本模块（v${diagnostics.hookSnapshotVersion}），" +
                     "App 是 v${BuildConfig.VERSION_CODE}。重启手机后重新检测",
+                CheckAction.OpenLog,
             )
         }
         val report = hookReport(diagnostics.hooks)
@@ -532,6 +578,7 @@ internal object DiagnosticsReport {
                 "关键 hook 一个都没挂上：${report.missingCritical.joinToString("、")}。" +
                     "模块收不到应用切换或进程退出，自动开关不会工作。" +
                     "确认 LSPosed 作用域只勾「系统框架」，并重启手机",
+                CheckAction.OpenLsposed,
             )
             HookHealth.DEGRADED -> CheckItem(
                 title,
@@ -539,6 +586,7 @@ internal object DiagnosticsReport {
                 "${report.degraded.joinToString("、")}没挂上。这个功能会降级：" +
                     "比如划掉任务后要等进程被系统回收才断开 VPN。" +
                     cosmeticHint(report.cosmetic),
+                CheckAction.OpenLog,
             )
             HookHealth.OK -> CheckItem(
                 title,
@@ -550,6 +598,7 @@ internal object DiagnosticsReport {
                 title,
                 CheckStatus.UNKNOWN,
                 "没有可用的 hook 挂载数据，重启手机后重新检测",
+                CheckAction.OpenLog,
             )
         }
     }

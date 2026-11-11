@@ -81,9 +81,12 @@ internal fun ClientAdapterDialog(state: AppState, onDismiss: () -> Unit) {
     }
     // 手动测过的那次会固定下来，自动连接不再改写；界面上要说清楚，否则
     // 用户会以为「记住的方式」还会自己变
-    val pinned = remember(pkg, test?.at, refreshKey) {
-        if (pkg.isEmpty()) null else ExternalControl.pinnedMode(context, pkg)
+    val pinState = remember(pkg, test?.at, refreshKey) {
+        if (pkg.isEmpty()) null else ExternalControl.pinState(context, pkg)
     }
+    // 过期之后 pinnedMode 会返回 null，引擎回到「重新学」；界面不能因此显示「未记忆」，
+    // 那会让人以为从来没固定过。过期单独说一句，见下面的 InfoRow。
+    val pinned = pinState?.takeIf { !it.stale }?.mode
 
     LaunchedEffect(Unit) { state.refreshClientTest() }
     LaunchedEffect(state.clientTest?.status) {
@@ -147,8 +150,16 @@ internal fun ClientAdapterDialog(state: AppState, onDismiss: () -> Unit) {
                         inspection?.hasQuickTile,
                     )
                     InfoRow(
-                        if (pinned != null) "当前方式（手动固定）" else "当前记忆方式",
-                        remembered?.let { modeLabel(it) } ?: "未记忆",
+                        when {
+                            pinState?.stale == true -> "当前方式（已过期）"
+                            pinned != null -> "当前方式（手动固定）"
+                            else -> "当前记忆方式"
+                        },
+                        when {
+                            pinState?.stale == true ->
+                                "${modeLabel(pinState.mode)} · 客户端升级过，需要重新测一次"
+                            else -> remembered?.let { modeLabel(it) } ?: "未记忆"
+                        },
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(

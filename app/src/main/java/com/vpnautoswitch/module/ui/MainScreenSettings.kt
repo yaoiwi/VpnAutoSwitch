@@ -579,6 +579,9 @@ internal fun LazyListScope.settingsItems(
     if (visible("诊断")) item {
         SectionTitle("诊断")
         var showSelfCheck by remember { mutableStateOf(false) }
+        // 自检里点「去客户端适配」时，先关掉自检再开这个弹窗：两个 Dialog 叠着，
+        // 返回键只会关掉上面那个，用户会以为下面那份还开着
+        var showClientAdapter by remember { mutableStateOf(false) }
         AppCard(modifier = Modifier.fillMaxWidth()) {
             SettingsActionWithArrow(
                 title = "一键自检",
@@ -661,7 +664,37 @@ internal fun LazyListScope.settingsItems(
                 state = state,
                 onDismiss = { showSelfCheck = false },
                 onOpenLog = onOpenLog,
+                onAction = { action ->
+                    when (action) {
+                        CheckAction.OpenLog -> {
+                            showSelfCheck = false
+                            onOpenLog()
+                        }
+                        CheckAction.OpenLsposed -> {
+                            if (!state.openLsposed()) {
+                                Toast.makeText(context, "没有找到 LSPosed 管理器", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        CheckAction.OpenClientAdapter -> {
+                            showSelfCheck = false
+                            showClientAdapter = true
+                        }
+                        CheckAction.OpenVpnSettings -> {
+                            if (!state.openVpnSettings()) {
+                                Toast.makeText(context, "打不开系统 VPN 设置", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        is CheckAction.OpenAppDetails -> {
+                            if (!state.openAppDetails(action.pkg)) {
+                                Toast.makeText(context, "打不开应用信息", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                },
             )
+        }
+        if (showClientAdapter) {
+            ClientAdapterDialog(state) { showClientAdapter = false }
         }
     }
 }

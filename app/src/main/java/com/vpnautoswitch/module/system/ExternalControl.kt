@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -43,6 +44,9 @@ internal object ExternalControl {
 
     private val unsupportedStart = HashSet<String>()
     private val unsupportedStop = HashSet<String>()
+
+    /** 已经记过「固定方式过期」的 `包|版本`，避免每次轮询都往日志里写一行 */
+    private val staleLogged = HashSet<String>()
 
     /** 查不到 VpnService 的包 → 探测失败的时刻（[SERVICE_PROBE_TTL_MS] 后重试） */
     private val noVpnService = HashMap<String, Long>()
@@ -90,44 +94,157 @@ internal object ExternalControl {
         saveKnown(ctx, set)
     }
 
-    /** 用户手动确认过的启动方式；null 表示跟随自动记忆 */
+    /** 一条固定记录的样子，给诊断和客户端适配界面显示 */
+    data class PinState(
+        val mode: String,
+        val version: Int,
+        val at: Long,
+        val stale: Boolean,
+    )
+
+    /**
+     * 用户手动确认过的启动方式；null 表示跟随自动记忆。
+     *
+     * 客户端升级之后这里会返回 null：升级可能改掉了导出的入口或者服务的行为，
+     * 继续按旧方式重试只会一轮一轮失败。让引擎回到「重新学」的状态，
+     * 比拿着一条过期记录硬试要好——issue #18 就是固定值一直生效、日志里却看不出原因。
+     */
     fun pinnedMode(ctx: Context, pkg: String): String? {
         if (pkg.isEmpty()) return null
-        return readPinned(ctx).firstOrNull { it.startsWith("$pkg|") }?.substringAfter('|')
+        val entry = PinCodec.entryFor(readPinnedRaw(ctx), pkg) ?: return null
+        val version = clientVersion(ctx, pkg)
+        if (PinCodec.isStale(entry, version)) {
+            // 引擎每秒都会问一次，只记第一遍
+            if (staleLogged.add("$pkg|${entry.version}")) {
+                ModuleLog.append(
+                    ctx,
+                    "pinned ${entry.mode} for $pkg looks stale " +
+                        "(client ${entry.version} -> $version), learning again",
+                )
+            }
+            return null
+        }
+        return entry.mode
+    }
+
+    /** 诊断用：固定记录当前是什么状态，过期也照样返回 */
+    fun pinState(ctx: Context, pkg: String): PinState? {
+        if (pkg.isEmpty()) return null
+        val entry = PinCodec.entryFor(readPinnedRaw(ctx), pkg) ?: return null
+        return PinState(
+            mode = entry.mode,
+            version = entry.version,
+            at = entry.at,
+            stale = PinCodec.isStale(entry, clientVersion(ctx, pkg)),
+        )
     }
 
     fun pin(ctx: Context, pkg: String, mode: String) {
         if (pkg.isEmpty() || mode.isEmpty()) return
-        val set = readPinned(ctx).toMutableSet()
-        set.removeAll { it.startsWith("$pkg|") }
-        set.add("$pkg|$mode")
+        val entry = PinCodec.Entry(pkg, mode, clientVersion(ctx, pkg), System.currentTimeMillis())
+        val entries = PinCodec.upsert(PinCodec.parse(readPinnedRaw(ctx)), entry)
+        writePinned(ctx, entries)
+        staleLogged.remove("$pkg|${entry.version}")
+        clearPinFailures(ctx, pkg)
+    }
+
+    fun unpin(ctx: Context, pkg: String) {
+        if (pkg.isEmpty()) return
+        val entries = PinCodec.remove(PinCodec.parse(readPinnedRaw(ctx)), pkg)
+        writePinned(ctx, entries)
+        staleLogged.removeAll { it.startsWith("$pkg|") }
+    }
+
+    private fun readPinnedRaw(ctx: Context): String? = try {
+        Settings.Secure.getString(ctx.contentResolver, PIN_KEY)
+    } catch (t: Throwable) {
+        null
+    }
+
+    private fun writePinned(ctx: Context, entries: List<PinCodec.Entry>) {
         try {
-            Settings.Secure.putString(ctx.contentResolver, PIN_KEY, set.joinToString(","))
+            Settings.Secure.putString(ctx.contentResolver, PIN_KEY, PinCodec.format(entries))
         } catch (t: Throwable) {
             // 写不进去只影响下次是否还会被自动记忆覆盖
         }
     }
 
-    fun unpin(ctx: Context, pkg: String) {
-        if (pkg.isEmpty()) return
-        val set = readPinned(ctx).toMutableSet()
-        if (!set.removeAll { it.startsWith("$pkg|") }) return
+    /** 客户端版本号；查不到返回 0，此时不做过期判断 */
+    fun clientVersion(ctx: Context, pkg: String): Int = try {
+        val info = ctx.packageManager.getPackageInfo(pkg, 0)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.longVersionCode.toInt()
+        } else {
+            @Suppress("DEPRECATION")
+            info.versionCode
+        }
+    } catch (t: Throwable) {
+        0
+    }
+
+    // ------------------------------------------------------------ 固定方式的失败轮数
+
+    /** 连续多少轮按固定方式启动都没连上，见 [notePinFailure] */
+    private const val PIN_FAIL_KEY = "vpn_autoswitch_pin_fails"
+
+    fun pinFailRounds(ctx: Context, pkg: String): Int {
+        if (pkg.isEmpty()) return 0
+        return readPinFails(ctx)[pkg] ?: 0
+    }
+
+    /**
+     * 记一轮「按固定方式没拉起来」，返回累计轮数。
+     *
+     * 一轮只该调一次（调用方用 serviceModeHintLogged 保证），所以这个数就是
+     * 「用户第几次打开目标应用都没连上」。攒到阈值说明这条路真的不通，
+     * 该换一条，而不是继续重试。
+     */
+    fun notePinFailure(ctx: Context, pkg: String): Int {
+        if (pkg.isEmpty()) return 0
+        val map = readPinFails(ctx)
+        val next = (map[pkg] ?: 0) + 1
+        map[pkg] = next
         try {
-            Settings.Secure.putString(ctx.contentResolver, PIN_KEY, set.joinToString(","))
+            Settings.Secure.putString(
+                ctx.contentResolver,
+                PIN_FAIL_KEY,
+                map.entries.joinToString(",") { "${it.key}=${it.value}" },
+            )
+        } catch (t: Throwable) {
+            // 记不下来最多就是永远不换路，不影响连接本身
+        }
+        return next
+    }
+
+    fun clearPinFailures(ctx: Context, pkg: String) {
+        if (pkg.isEmpty()) return
+        val map = readPinFails(ctx)
+        if (map.remove(pkg) == null) return
+        try {
+            Settings.Secure.putString(
+                ctx.contentResolver,
+                PIN_FAIL_KEY,
+                map.entries.joinToString(",") { "${it.key}=${it.value}" },
+            )
         } catch (t: Throwable) {
             // 忽略
         }
     }
 
-    private fun readPinned(ctx: Context): Set<String> = try {
-        Settings.Secure.getString(ctx.contentResolver, PIN_KEY)
-            ?.split(',')
-            ?.map { it.trim() }
-            ?.filter { it.contains('|') }
-            ?.toSet()
-            ?: emptySet()
-    } catch (t: Throwable) {
-        emptySet()
+    private fun readPinFails(ctx: Context): MutableMap<String, Int> {
+        val map = HashMap<String, Int>()
+        try {
+            Settings.Secure.getString(ctx.contentResolver, PIN_FAIL_KEY)
+                ?.split(',')
+                ?.forEach { entry ->
+                    val pkg = entry.substringBefore('=', "").trim()
+                    val count = entry.substringAfter('=', "").trim().toIntOrNull()
+                    if (pkg.isNotEmpty() && count != null && count > 0) map[pkg] = count
+                }
+        } catch (t: Throwable) {
+            // 读不到当作没记过
+        }
+        return map
     }
 
     fun forget(ctx: Context, pkg: String) {

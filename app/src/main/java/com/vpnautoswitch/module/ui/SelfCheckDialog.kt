@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -44,6 +45,7 @@ internal fun SelfCheckDialog(
     state: AppState,
     onDismiss: () -> Unit,
     onOpenLog: () -> Unit,
+    onAction: (CheckAction) -> Unit,
 ) {
     val context = LocalContext.current
     val colors = MiuixTheme.colorScheme
@@ -102,6 +104,23 @@ internal fun SelfCheckDialog(
                                 color = colors.onSurfaceVariantSummary,
                                 modifier = Modifier.padding(top = 2.dp),
                             )
+                            // 只有需要处理的项才给动作：正常项后面挂个按钮反而在催人点
+                            if (item.status != CheckStatus.OK) {
+                                item.action?.let { action ->
+                                    Text(
+                                        text = actionLabel(action),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = colors.primary,
+                                        modifier = Modifier
+                                            .padding(top = 6.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(colors.primary.copy(alpha = 0.10f))
+                                            .clickable { onAction(action) }
+                                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -182,6 +201,14 @@ internal fun SelfCheckDialog(
             }
         }
     }
+}
+
+private fun actionLabel(action: CheckAction): String = when (action) {
+    CheckAction.OpenVpnSettings -> "去系统设置"
+    is CheckAction.OpenAppDetails -> "打开应用信息"
+    CheckAction.OpenLsposed -> "打开 LSPosed"
+    CheckAction.OpenClientAdapter -> "去客户端适配"
+    CheckAction.OpenLog -> "查看日志"
 }
 
 private fun statusLabel(status: CheckStatus): String = when (status) {

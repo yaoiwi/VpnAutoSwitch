@@ -103,6 +103,9 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
         // 只有「确实靠外部手段连上」才记录，always-on 能连上的客户端不该被误判
         pendingExternalMode?.let { mode ->
             ExternalControl.remember(ctx, cfg.vpnPackage, mode)
+            // 这一轮通了，说明当前这条路是好的：把「连续几轮没拉起来」的计数清掉，
+            // 否则下次偶尔失败会很快攒到换路阈值，把一条本来能用的路换掉
+            ExternalControl.clearPinFailures(ctx, cfg.vpnPackage)
             // 靠界面才连上，说明这一轮的静默启动白试了。连续两轮都这样就不再浪费那几秒
             // 初始化宽限，下一轮直接开界面；改用静默又连上了的，把计数清掉。
             if (mode == "activity") {
@@ -346,26 +349,61 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
                 !serviceModeHintLogged
             ) {
                 serviceModeHintLogged = true
-                log(
-                    ctx,
-                    // 这条记在第 3 次尝试之前，已经失败的是前两次
-                    "external-only: VpnService 方式试了 ${externalAttempts - 1} 次都没连上。" +
-                        "这个客户端可能只认外部控制，去首页「客户端适配」点一次「测试外部控制」",
-                )
-                // 走到这里就是「确实拉不起来」，得让状态报告知道。
-                // 以前这条路一次都不写 failure：报告只能捡到上一次关闭失败的记录，
-                // 于是 issue #18 那份写着「关闭 VPN 未成功 · 连续 3 次」，
-                // 而眼前真正失败的是拉起。每轮只记一次（同一个 flag 兜住），
-                // 所以 streak 的含义仍然是「连续几轮没拉起来」。
-                noteFailure(
-                    ctx,
-                    cfg,
-                    hint = "已连续多次没能建立 VPN：${cfg.vpnPackage} 被固定成 VpnService 方式，" +
-                        "模块只会直接启动它的服务。这个客户端可能只认外部控制，" +
-                        "去首页「客户端适配」测一次，成功后会改用外部控制",
-                )
+                val rounds = ExternalControl.notePinFailure(ctx, cfg.vpnPackage)
+                if (rounds >= PIN_DEMOTE_ROUNDS) {
+                    // 连着几轮都停在同一条路上，说明这个「固定方式」本身可能就是错的
+                    // （客户端升级后换了入口、或者某些节点下只有界面能连）。先把它丢掉，
+                    // 这一轮直接走完整兜底链，试出一条真能通的路，连上后会自动记住。
+                    ExternalControl.unpin(ctx, cfg.vpnPackage)
+                    ExternalControl.clearSilentFails(ctx, cfg.vpnPackage)
+                    log(
+                        ctx,
+                        "pinned service failed $rounds rounds -> dropping the pin, " +
+                            "trying the full fallback chain",
+                    )
+                    val scheme = if (cfg.allowVpnUi) {
+                        ExternalControl.startModeWithUi(ctx, cfg.vpnPackage)
+                    } else {
+                        // 用户没允许弹界面，就只试外部控制入口和服务——START_CLASH
+                        // 是客户端给自动化用的入口，不算「把界面拉到前台」
+                        ExternalControl.startMode(ctx, cfg.vpnPackage)
+                    }
+                    if (scheme == null) {
+                        log(ctx, "fallback chain: no way into ${cfg.vpnPackage} without the user")
+                        noteFailure(
+                            ctx,
+                            cfg,
+                            hint = "连续 $rounds 轮没能建立 VPN：${cfg.vpnPackage} 的服务和外部控制入口" +
+                                "都没把隧道拉起来。在客户端里手动连一次，确认它自己能连上",
+                        )
+                    } else {
+                        pendingExternalMode = if (scheme == "ui") "activity" else scheme
+                        if (scheme == "ui") uiShownAt = SystemClock.elapsedRealtime()
+                        log(ctx, "fallback chain: start via $scheme, will remember it once connected")
+                    }
+                } else {
+                    log(
+                        ctx,
+                        // 这条记在第 3 次尝试之前，已经失败的是前两次
+                        "external-only: VpnService 方式试了 ${externalAttempts - 1} 次都没连上。" +
+                            "这个客户端可能只认外部控制，去首页「客户端适配」点一次「测试外部控制」",
+                    )
+                    // 走到这里就是「确实拉不起来」，得让状态报告知道。
+                    // 以前这条路一次都不写 failure：报告只能捡到上一次关闭失败的记录，
+                    // 于是 issue #18 那份写着「关闭 VPN 未成功 · 连续 3 次」，
+                    // 而眼前真正失败的是拉起。每轮只记一次（同一个 flag 兜住），
+                    // 所以 streak 的含义仍然是「连续几轮没拉起来」。
+                    noteFailure(
+                        ctx,
+                        cfg,
+                        hint = "已连续多次没能建立 VPN：${cfg.vpnPackage} 被固定成 VpnService 方式，" +
+                            "模块只会直接启动它的服务。这个客户端可能只认外部控制，" +
+                            "去首页「客户端适配」测一次，成功后会改用外部控制",
+                    )
+                }
             }
-            scheduleDelayedServiceStart(ctx, cfg)
+            // 换路成功时 pendingExternalMode 已经不是 service，别再排一次服务启动
+            if (pendingExternalMode == "service") scheduleDelayedServiceStart(ctx, cfg)
         } else if (cfg.allowVpnUi) {
             // 两次静默都没连上，才按「外部控制入口 → 服务 → 界面」的顺序兜底。
             // 回来的值决定记什么：只有真的开了界面才记 activity，否则下一轮
