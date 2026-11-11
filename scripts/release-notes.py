@@ -17,10 +17,8 @@ ROOT = Path(__file__).resolve().parent.parent
 CHANGELOG = ROOT / "CHANGELOG.md"
 
 FOOTER = (
-    "**升级方式**：覆盖安装后**重启手机** —— 模块代码跑在 system_server 里，"
-    "只重启应用不会重新加载。\n"
-    "\n"
-    "**完整更新日志**：https://github.com/yaoiwi/VpnAutoSwitch/blob/main/CHANGELOG.md"
+    "**升级后重启手机**（模块跑在 system_server 里）。"
+    "完整日志：[CHANGELOG](https://github.com/yaoiwi/VpnAutoSwitch/blob/main/CHANGELOG.md)"
 )
 
 
