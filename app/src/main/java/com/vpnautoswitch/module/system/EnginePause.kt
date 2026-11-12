@@ -30,7 +30,7 @@ internal fun Engine.togglePause(ctx: Context) {
         false
     }
     if (!ok) {
-        log(ctx, "toggle pause failed: settings write rejected")
+        log(ctx, LogCat.DIAG, "toggle pause failed: settings write rejected")
         return
     }
 
@@ -42,9 +42,9 @@ internal fun Engine.togglePause(ctx: Context) {
         aliveTargets.clear()
         offAppForeground = null
         stopWatchdog()
-        log(ctx, "automation paused by tile")
+        log(ctx, LogCat.DIAG, "automation paused by tile")
     } else {
-        log(ctx, "automation resumed by tile")
+        log(ctx, LogCat.DIAG, "automation resumed by tile")
         val cfg = ConfigRepo.get(ctx)
         val foreground = lastForeground
         if (foreground != null &&

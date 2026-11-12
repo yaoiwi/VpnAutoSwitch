@@ -108,7 +108,7 @@ internal object DiagnosticsReport {
             },
             buildString {
                 append(diagnostics.network)
-                append(" · ").append(ssidLabel(diagnostics))
+                append(" · ").append(ssidLabel(diagnostics, config))
                 if (diagnostics.ssidState == "masked") {
                     append("\n读到的是占位值：系统对 SSID 做了脱敏，「指定 Wi-Fi」规则可能匹配不上")
                 }
@@ -238,7 +238,7 @@ internal object DiagnosticsReport {
                     "从未"
                 }
             )
-            appendLine("网络：${diagnostics.network} · SSID=${ssidLabel(diagnostics)}")
+            appendLine("网络：${diagnostics.network} · SSID=${ssidLabel(diagnostics, config)}")
             appendLine("VPN 包：${config.vpnPackage.ifEmpty { "未选择" }}")
             // 固定写一行：排查「拉不起来」时第一个要看的就是它，
             // 以前只能从 external-only: restart VPN service 这类日志反推
@@ -256,6 +256,10 @@ internal object DiagnosticsReport {
             appendLine("隧道：${if (diagnostics.vpnConnected) "已连接" else "未连接"}")
             appendLine("always-on：${diagnostics.alwaysOnApp ?: "未设置"} · 接管：${if (diagnostics.takenByModule) "是" else "否"}")
             appendLine("当前规则：${ruleLabel(diagnostics.activeRule)} · ${diagnostics.ruleDetail}")
+            // 「该开却没开」时先排除「被别的规则挡住」这一种可能，比逐项检查快得多
+            if (diagnostics.ruleTrace.isNotEmpty()) {
+                appendLine("判定链：${diagnostics.ruleTrace}")
+            }
             // 规则命中却没连上时，这一行比后面十几项检查都先被看到
             if (diagnostics.blocked.isNotBlank()) {
                 appendLine("卡在：${diagnostics.blocked}")
@@ -746,9 +750,15 @@ internal object DiagnosticsReport {
         else -> "未上报"
     }
 
-    /** SSID 的三种状态分开写，否则「没连 Wi-Fi」和「读不到名字」看起来一模一样 */
-    private fun ssidLabel(d: Diagnostics): String = when {
-        d.currentSsid.isNotEmpty() -> d.currentSsid
+    /**
+     * SSID 的三种状态分开写，否则「没连 Wi-Fi」和「读不到名字」看起来一模一样。
+     *
+     * 名字默认遮成 `Ho***Fi(8)`：这份报告的主要用途是贴进 issue，而 SSID 常常带着
+     * 姓名、房号、公司名。设置里可以改成显示完整名称。
+     */
+    private fun ssidLabel(d: Diagnostics, config: Config): String = when {
+        d.currentSsid.isNotEmpty() ->
+            com.vpnautoswitch.module.system.SsidMask.of(d.currentSsid, config.fullSsid)
         d.ssidState == "masked" -> "读取失败（系统可能已脱敏）"
         d.ssidState == "off" -> "未连接 Wi-Fi"
         else -> "未上报"

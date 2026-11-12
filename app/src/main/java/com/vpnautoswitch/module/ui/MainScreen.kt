@@ -4,6 +4,7 @@ import android.view.HapticFeedbackConstants
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -303,6 +304,25 @@ private fun LazyListScope.overviewItems(
 ) {
     item { HeroStatusCard(state) }
 
+    // 装完到第一次连上之间有四道坎：重启、选客户端、给触发条件、手动授权一次。
+    // 这四件事以前散在四处提示里，用户得自己拼；现在合成一张清单，做完就消失
+    val guide = FirstRunGuide.steps(
+        moduleState = state.diagnostics.moduleState,
+        vpnPackage = state.config.vpnPackage,
+        targets = state.config.targets.size,
+        wifiRules = state.config.wifiOn.size + state.config.wifiOff.size,
+        everConnected = state.diagnostics.everConnected,
+    )
+    if (!FirstRunGuide.isComplete(guide)) {
+        item {
+            FirstRunCard(
+                steps = guide,
+                onOpenLsposed = { state.openLsposed() },
+                onOpenApps = onOpenApps,
+            )
+        }
+    }
+
     item {
         SectionTitle("快捷开关")
         AppCard(modifier = Modifier.fillMaxWidth()) {
@@ -464,8 +484,71 @@ private fun HeroStatusCard(state: AppState) {
     }
 }
 
-/** 状态卡的一行：左侧固定标签，右侧值按 tone 取色 */
+/**
+ * 首次使用的清单卡。
+ *
+ * 只列事实（还差几步、差哪一步、点了去哪），不说「欢迎使用」这类话——用户要的是
+ * 尽快让它动起来，不是读说明。
+ */
 @Composable
+private fun FirstRunCard(
+    steps: List<FirstRunGuide.Step>,
+    onOpenLsposed: () -> Unit,
+    onOpenApps: () -> Unit,
+) {
+    val colors = MiuixTheme.colorScheme
+    val left = FirstRunGuide.remaining(steps)
+    AppCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp)) {
+            Text(
+                text = "还差 $left 步就能自动开关 VPN",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "按顺序做完，首页就会显示真实的连接状态",
+                fontSize = 11.sp,
+                color = colors.onSurfaceVariantSummary,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            steps.forEach { step ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            if (step.id == FirstRunGuide.ID_MODULE) onOpenLsposed() else onOpenApps()
+                        }
+                        .padding(vertical = 6.dp),
+                ) {
+                    Text(
+                        text = if (step.done) "✓" else "○",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (step.done) colors.onSurfaceVariantSummary else colors.onSurface,
+                        modifier = Modifier.width(20.dp),
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = step.title,
+                            fontSize = 13.sp,
+                            fontWeight = if (step.done) FontWeight.Normal else FontWeight.Medium,
+                            color = if (step.done) colors.onSurfaceVariantSummary else colors.onSurface,
+                        )
+                        Text(
+                            text = step.detail,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp,
+                            color = colors.onSurfaceVariantSummary,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 状态卡的一行：左侧固定标签，右侧值按 tone 取色 */@Composable
 private fun StatusRow(
     label: String,
     value: String,

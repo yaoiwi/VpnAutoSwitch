@@ -76,7 +76,7 @@ internal fun Engine.watchdogTick() {
         // 兜底：目标进程都没了，VPN 却还开着（例如进程死亡事件被系统吞了），
         // 只要这轮是模块拉起的、且没有「打开即关闭」的应用在压制，就直接关掉。
         if (autoSession && offAppForeground == null && (active || hasVpnTransport(ctx))) {
-            log(ctx, "reconcile: no target alive but vpn still on -> schedule off")
+            log(ctx, LogCat.DIAG, "reconcile: no target alive but vpn still on -> schedule off")
             scheduleOff(ctx, "no target alive")
         }
         watchdogRunning = false
@@ -97,12 +97,12 @@ internal fun Engine.watchdogTick() {
             return
         }
         offAppForeground = null
-        log(ctx, "$suppressor is gone, auto vpn available again")
+        log(ctx, LogCat.DIAG, "$suppressor is gone, auto vpn available again")
     }
 
     if (!anyTargetAllowedOnNetwork(cfg)) {
         if (active) {
-            log(ctx, "reconcile: network type disabled -> off")
+            log(ctx, LogCat.DIAG, "reconcile: network type disabled -> off")
             turnOff("network type disabled")
             // turnOff 已经停掉并移除了本看门狗，不能再把自己排回去
             return
@@ -112,7 +112,7 @@ internal fun Engine.watchdogTick() {
     }
 
     if (!EnginePolicy.shouldEnsureForProcessState(anyTargetAlive(ctx, processes()))) {
-        log(ctx, "reconcile: target process gone -> off")
+        log(ctx, LogCat.DIAG, "reconcile: target process gone -> off")
         aliveTargets.clear()
         scheduleOff(ctx, "watchdog")
         watchdogRunning = false
@@ -120,7 +120,7 @@ internal fun Engine.watchdogTick() {
         // 只有「隧道确实没通、也没接管」才值得记一行：接管标记还没补上的那一两拍里，
         // 隧道其实已经通了，写成「vpn is off」会把人带偏（一口气刷三十条也是这么来的）
         if (!active && !ExternalControl.isKnown(ctx, cfg.vpnPackage) && !hasVpnTransport(ctx)) {
-            log(ctx, "reconcile: vpn is off but target alive -> enable")
+            log(ctx, LogCat.DIAG, "reconcile: vpn is off but target alive -> enable")
         }
         ensureVpn(ctx, cfg)
         // 没连上就快步重试：原来的固定 5 秒一拍会让「第一次没成功」再白等 5 秒

@@ -44,7 +44,7 @@ internal fun Engine.testClient(ctx: Context, pkg: String, mode: String) {
     // 用户手动测过一次，之前的「静默起不来」记录可能已经过时（换了节点、升级了客户端），
     // 清掉让下一轮重新从静默开始试
     ExternalControl.clearSilentFails(ctx, pkg)
-    log(ctx, "client test start: $pkg / $mode")
+    log(ctx, LogCat.START, "client test start: $pkg / $mode")
 
     // startMode 会回报**实际走通**的那条路：测试「外部控制」时如果客户端没有
     // START_CLASH、退回 VpnService 连上了，固定的就该是 service，否则下一轮
@@ -61,7 +61,7 @@ internal fun Engine.testClient(ctx: Context, pkg: String, mode: String) {
             "无法启动客户端的 VpnService"
         }
         RuntimeDiagnostics.publishClientTest(ctx, pkg, mode, "failure", detail)
-        log(ctx, "client test failed to start: $detail")
+        log(ctx, LogCat.START, "client test failed to start: $detail")
         return
     }
 
@@ -85,14 +85,14 @@ internal fun Engine.pollClientTest(
             ctx, pkg, mode, "success",
             if (mode == "activity") "外部控制成功，已固定该方式" else "VpnService 启动成功，已固定该方式",
         )
-        log(ctx, "client test success: $pkg / $mode (pinned)")
+        log(ctx, LogCat.START, "client test success: $pkg / $mode (pinned)")
         return
     }
     if (attempt >= 30) {
         RuntimeDiagnostics.publishClientTest(
             ctx, pkg, mode, "failure", "15 秒内没有检测到 VPN transport",
         )
-        log(ctx, "client test timeout: $pkg / $mode")
+        log(ctx, LogCat.START, "client test timeout: $pkg / $mode")
         return
     }
     handler.postDelayed({
@@ -107,5 +107,5 @@ internal fun Engine.forgetClientMode(ctx: Context, pkg: String) {
     ExternalControl.unpin(ctx, pkg)
     if (ModuleState.prewarmUnsupported(ctx) == pkg) ModuleState.setPrewarmUnsupported(ctx, null)
     RuntimeDiagnostics.publishClientTest(ctx, pkg, "", "idle", "已清除记住的启动方式")
-    log(ctx, "client mode forgotten: $pkg")
+    log(ctx, LogCat.START, "client mode forgotten: $pkg")
 }

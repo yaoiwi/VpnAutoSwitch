@@ -68,6 +68,15 @@ data class Diagnostics(
     val activeRule: String = "",
     val ruleDetail: String = "",
     /**
+     * 判定链：命中之前已经排除掉的条件，形如「已排除：暂停 · Wi-Fi关」。
+     *
+     * 「该开却没开」时，用户第一个问题是「是不是被别的规则挡住了」。只给命中项
+     * 回答不了这个问题，只能靠这一行。
+     */
+    val ruleTrace: String = "",
+    /** 这个客户端是否成功连上过（模块只在真看到隧道后记一笔） */
+    val everConnected: Boolean = false,
+    /**
      * 规则要求连上、但隧道还没起来的这一刻，卡在哪一步。
      *
      * 「命中规则」和「实际状态」都是「未连接」时，光看这两行分不出是模块在动手、
@@ -199,6 +208,8 @@ data class Diagnostics(
                 vpnConnected = hasVpnTransport(context),
                 activeRule = runtime?.optString("activeRule").orEmpty(),
                 ruleDetail = runtime?.optString("detail").orEmpty(),
+                ruleTrace = runtime?.optString("trace").orEmpty(),
+                everConnected = runtime?.optBoolean("everConnected", false) ?: false,
                 blocked = runtime?.optString("blocked").orEmpty(),
                 blockNeedsUser = runtime?.optBoolean("blockNeedsUser", false) ?: false,
                 readiness = runtime?.optString("readiness").orEmpty(),
@@ -398,26 +409,61 @@ class AppState(private val context: Context) {
             return
         }
         mainHandler.postDelayed({
-            val text = try {
-                Settings.Secure.getString(context.contentResolver, ModuleLog.FULL_KEY).orEmpty()
-            } catch (t: Throwable) {
-                ""
-            }
-            if (text.isNotEmpty()) {
-                try {
-                    context.sendBroadcast(
-                        Intent(Engine.ACTION_CLEAR_LOG_FULL).setPackage("android")
-                    )
-                } catch (t: Throwable) {
-                    // 清不掉只是多占一点设置空间
+            // 这份最多 1500 行、一百多 KB，主线程读会卡一帧
+            try {
+                executor.execute {
+                    val text = try {
+                        Settings.Secure.getString(
+                            context.contentResolver,
+                            ModuleLog.FULL_KEY,
+                        ).orEmpty()
+                    } catch (t: Throwable) {
+                        ""
+                    }
+                    if (text.isNotEmpty()) {
+                        try {
+                            context.sendBroadcast(
+                                Intent(Engine.ACTION_CLEAR_LOG_FULL).setPackage("android")
+                            )
+                        } catch (t: Throwable) {
+                            // 清不掉只是多占一点设置空间
+                        }
+                    }
+                    mainHandler.post { onReady(text) }
                 }
+            } catch (t: Throwable) {
+                onReady("")
             }
-            onReady(text)
         }, 700L)
     }
 
+    /** 最新一次读取的编号：后台线程排队时，只有最后一次的结果值得写回 */
+    private var diagnosticsSeq = 0
+
+    /**
+     * 读一遍系统侧状态。
+     *
+     * 这里要读十几次 Settings.Secure（每次都是一次跨进程调用），再查包管理器和网络状态。
+     * 以前是主线程直接做：打开诊断页、点刷新、内容变化触发的刷新都会卡一下，低端机上
+     * 能看出掉帧。现在整段丢给后台线程，只把结果搬回主线程赋值。
+     *
+     * 首屏那份仍然是同步读的——冷启动只做一次，换成异步会让状态卡先闪一下「模块未运行」，
+     * 比省下的几十毫秒更扎眼。
+     */
     fun refreshDiagnostics() {
-        diagnostics = Diagnostics.load(context, config)
+        val seq = ++diagnosticsSeq
+        val cfg = config
+        try {
+            executor.execute {
+                val next = Diagnostics.load(context, cfg)
+                mainHandler.post {
+                    // 单线程池是 FIFO，但快速连点时前面的结果已经过时，别拿它盖掉新的
+                    if (seq == diagnosticsSeq) diagnostics = next
+                }
+            }
+        } catch (t: Throwable) {
+            // 界面已销毁（线程池关了）：这次刷新没有意义
+        }
     }
 
     private var refreshPosted = false

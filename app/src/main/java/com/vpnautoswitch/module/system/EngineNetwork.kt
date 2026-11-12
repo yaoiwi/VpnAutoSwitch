@@ -17,7 +17,7 @@ internal fun Engine.registerNetworkCallback(ctx: Context) {
         // 顺手确认一次当前网络：开机早期注册成功、回调却迟迟不来时，lastTransport
         // 会一直停在 0，Wi-Fi 规则就整条失效。
         if (probeNetwork(ctx)) {
-            log(ctx, "network callback alive, current ${transportLabel()} ssid=${currentSsid.orEmpty()}")
+            log(ctx, LogCat.NET, "network callback alive, current ${transportLabel()} ssid=${ssidForLog(ctx, currentSsid)}")
             handler.post {
                 handleNetworkChanged()
                 publishRuntime(ctx)
@@ -40,7 +40,7 @@ internal fun Engine.registerNetworkCallback(ctx: Context) {
             val beforeSsid = currentSsid
             refreshSsid(ctx, transport == 1)
             if (changed || beforeSsid != currentSsid) {
-                log(ctx, "network -> ${transportLabel()} ssid=${currentSsid.orEmpty()}")
+                log(ctx, LogCat.NET, "network -> ${transportLabel()} ssid=${ssidForLog(ctx, currentSsid)}")
             }
             handler.post {
                 handleNetworkChanged()
@@ -58,18 +58,18 @@ internal fun Engine.registerNetworkCallback(ctx: Context) {
     try {
         cm.registerDefaultNetworkCallback(callback, handler)
         networkCallback = callback
-        log(ctx, "network callback registered")
+        log(ctx, LogCat.NET, "network callback registered")
         // 注册只保证「之后的变化」，注册这一刻网络已经连好时会不会补一次回调，各家 ROM
         // 不一样。这里主动看一眼当前网络，把 lastTransport / SSID 先填上。
         if (probeNetwork(ctx)) {
-            log(ctx, "network now ${transportLabel()} ssid=${currentSsid.orEmpty()}")
+            log(ctx, LogCat.NET, "network now ${transportLabel()} ssid=${ssidForLog(ctx, currentSsid)}")
             handler.post {
                 handleNetworkChanged()
                 publishRuntime(ctx)
             }
         }
     } catch (t: Throwable) {
-        log(ctx, "register network callback failed: $t")
+        log(ctx, LogCat.NET, "register network callback failed: $t")
     }
 }
 
@@ -263,17 +263,17 @@ internal fun Engine.handleNetworkChanged() {
     val hit = refreshWifiSuppression(ctx, cfg)
     if (hit != null) {
         if (VpnSwitcher.isActive(ctx.contentResolver)) {
-            log(ctx, "wifi \"$hit\" -> turn off")
-            turnOff("wifi off: $hit")
+            log(ctx, LogCat.NET, "wifi \"$hit\" -> turn off")
+            turnOff("wifi off: ${ssidForLog(ctx, hit)}")
         } else {
-            log(ctx, "wifi \"$hit\" -> keep off")
+            log(ctx, LogCat.NET, "wifi \"${ssidForLog(ctx, hit)}\" -> keep off")
         }
         stopWatchdog()
         return
     }
     val ssid = currentSsid
     if (!ssid.isNullOrEmpty() && cfg.wifiOn.contains(ssid)) {
-        log(ctx, "wifi \"$ssid\" -> turn on")
+        log(ctx, LogCat.NET, "wifi \"${ssidForLog(ctx, ssid)}\" -> turn on")
         // 这是一个新的开启意图，取消此前排队的关闭任务
         offToken++
         ensureVpn(ctx, cfg)
@@ -283,7 +283,7 @@ internal fun Engine.handleNetworkChanged() {
 
     if (!anyTargetAllowedOnNetwork(cfg)) {
         if (VpnSwitcher.isActive(ctx.contentResolver)) {
-            log(ctx, "network type disabled -> turn off")
+            log(ctx, LogCat.NET, "network type disabled -> turn off")
             turnOff("network type disabled")
         }
         return

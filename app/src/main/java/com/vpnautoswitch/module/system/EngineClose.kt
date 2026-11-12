@@ -200,7 +200,7 @@ internal fun Engine.verifyOff(
     if (!closeChainValid(ctx, expectedPackage, generation)) return
     if (!hasVpnTransport(ctx, fresh = true)) {
         noteVpnDown(ctx)
-        log(ctx, "verify: vpn is down")
+        log(ctx, LogCat.STOP, "verify: vpn is down")
         endCloseChain(ctx, generation)
         return
     }
@@ -234,7 +234,7 @@ internal fun Engine.verifyOff(
         },
     )
     if (skipBroadcast && EnginePolicy.StopStep.BROADCAST in plan) {
-        log(ctx, "verify: 跳过 STOP 广播（连续 $broadcastFailures 次没有反应，等也是白等）")
+        log(ctx, LogCat.STOP, "verify: 跳过 STOP 广播（连续 $broadcastFailures 次没有反应，等也是白等）")
     }
 
     // 1) 无 UI：给客户端发它自己的停止广播（Clash 系支持）。
@@ -250,7 +250,7 @@ internal fun Engine.verifyOff(
                     // 这次管用了：把「无效」的结论清掉，客户端升级后还能重新给机会
                     ModuleState.noteBroadcastResult(ctx, expectedPackage, true)
                     noteVpnDown(ctx)
-                    log(ctx, "verify: vpn is down (client stopped)")
+                    log(ctx, LogCat.STOP, "verify: vpn is down (client stopped)")
                     endCloseChain(ctx, generation)
                 } else {
                     ModuleState.noteBroadcastResult(ctx, expectedPackage, false)
@@ -342,11 +342,11 @@ internal fun Engine.startOffGuard(ctx: Context, req: Engine.GuardRequest) {
                 // 客户端会自己把 VPN 拉回来，这时候再 bind 一次只会让它更快连上
                 if (pendingPrewarm != null) {
                     pendingPrewarm = null
-                    log(ctx, "prewarm cancelled: 客户端会自己重连，本轮不预热")
+                    log(ctx, LogCat.STOP, "prewarm cancelled: 客户端会自己重连，本轮不预热")
                 }
                 return
             }
-            log(ctx, "guard: vpn came back -> re-off ($attempts/$MAX_GUARD_ATTEMPTS)")
+            log(ctx, LogCat.STOP, "guard: vpn came back -> re-off ($attempts/$MAX_GUARD_ATTEMPTS)")
             // 走完整关闭链（停止广播 → 磁贴 → 强停），而不是只点磁贴：
             // 磁贴是切换语义，连续点两次会把 VPN 又打开
             chainGen = ++offGeneration
@@ -409,17 +409,17 @@ internal fun Engine.maybePrewarm(ctx: Context) {
     val cfgNow = ConfigRepo.get(ctx)
     if (!cfgNow.enabled || cfgNow.vpnPackage != req.vpnPackage) {
         pendingPrewarm = null
-        log(ctx, "prewarm cancelled: 客户端或开关已变")
+        log(ctx, LogCat.STOP, "prewarm cancelled: 客户端或开关已变")
         return
     }
     if (userOff || automationPaused) {
         pendingPrewarm = null
-        log(ctx, "prewarm skipped: 已停止自动控制")
+        log(ctx, LogCat.STOP, "prewarm skipped: 已停止自动控制")
         return
     }
     if (aliveTargets.isNotEmpty() || offAppForeground != null) {
         pendingPrewarm = null
-        log(ctx, "prewarm skipped: 目标应用已回到前台，不用预热")
+        log(ctx, LogCat.STOP, "prewarm skipped: 目标应用已回到前台，不用预热")
         return
     }
     // 主链还在跑：它收尾时会再叫一次，这里不插队
@@ -449,13 +449,13 @@ internal fun Engine.maybePrewarm(ctx: Context) {
         // 隧道还在：这一轮不是「关掉了」的状态，预热会让它更难断
         EnginePolicy.PrewarmGate.SKIP_TRANSPORT -> {
             pendingPrewarm = null
-            log(ctx, "prewarm skipped: 隧道还连着，这一轮不用预热")
+            log(ctx, LogCat.STOP, "prewarm skipped: 隧道还连着，这一轮不用预热")
             return
         }
         // 进程还活着就已经是热的，什么都不用做
         EnginePolicy.PrewarmGate.SKIP_ALIVE -> {
             pendingPrewarm = null
-            log(ctx, "prewarm skipped: 客户端进程还活着，不用预热")
+            log(ctx, LogCat.STOP, "prewarm skipped: 客户端进程还活着，不用预热")
             return
         }
         // 刚强停过：bind 会把刚进入 stopped 状态的客户端拉回来，稍等一下再试，
@@ -463,7 +463,7 @@ internal fun Engine.maybePrewarm(ctx: Context) {
         EnginePolicy.PrewarmGate.SKIP_FORCE_STOP -> {
             val wait = (lastForceStopAt + PREWARM_AFTER_FORCE_STOP_MS - now + 300L)
                 .coerceAtLeast(300L)
-            log(ctx, "prewarm: 刚强停过，${wait}ms 后再预热")
+            log(ctx, LogCat.STOP, "prewarm: 刚强停过，${wait}ms 后再预热")
             handler.postDelayed({ maybePrewarm(ctx) }, wait)
             return
         }
@@ -472,7 +472,7 @@ internal fun Engine.maybePrewarm(ctx: Context) {
     pendingPrewarm = null
     // 上一轮强停可能留下了 stopped 标记，先清掉再 bind，否则拉不起来
     val unstopped = Packages.unstop(req.vpnPackage)
-    log(ctx, "prewarm: 开始预热 ${req.vpnPackage}（清除 stopped=$unstopped）")
+    log(ctx, LogCat.STOP, "prewarm: 开始预热 ${req.vpnPackage}（清除 stopped=$unstopped）")
     if (!ExternalControl.prewarm(ctx, req.vpnPackage, handler)) return
     handler.postDelayed({ verifyPrewarm(ctx, req) }, PREWARM_CHECK_MS)
 }
@@ -491,7 +491,7 @@ internal fun Engine.verifyPrewarm(ctx: Context, req: Engine.PrewarmRequest) {
     if (aliveTargets.isNotEmpty() || offAppForeground != null) return
     if (!hasVpnTransport(ctx, fresh = true)) return
     ModuleState.setPrewarmUnsupported(ctx, req.vpnPackage)
-    log(ctx, "prewarm: 客户端一被唤醒就自己连上了，以后不再预热（重启后也记住），并再关一次")
+    log(ctx, LogCat.STOP, "prewarm: 客户端一被唤醒就自己连上了，以后不再预热（重启后也记住），并再关一次")
     val generation = ++offGeneration
     closeChainRunning = true
     closeChainGen = generation
@@ -544,7 +544,7 @@ internal fun Engine.verifyOffStep(
     val cfg = ConfigRepo.get(ctx)
     if (!hasVpnTransport(ctx, fresh = true)) {
         noteVpnDown(ctx)
-        log(ctx, "verify: vpn is down")
+        log(ctx, LogCat.STOP, "verify: vpn is down")
         endCloseChain(ctx, generation)
         return
     }
@@ -557,7 +557,7 @@ internal fun Engine.verifyOffStep(
         awaitDown(ctx, expectedPackage, generation, 2_500L) { down ->
             if (down) {
                 noteVpnDown(ctx)
-                log(ctx, "verify: vpn is down (client stop activity)")
+                log(ctx, LogCat.STOP, "verify: vpn is down (client stop activity)")
                 endCloseChain(ctx, generation)
             } else {
                 verifyOffStep(ctx, expectedPackage, generation, false, plan)
@@ -594,7 +594,7 @@ internal fun Engine.verifyOffStep(
             awaitDown(ctx, expectedPackage, generation, 1_200L) { down ->
                 if (down) {
                     noteVpnDown(ctx)
-                    log(ctx, "verify: vpn is down (qs tile)")
+                    log(ctx, LogCat.STOP, "verify: vpn is down (qs tile)")
                     endCloseChain(ctx, generation)
                 } else {
                     finishVerifyOff(ctx, expectedPackage, generation, 0, plan)
@@ -604,7 +604,7 @@ internal fun Engine.verifyOffStep(
         }
         // 磁贴存在但点不动（ROM 限制 / 磁贴未启用）：继续走后面的手段，但留个记录，
         // 否则日志里只会看到「温和手段没关掉」，查不出是哪一步失效
-        log(ctx, "verify: 快捷磁贴点击未生效，继续下一种手段")
+        log(ctx, LogCat.STOP, "verify: 快捷磁贴点击未生效，继续下一种手段")
     }
     finishVerifyOff(ctx, expectedPackage, generation, 0, plan)
 }
@@ -642,12 +642,12 @@ internal fun Engine.finishVerifyOff(
     if (attempt == 0 && !stopServiceTried && expectedPackage.isNotEmpty()) {
         stopServiceTried = true
         if (ExternalControl.stopVpnService(ctx, expectedPackage)) {
-            log(ctx, "verify: 先停客户端 VpnService，等它自己断开")
+            log(ctx, LogCat.STOP, "verify: 先停客户端 VpnService，等它自己断开")
             handler.postDelayed({
                 if (!closeChainValid(ctx, expectedPackage, generation)) return@postDelayed
                 if (!hasVpnTransport(ctx, fresh = true)) {
                     noteVpnDown(ctx)
-                    log(ctx, "verify: vpn is down (VpnService stopped)")
+                    log(ctx, LogCat.STOP, "verify: vpn is down (VpnService stopped)")
                     endCloseChain(ctx, generation)
                 } else {
                     finishVerifyOff(ctx, expectedPackage, generation, attempt, plan)
@@ -666,19 +666,19 @@ internal fun Engine.finishVerifyOff(
         if (cfg.keepClientAlive && cfg.forceStopVpn && expectedPackage.isNotEmpty() &&
             chainForceStopAllowed
         ) {
-            log(ctx, "verify: 温和手段没关掉，改为强制停止（稍后会重新预热进程）")
+            log(ctx, LogCat.STOP, "verify: 温和手段没关掉，改为强制停止（稍后会重新预热进程）")
             finishVerifyOff(
                 ctx, expectedPackage, generation, attempt,
                 listOf(EnginePolicy.StopStep.FORCE_STOP),
             )
             return
         }
-        log(ctx, "verify: vpn still up, no further step allowed")
+        log(ctx, LogCat.STOP, "verify: vpn still up, no further step allowed")
         endCloseChain(ctx, generation)
         return
     }
     if (attempt >= MAX_FORCE_STOP_ATTEMPTS) {
-        log(ctx, "verify: still up after $attempt force stops, giving up")
+        log(ctx, LogCat.STOP, "verify: still up after $attempt force stops, giving up")
         RuntimeDiagnostics.publishFailure(ctx, "stop", expectedPackage, attempt)
         endCloseChain(ctx, generation)
         return
@@ -723,7 +723,7 @@ internal fun Engine.finishVerifyOff(
             // 强停这条路是绝大多数关闭的终点（17:49:58、17:53:37 都是），
             // 结果只有走磁贴 / 广播成功的少数情况才有提示。
             noteVpnDown(ctx)
-            log(ctx, "verify: disconnected after force stop")
+            log(ctx, LogCat.STOP, "verify: disconnected after force stop")
             endCloseChain(ctx, generation)
         } else {
             // 强停后隧道还在：多半是 VPN 会话没拆完，system_server 又把客户端的
@@ -745,7 +745,7 @@ internal fun Engine.forceStop(ctx: Context, pkg: String): Boolean = try {
     am.javaClass.getMethod("forceStopPackage", String::class.java).invoke(am, pkg)
     true
 } catch (t: Throwable) {
-    log(ctx, "force stop failed: $t")
+    log(ctx, LogCat.STOP, "force stop failed: $t")
     RuntimeDiagnostics.publishFailure(ctx, "forceStop", pkg, 0)
     false
 }

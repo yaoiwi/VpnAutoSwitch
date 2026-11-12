@@ -62,12 +62,12 @@ internal fun Engine.handleForeground(pkg: String) {
         offToken++
         // 即使 VPN 当前没连上，也要让 600ms 后准备启动的服务失效
         startToken++
-        if (first) log(ctx, "$pkg -> foreground (off trigger)")
+        if (first) log(ctx, LogCat.DIAG, "$pkg -> foreground (off trigger)")
         if (VpnSwitcher.isActive(ctx.contentResolver) || hasVpnTransport(ctx)) {
             turnOff("opened $pkg")
         } else {
             stopWatchdog()
-            if (first) log(ctx, "vpn already off, keep off while $pkg is open")
+            if (first) log(ctx, LogCat.DIAG, "vpn already off, keep off while $pkg is open")
         }
         return
     }
@@ -80,13 +80,13 @@ internal fun Engine.handleForeground(pkg: String) {
 
     // 当前 Wi-Fi 在「关闭 VPN」列表里：不自动开启
     if (wifiSuppressed) {
-        log(ctx, "$pkg -> foreground, but wifi rule keeps vpn off")
+        log(ctx, LogCat.DIAG, "$pkg -> foreground, but wifi rule keeps vpn off")
         return
     }
 
     if (offAppForeground != null) {
         offAppForeground = null
-        log(ctx, "back to $pkg, auto enable resumed")
+        log(ctx, LogCat.DIAG, "back to $pkg, auto enable resumed")
     }
 
     // 目标又回到前台，取消上一次「进程结束」排队的关闭
@@ -105,7 +105,7 @@ internal fun Engine.handleForeground(pkg: String) {
         userOff = false
         // 新一轮「用户主动打开」，抖动重试次数重新开始算
         flapRetries = 0
-        log(ctx, "$pkg reopened -> auto enable resumed")
+        log(ctx, LogCat.DIAG, "$pkg reopened -> auto enable resumed")
     }
     // 是「重新打开」就当作一次全新的连接请求，别被上一轮的掉线状态挡住
     if (freshOpen) wasConnected = false
@@ -114,7 +114,7 @@ internal fun Engine.handleForeground(pkg: String) {
     if (isNetworkAllowed(cfg, pkg)) {
         ensureVpn(ctx, cfg, pkg)
     } else {
-        log(ctx, "network type disabled, skip enabling")
+        log(ctx, LogCat.DIAG, "network type disabled, skip enabling")
     }
     startWatchdog()
 }
@@ -132,7 +132,7 @@ internal fun Engine.logForeground(ctx: Context, pkg: String, freshOpen: Boolean)
     if (repeated || (!freshOpen && hasVpnTransport(ctx))) return
     lastLoggedForegroundPkg = pkg
     lastForegroundLogAt = now
-    log(ctx, "$pkg -> foreground")
+    log(ctx, LogCat.DIAG, "$pkg -> foreground")
 }
 
 internal fun Engine.handleProcessDied(pkg: String, detail: String? = null) {
@@ -174,7 +174,7 @@ internal fun Engine.handleProcessDied(pkg: String, detail: String? = null) {
     val removed = aliveTargets.remove(pkg)
     if (!removed) return
     val ctx = context()
-    log(ctx, "$pkg -> process died${detail?.let { " ($it)" } ?: ""}")
+    log(ctx, LogCat.DIAG, "$pkg -> process died${detail?.let { " ($it)" } ?: ""}")
     if (lastForeground == pkg) lastForeground = null
     if (wasForeground) lastForegroundTarget = null
     // 按用户选的口径判断要不要收会话（只断当前 / 任意一个 / 全部退出）。
@@ -195,7 +195,7 @@ internal fun Engine.handleProcessDied(pkg: String, detail: String? = null) {
         )
     } else if (dismissMode == Config.DISMISS_ALL && aliveTargets.isNotEmpty()) {
         // 「全部退出才断」最难理解的地方就是「为什么没断」，这一行替用户回答
-        log(ctx, "session kept: ${aliveTargets.size} target(s) still alive（全部退出才断）")
+        log(ctx, LogCat.DIAG, "session kept: ${aliveTargets.size} target(s) still alive（全部退出才断）")
     }
     if (!EnginePolicy.shouldScheduleOffAfterDeath(true, aliveTargets.size)) return
     // 应用有时只是进程重启（被系统回收后立刻恢复），等一下再决定要不要关，
@@ -232,7 +232,7 @@ internal fun Engine.handleTaskRemoved(pkg: String) {
     // 真划掉时桌面的 resume 事件一般紧跟着这个回调，所以这里先挂一笔，两秒后再看：
     // 那时它已经不在前台，就按正常退出处理，整体只是晚了 2 秒。
     if (EnginePolicy.isStaleTaskRemoval(pkg, lastForeground)) {
-        log(ctx, "$pkg -> task removed ignored（仍是前台应用，判定为残留任务记录）")
+        log(ctx, LogCat.DIAG, "$pkg -> task removed ignored（仍是前台应用，判定为残留任务记录）")
         scheduleTaskRecheck(ctx, cfg, pkg)
         return
     }
@@ -244,10 +244,10 @@ internal fun Engine.handleTaskRemoved(pkg: String) {
             windowMs = UI_TASK_REMOVAL_GUARD_MS,
         )
     ) {
-        log(ctx, "$pkg -> task removed ignored（刚打开客户端界面，判定为被挤到后台）")
+        log(ctx, LogCat.DIAG, "$pkg -> task removed ignored（刚打开客户端界面，判定为被挤到后台）")
         return
     }
-    log(ctx, "$pkg -> task removed")
+    log(ctx, LogCat.DIAG, "$pkg -> task removed")
     applyTaskRemoval(ctx, cfg, pkg)
 }
 
@@ -270,7 +270,7 @@ internal fun Engine.logTaskRemovalSkip(
     val last = taskSkipLoggedAt[key]
     if (last != null && now - last < TASK_SKIP_LOG_MS) return
     taskSkipLoggedAt[key] = now
-    log(ctx, "$pkg -> task removed ignored（${EnginePolicy.taskRemovalSkipReason(verdict)}）")
+    log(ctx, LogCat.DIAG, "$pkg -> task removed ignored（${EnginePolicy.taskRemovalSkipReason(verdict)}）")
 }
 
 /** 残留任务记录的复查：两秒后该包仍不在前台，才按划掉处理 */
@@ -293,7 +293,7 @@ internal fun Engine.scheduleTaskRecheck(ctx: Context, cfg: Config, pkg: String) 
             logTaskRemovalSkip(ctx, pkg, verdict)
             return@postDelayed
         }
-        log(ctx, "$pkg -> task removed（复查确认已离开前台）")
+        log(ctx, LogCat.DIAG, "$pkg -> task removed（复查确认已离开前台）")
         applyTaskRemoval(ctx, ConfigRepo.get(ctx), pkg)
     }, TASK_RECHECK_MS)
 }
@@ -321,7 +321,7 @@ internal fun Engine.applyTaskRemoval(ctx: Context, cfg: Config, pkg: String) {
             else "a background target was dismissed -> end session",
         )
     } else if (cfg.dismissMode == Config.DISMISS_ALL && aliveTargets.isNotEmpty()) {
-        log(ctx, "session kept: ${aliveTargets.size} target(s) still alive（全部退出才断）")
+        log(ctx, LogCat.DIAG, "session kept: ${aliveTargets.size} target(s) still alive（全部退出才断）")
     }
     if (EnginePolicy.shouldScheduleOffAfterDeath(true, aliveTargets.size)) {
         scheduleOff(ctx, "$pkg task removed")

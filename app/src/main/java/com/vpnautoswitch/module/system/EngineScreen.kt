@@ -22,7 +22,7 @@ internal fun Engine.onScreenOff(ctx: Context) {
     val minutes = cfg.screenOffMinutes.coerceIn(1, SCREEN_OFF_MAX_MINUTES)
     screenOffAt = SystemClock.elapsedRealtime()
     val token = ++screenOffToken
-    log(ctx, "screen off -> disconnect in ${minutes}min")
+    log(ctx, LogCat.DIAG, "screen off -> disconnect in ${minutes}min")
     handler.postDelayed({
         if (token != screenOffToken) return@postDelayed
         val current = ConfigRepo.get(ctx)
@@ -37,7 +37,7 @@ internal fun Engine.onScreenOff(ctx: Context) {
         ) {
             return@postDelayed
         }
-        log(ctx, "screen off ${current.screenOffMinutes}min -> off")
+        log(ctx, LogCat.DIAG, "screen off ${current.screenOffMinutes}min -> off")
         screenOffActive = true
         turnOff("screen off")
     }, minutes * 60_000L)
@@ -53,7 +53,7 @@ internal fun Engine.cancelScreenOffTimer(ctx: Context) {
     if (screenOffToken == 0) return
     screenOffToken++
     screenOffAt = 0L
-    if (!screenOffActive) log(ctx, "screen on -> cancel the pending disconnect")
+    if (!screenOffActive) log(ctx, LogCat.DIAG, "screen on -> cancel the pending disconnect")
 }
 
 /** 解锁：解除锁屏断开状态，目标应用还活着就按原来的规则重新连上 */
@@ -62,7 +62,7 @@ internal fun Engine.onScreenUnlocked(ctx: Context) {
     screenOffActive = false
     val cfg = ConfigRepo.get(ctx)
     if (!cfg.enabled || cfg.vpnPackage.isEmpty()) return
-    log(ctx, "unlocked -> auto connect available again")
+    log(ctx, LogCat.DIAG, "unlocked -> auto connect available again")
     if (aliveTargets.isNotEmpty() || isWifiOnActive(cfg)) {
         ensureVpn(ctx, cfg)
         startWatchdog()
@@ -103,7 +103,7 @@ internal fun Engine.onUserUnlocked(ctx: Context) {
         }
         return
     }
-    log(ctx, "user unlocked -> retry starting the module app")
+    log(ctx, LogCat.DIAG, "user unlocked -> retry starting the module app")
     warmupConfig(ctx, 0)
     replayPendingEvents()
     publishRuntime(ctx)

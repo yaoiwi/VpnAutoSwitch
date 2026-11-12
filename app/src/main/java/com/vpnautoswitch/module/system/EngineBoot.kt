@@ -115,9 +115,9 @@ internal fun Engine.warmupConfig(ctx: Context, attempt: Int) {
     if (cfg != null) {
         when {
             attempt > 0 ->
-                log(ctx, "config ready after ${attempt * 2}s (source=${ConfigRepo.lastSource()})")
+                log(ctx, LogCat.BOOT, "config ready after ${attempt * 2}s (source=${ConfigRepo.lastSource()})")
             ConfigRepo.lastSource() != "provider" ->
-                log(ctx, "config from ${ConfigRepo.lastSource()} cache, app process not up yet")
+                log(ctx, LogCat.BOOT, "config from ${ConfigRepo.lastSource()} cache, app process not up yet")
         }
         // 配置是异步到的：它到达之前发生的网络事件会被丢掉（那时 ConfigRepo 还是空的），
         // 而「开机时 Wi-Fi 已经连着、用户直接开目标应用」正是最常见的情形。
@@ -128,14 +128,14 @@ internal fun Engine.warmupConfig(ctx: Context, attempt: Int) {
         }
         return
     }
-    if (attempt == 0) log(ctx, "config not ready yet, waiting for the app process")
+    if (attempt == 0) log(ctx, LogCat.BOOT, "config not ready yet, waiting for the app process")
     if (attempt >= CONFIG_WARMUP_ATTEMPTS) {
         // 设备还没解锁：App 的非 directBootAware 组件一律起不来，怎么重试都白搭。
         // 不在这里判死刑，降到 30 秒一次等解锁；解锁广播会立刻再叫一次（见 onUserUnlocked）。
         if (isUserUnlocked(ctx) == false) {
             if (!lockedWaitLogged) {
                 lockedWaitLogged = true
-                log(ctx, "config: 设备还没解锁，模块 App 起不来，等解锁后自动重试")
+                log(ctx, LogCat.BOOT, "config: 设备还没解锁，模块 App 起不来，等解锁后自动重试")
             }
             // 解锁那一刻 App 才允许启动，所以每轮都再敲一次门：成功的那次会打
             // 「module app process requested」，从日志能直接看出解锁后是否接上了
@@ -175,7 +175,7 @@ internal fun Engine.kickAppProcess(ctx: Context, verbose: Boolean = true) {
             ),
         )
         if (started != null) {
-            log(ctx, "config: module app process requested")
+            log(ctx, LogCat.BOOT, "config: module app process requested")
         } else {
             // 返回 null 表示系统没接这次启动，原因可能是包还在 stopped、用户还没解锁、
             // 或者 ROM 拦了后台启动。这三者处理方式完全不同，所以把现场一起打出来。
@@ -188,7 +188,7 @@ internal fun Engine.kickAppProcess(ctx: Context, verbose: Boolean = true) {
             } catch (t: Throwable) {
                 // 光知道「没找到」不够：开机初期 PackageManager 自己也可能抛 NPE，
                 // 那种情况组件其实是好的，下一次就成功。把异常类型带上才分得清。
-                if (verbose) log(ctx, "config: 查同步服务失败（${t.javaClass.simpleName}: ${t.message}）")
+                if (verbose) log(ctx, LogCat.BOOT, "config: 查同步服务失败（${t.javaClass.simpleName}: ${t.message}）")
                 false
             }
             val stopped = try {
@@ -208,11 +208,11 @@ internal fun Engine.kickAppProcess(ctx: Context, verbose: Boolean = true) {
             val line = "config: 模块 App 的同步服务起不来" +
                 "（service=$serviceFound, stopped=$stopped, enabled=$enabled, " +
                 "unlocked=$unlocked），继续等 provider"
-            if (verbose) log(ctx, line) else XposedBridge.log("[$TAG] $line")
+            if (verbose) log(ctx, LogCat.BOOT, line) else XposedBridge.log("[$TAG] $line")
         }
     } catch (t: Throwable) {
         val line = "config: 拉不起模块 App 进程（$t），继续等 provider"
-        if (verbose) log(ctx, line) else XposedBridge.log("[$TAG] $line")
+        if (verbose) log(ctx, LogCat.BOOT, line) else XposedBridge.log("[$TAG] $line")
     }
 }
 
@@ -226,7 +226,7 @@ internal fun Engine.noteConfigMissing(ctx: Context, pkg: String) {
     val now = SystemClock.elapsedRealtime()
     if (now - lastConfigMissingAt < CONFIG_MISSING_LOG_MS) return
     lastConfigMissingAt = now
-    log(ctx, "config unavailable, $pkg ignored (start the module app once)")
+    log(ctx, LogCat.BOOT, "config unavailable, $pkg ignored (start the module app once)")
 }
 
 internal fun Engine.heartbeatDelay(): Long {
@@ -279,10 +279,10 @@ internal fun Engine.cleanupStaleState(ctx: Context) {
         if (VpnSwitcher.isActive(ctx.contentResolver)) {
             val cfg = ConfigRepo.get(ctx)
             VpnSwitcher.disable(ctx, cfg.restoreOriginal, cfg.vpnPackage)
-            log(ctx, "stale vpn state cleaned on boot")
+            log(ctx, LogCat.BOOT, "stale vpn state cleaned on boot")
         }
     } catch (t: Throwable) {
-        log(ctx, "cleanup failed: $t")
+        log(ctx, LogCat.BOOT, "cleanup failed: $t")
     }
 }
 
@@ -302,7 +302,7 @@ internal fun Engine.registerRebootReceiver(ctx: Context): Boolean {
                 ACTION_DUMP_LOG -> {
                     // 只在用户点了「导出完整日志」时才写这一大串：常驻会把设置撑大
                     val lines = ModuleLog.dump(ctx)
-                    if (lines < 0) log(ctx, "dump full log failed")
+                    if (lines < 0) log(ctx, LogCat.BOOT, "dump full log failed")
                 }
                 ACTION_CLEAR_LOG_FULL -> ModuleLog.clearFull(ctx)
                 ModuleContract.ACTION_TOGGLE_PAUSE -> togglePause(ctx)
@@ -351,12 +351,12 @@ internal fun Engine.registerRebootReceiver(ctx: Context): Boolean {
             ctx.registerReceiver(receiver, filter, REBOOT_PERMISSION, handler)
         }
         rebootReceiverRegistered = true
-        log(ctx, "reboot receiver registered")
+        log(ctx, LogCat.BOOT, "reboot receiver registered")
         return true
     } catch (t: Throwable) {
         // LSPosed 往往比 AMS 上线早，这时 registerReceiver 会 NPE。这属于预期内的
         // 「还没就绪」，retryBoot 两秒后会再来，所以别写成 failed——那看起来像坏了。
-        log(ctx, "reboot receiver not ready yet (${t.javaClass.simpleName}), retry in 2s")
+        log(ctx, LogCat.BOOT, "reboot receiver not ready yet (${t.javaClass.simpleName}), retry in 2s")
         return false
     }
 }

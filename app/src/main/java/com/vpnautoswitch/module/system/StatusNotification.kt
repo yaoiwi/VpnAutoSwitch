@@ -63,7 +63,7 @@ internal object StatusNotification {
         if (blocked != null) {
             if (blocked != lastBlockReason) {
                 lastBlockReason = blocked
-                Engine.log(ctx, "status notification skipped: $blocked")
+                Engine.log(ctx, LogCat.DIAG, "status notification skipped: $blocked")
             }
             return
         }
@@ -82,7 +82,7 @@ internal object StatusNotification {
             lastKey = key
             if (!loggedSent) {
                 loggedSent = true
-                Engine.log(ctx, "status notification -> app")
+                Engine.log(ctx, LogCat.DIAG, "status notification -> app")
             }
         }
     }
@@ -192,7 +192,7 @@ internal object StatusNotification {
         // 通知失败绝不能影响 VPN 控制；只在第一次记一行，避免刷屏
         if (!loggedFailure) {
             loggedFailure = true
-            Engine.log(ctx, "status notification failed: $t")
+            Engine.log(ctx, LogCat.DIAG, "status notification failed: $t")
         }
         false
     }

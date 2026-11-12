@@ -101,7 +101,14 @@ data class Config(
      * 通知由 system_server 里的模块发出（App 不常驻，没法实时感知状态），
      * 所以通知归属会显示成「Android 系统」，这是权限决定的，不是 bug。
      */
-    val statusNotification: Boolean = false
+    val statusNotification: Boolean = false,
+    /**
+     * 日志与诊断报告里显示完整的 Wi-Fi 名称。
+     *
+     * 默认关：SSID 常常带着姓名、房号、公司名，而排障的标准动作是把日志贴到 issue。
+     * 关掉时显示成 `Ho***Fi`，同一个名字在日志里始终是同一个样子，照样能对比「切没切网」。
+     */
+    val fullSsid: Boolean = false
 ) {
 
     /** 某个应用生效的网络条件：有覆盖用覆盖，否则看全局 */
@@ -149,6 +156,7 @@ data class Config(
         o.put("forceStopNow", forceStopImmediately)
         o.put("screenOff", disconnectOnScreenOff)
         o.put("screenOffMin", screenOffMinutes)
+        o.put("fullSsid", fullSsid)
         return o.toString()
     }
 
@@ -156,8 +164,13 @@ data class Config(
         const val PREFS_NAME = "vpn_autoswitch_config"
         internal const val KEY_JSON = "config_json"
 
-        /** 配置结构版本：2 起多了「单应用网络覆盖」与「常驻状态通知」，旧版本读新配置会忽略这些字段 */
-        const val SCHEMA = 2
+        /**
+         * 配置结构版本。
+         *
+         * 2：多了「单应用网络覆盖」与「常驻状态通知」。
+         * 3：多了 [Config.fullSsid]。旧版本读到新配置只会忽略这个键，行为不变。
+         */
+        const val SCHEMA = 3
 
         /** 界面风格：HyperOS / Miuix 那套 */
         const val THEME_HYPER = "hyper"
@@ -240,6 +253,7 @@ data class Config(
                     forceStopImmediately = o.optBoolean("forceStopNow", false),
                     disconnectOnScreenOff = o.optBoolean("screenOff", false),
                     screenOffMinutes = o.optInt("screenOffMin", 10).coerceIn(1, 120),
+                    fullSsid = o.optBoolean("fullSsid", false),
                     darkMode = when (o.optString("darkMode", "system")) {
                         "dark" -> "dark"
                         "light" -> "light"

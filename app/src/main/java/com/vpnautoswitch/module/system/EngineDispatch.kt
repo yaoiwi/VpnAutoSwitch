@@ -52,7 +52,7 @@ internal fun Engine.prewarm(pkg: String) {
     lastPrewarmPkg = pkg
     lastPrewarmAt = now
 
-    log(ctx, "$pkg launching -> prewarm")
+    log(ctx, LogCat.DIAG, "$pkg launching -> prewarm")
     ensureVpn(ctx, cfg, pkg)
     // 点了又立刻退出时没人收尾，交给看门狗发现「没有目标存活」后再关
     startWatchdog()

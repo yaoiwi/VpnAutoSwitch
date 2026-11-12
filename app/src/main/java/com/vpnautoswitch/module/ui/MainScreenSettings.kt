@@ -583,6 +583,19 @@ internal fun LazyListScope.settingsItems(
         // 返回键只会关掉上面那个，用户会以为下面那份还开着
         var showClientAdapter by remember { mutableStateOf(false) }
         AppCard(modifier = Modifier.fillMaxWidth()) {
+            // 日志和报告常常被贴进 issue，而 SSID 里带着姓名、房号、公司名。
+            // 默认遮起来，需要自己看原文时再打开
+            SettingsSwitch(
+                title = "显示完整 Wi-Fi 名称",
+                summary = if (state.config.fullSsid) {
+                    "日志和报告里写完整名称。贴到公开场合前留意一下"
+                } else {
+                    "日志和报告里遮成 Ho***Fi(8)，避免贴出去时带上家庭或公司名称"
+                },
+                icon = MiuixIcons.Show,
+                checked = state.config.fullSsid,
+                onCheckedChange = { state.save(state.config.copy(fullSsid = it)) },
+            )
             SettingsActionWithArrow(
                 title = "一键自检",
                 icon = MiuixIcons.Info,
@@ -708,7 +721,8 @@ private fun LogBody(
     onRefresh: () -> Unit,
 ) {
     var onlyAbnormal by remember { mutableStateOf(false) }
-    val shown = LogFilter.select(lines, onlyAbnormal)
+    var tab by remember { mutableStateOf(LogFilter.Tab.ALL) }
+    val shown = LogFilter.select(lines, onlyAbnormal, tab)
     val copyText = shown.joinToString("\n")
     val copyLog = {
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -781,6 +795,30 @@ private fun LogBody(
             modifier = Modifier.weight(1f),
         )
     }
+    // 类别只用文字标签：五个按钮在窄屏上会挤成一团，标签点起来更快也更安静
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        LogFilter.Tab.values().forEach { candidate ->
+            val selected = candidate == tab
+            Text(
+                text = candidate.label,
+                fontSize = 12.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (selected) {
+                    MiuixTheme.colorScheme.onSurface
+                } else {
+                    MiuixTheme.colorScheme.onSurfaceVariantSummary
+                },
+                modifier = Modifier
+                    .clickable { tab = candidate }
+                    .padding(vertical = 4.dp),
+            )
+        }
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -792,7 +830,11 @@ private fun LogBody(
             onClick = { onlyAbnormal = !onlyAbnormal },
         )
         Text(
-            text = if (onlyAbnormal) "筛出 ${shown.size} / ${lines.size} 条" else "共 ${lines.size} 条，显示最近 60 条",
+            text = if (onlyAbnormal || tab != LogFilter.Tab.ALL) {
+                "筛出 ${shown.size} / ${lines.size} 条"
+            } else {
+                "共 ${lines.size} 条，显示最近 60 条"
+            },
             fontSize = 11.sp,
             // weight 把「清空」推到最右，按钮不会跟着文字长度左右乱跳
             modifier = Modifier.weight(1f).align(Alignment.CenterVertically),

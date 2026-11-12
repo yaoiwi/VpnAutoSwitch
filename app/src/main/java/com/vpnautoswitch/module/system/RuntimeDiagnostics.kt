@@ -42,6 +42,10 @@ internal object RuntimeDiagnostics {
         readiness: String = "",
         /** 本轮已经发出的启动请求次数 */
         attempt: Int = 0,
+        /** 判定链：命中前已经排除掉的条件，形如「已排除：暂停 · Wi-Fi关」 */
+        trace: String = "",
+        /** 这个客户端是否成功连上过；用来区分「没授权」和「这次没拉起来」 */
+        everConnected: Boolean = false,
     ) {
         try {
             val json = JSONObject()
@@ -55,6 +59,8 @@ internal object RuntimeDiagnostics {
                 .put("blockNeedsUser", blockNeedsUser)
                 .put("readiness", readiness)
                 .put("attempt", attempt)
+                .put("trace", trace)
+                .put("everConnected", everConnected)
             Settings.Secure.putString(ctx.contentResolver, RUNTIME_KEY, json.toString())
         } catch (t: Throwable) {
             XposedBridge.log("[$TAG] runtime snapshot failed: $t")
