@@ -24,6 +24,9 @@ import android.provider.Settings
  *   <包名>.action.STOP_CLASH
  *   <包名>.action.TOGGLE_CLASH
  * 这是官方给「快捷方式 / 自动化工具」用的入口，等价于用户在 App 里点连接。
+ *
+ * 后缀不是统一的：FlClash 导出的是 `<包名>.action.START` / `.STOP`（QuickActionActivity），
+ * 少一个 `_CLASH`。所以入口按客户端配置成候选列表，见 [ClientRecipe.startSuffixes]。
  */
 internal object ExternalControl {
 
@@ -42,6 +45,12 @@ internal object ExternalControl {
     /** 预热时等 onServiceConnected 的上限：客户端可能是冷启动，给足 6 秒 */
     private const val PREWARM_TIMEOUT_MS = 6_000L
 
+    /**
+     * 确认过「没有这个入口」的 `包名|后缀`。
+     *
+     * 按后缀分开记：一个客户端可能没有 `action.START_CLASH` 却有 `action.START`
+     * （FlClash 就是这样），按包名整体拉黑会让第二个候选永远试不到。
+     */
     private val unsupportedStart = HashSet<String>()
     private val unsupportedStop = HashSet<String>()
 
@@ -343,8 +352,8 @@ internal object ExternalControl {
     /** 重新测试时清掉“这个客户端不行”的缓存，允许重新探测。 */
     fun resetProbe(pkg: String) {
         if (pkg.isEmpty()) return
-        unsupportedStart.remove(pkg)
-        unsupportedStop.remove(pkg)
+        unsupportedStart.removeAll { it.startsWith("$pkg|") }
+        unsupportedStop.removeAll { it.startsWith("$pkg|") }
         noVpnService.remove(pkg)
     }
 
@@ -618,7 +627,7 @@ internal object ExternalControl {
     fun start(ctx: Context, pkg: String): Boolean {
         // 实测直接 startForegroundService 启动 TunService 时，服务起来了但隧道不建立
         // （拿不到应用自己的初始化上下文），所以优先走官方导出的外部控制入口。
-        if (launch(ctx, pkg, "action.START_CLASH", unsupportedStart)) return true
+        if (launch(ctx, pkg, startSuffixes(pkg), unsupportedStart)) return true
         return startVpnService(ctx, pkg)
     }
 
@@ -675,9 +684,9 @@ internal object ExternalControl {
     fun startModeWithUi(ctx: Context, pkg: String): String? {
         if (prefersService(ctx, pkg)) {
             if (startVpnService(ctx, pkg)) return "service"
-            if (launch(ctx, pkg, "action.START_CLASH", unsupportedStart)) return "activity"
+            if (launch(ctx, pkg, startSuffixes(pkg), unsupportedStart)) return "activity"
         } else {
-            if (launch(ctx, pkg, "action.START_CLASH", unsupportedStart)) return "activity"
+            if (launch(ctx, pkg, startSuffixes(pkg), unsupportedStart)) return "activity"
             if (startVpnService(ctx, pkg)) return "service"
         }
         return if (openUi(ctx, pkg)) "ui" else null
@@ -709,11 +718,23 @@ internal object ExternalControl {
     fun startMode(ctx: Context, pkg: String): String? {
         if (prefersService(ctx, pkg)) {
             if (startVpnService(ctx, pkg)) return "service"
-            return if (launch(ctx, pkg, "action.START_CLASH", unsupportedStart)) "activity" else null
+            return if (launch(ctx, pkg, startSuffixes(pkg), unsupportedStart)) "activity" else null
         }
-        if (launch(ctx, pkg, "action.START_CLASH", unsupportedStart)) return "activity"
+        if (launch(ctx, pkg, startSuffixes(pkg), unsupportedStart)) return "activity"
         return if (startVpnService(ctx, pkg)) "service" else null
     }
+
+    /**
+     * 这个客户端该试哪些启动入口。
+     *
+     * 认得出配方就按配方给的顺序（FlClash 只有 `action.START`，先试 `START_CLASH`
+     * 等于每次白查一次）；认不出来仍按 Clash 系的老后缀试，行为和 1.9.20 之前一致。
+     */
+    private fun startSuffixes(pkg: String): List<String> =
+        ClientRecipes.of(pkg)?.startSuffixes ?: DEFAULT_START_SUFFIXES
+
+    private fun stopSuffixes(pkg: String): List<String> =
+        ClientRecipes.of(pkg)?.stopSuffixes ?: DEFAULT_STOP_SUFFIXES
 
     /** 找出包里声明了 BIND_VPN_SERVICE 的服务（VpnService 实现） */
     private fun findVpnService(ctx: Context, pkg: String): String? = try {
@@ -728,7 +749,7 @@ internal object ExternalControl {
     }
 
     fun stop(ctx: Context, pkg: String): Boolean =
-        launch(ctx, pkg, "action.STOP_CLASH", unsupportedStop)
+        launch(ctx, pkg, stopSuffixes(pkg), unsupportedStop)
 
     /**
      * 无 UI 的停止请求。Clash 系在进程内注册了 `\.intent.action.CLASH_REQUEST_STOP`
@@ -745,45 +766,70 @@ internal object ExternalControl {
         false
     }
 
+    /**
+     * 按候选顺序找客户端导出的外部控制入口，命中就发出去。
+     *
+     * 以前只认 `action.START_CLASH` 一个后缀，FlClash 导出的 `action.START`
+     * 永远匹配不上，两条路都断，表现就是「模块对它完全没反应」（#19）。
+     *
+     * @param suffixes 候选后缀，拼成 `<包名>.<后缀>`；全部落空返回 false
+     */
     private fun launch(
         ctx: Context,
         pkg: String,
-        suffix: String,
+        suffixes: List<String>,
         unsupported: MutableSet<String>
     ): Boolean {
-        if (pkg.isEmpty() || pkg in unsupported) return false
+        if (pkg.isEmpty() || suffixes.isEmpty()) return false
 
-        val action = "$pkg.$suffix"
-        val intent = Intent(action)
-            .setPackage(pkg)
-            .addCategory(Intent.CATEGORY_DEFAULT)
+        var missing = 0
+        var freshMiss = false
 
-        val resolved = try {
-            ctx.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
-        } catch (t: Throwable) {
-            null
-        }
-        if (resolved == null) {
-            if (unsupported.add(pkg)) {
-                // 同一个入口 start / stop 都会查，所以文案不能写死「关闭」——
-                // 启动路径上出现「改用后面的手段关闭」会把人带到反方向。
-                ModuleLog.append(ctx, "$pkg 没有 $suffix 入口，改用备用方式")
+        for (suffix in suffixes) {
+            val key = "$pkg|$suffix"
+            if (key in unsupported) {
+                missing++
+                continue
             }
-            return false
+
+            val action = "$pkg.$suffix"
+            val intent = Intent(action)
+                .setPackage(pkg)
+                .addCategory(Intent.CATEGORY_DEFAULT)
+
+            val resolved = try {
+                ctx.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+            } catch (t: Throwable) {
+                null
+            }
+            if (resolved == null) {
+                if (unsupported.add(key)) freshMiss = true
+                missing++
+                continue
+            }
+
+            return try {
+                intent.addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS or
+                        Intent.FLAG_ACTIVITY_NO_ANIMATION
+                )
+                ctx.startActivity(intent)
+                ModuleLog.append(ctx, "external control: ${resolved.activityInfo.name} ($suffix)")
+                true
+            } catch (t: Throwable) {
+                ModuleLog.append(ctx, "external control failed: $t")
+                false
+            }
         }
 
-        return try {
-            intent.addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS or
-                    Intent.FLAG_ACTIVITY_NO_ANIMATION
+        // 只在第一次全部落空时写一行：轮询每秒都会走到这里，重复写会把日志刷满
+        if (freshMiss && missing == suffixes.size) {
+            ModuleLog.append(
+                ctx,
+                "$pkg 没有 ${suffixes.joinToString(" / ")} 入口，改用备用方式"
             )
-            ctx.startActivity(intent)
-            ModuleLog.append(ctx, "external control: ${resolved.activityInfo.name} ($suffix)")
-            true
-        } catch (t: Throwable) {
-            ModuleLog.append(ctx, "external control failed: $t")
-            false
         }
+        return false
     }
 }

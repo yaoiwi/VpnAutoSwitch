@@ -188,7 +188,11 @@ internal fun SelfCheckDialog(
                     text = "打开 LSPosed",
                     onClick = {
                         if (!state.openLsposed()) {
-                            Toast.makeText(context, "没有找到 LSPosed 管理器", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(
+                                context,
+                                "打不开 LSPosed，可能没安装或已被冻结",
+                                Toast.LENGTH_SHORT
+                            ).show()
                         }
                     },
                     modifier = Modifier.weight(1f),

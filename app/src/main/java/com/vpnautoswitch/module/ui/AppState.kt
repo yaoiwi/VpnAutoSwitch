@@ -134,6 +134,7 @@ data class Diagnostics(
     val clientMode: String = "",
 ) {
     companion object {
+
         /**
          * 主页关心的设置键。
          *
@@ -656,12 +657,26 @@ class AppState(private val context: Context) {
         false
     }
 
-    fun openLsposed(): Boolean {
-        val intent = context.packageManager.getLaunchIntentForPackage("org.lsposed.manager")
-            ?: return false
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(intent)
-        return true
+    /**
+     * 打开 LSPosed 管理器。
+     *
+     * 管理器被冻结 / 停用 / 装在分身里时 [PackageManager.getLaunchIntentForPackage]
+     * 返回 null，以前直接 return false，界面只提示「没有找到」——用户手里明明装着，
+     * 却没有任何可操作的东西（#15 那位就卡在这里）。现在退回应用详情页，
+     * 至少能点「启用」或解除冻结。
+     */
+    fun openLsposed(): Boolean = try {
+        val intent = context.packageManager.getLaunchIntentForPackage(LSPOSED_PACKAGE)
+        if (intent != null) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+            true
+        } else {
+            openAppDetails(LSPOSED_PACKAGE)
+        }
+    } catch (t: Throwable) {
+        // 部分 ROM 会拦掉后台启动 Activity（抛 SecurityException），没装则是 ActivityNotFound
+        openAppDetails(LSPOSED_PACKAGE)
     }
 
     /** 系统「设置 → VPN」；极少数 ROM 没有这个页面，退回设置首页 */
@@ -698,6 +713,10 @@ class AppState(private val context: Context) {
             ?: AppsRepository.labelOf(context, packageName)
 
     companion object {
+
+        /** LSPosed 管理器的包名，跳转和包状态查询都用它 */
+        const val LSPOSED_PACKAGE = "org.lsposed.manager"
+
         const val MODE_MULTI = 0
         const val MODE_SINGLE = 1
 

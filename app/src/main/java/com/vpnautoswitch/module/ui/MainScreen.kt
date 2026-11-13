@@ -222,6 +222,15 @@ fun MainScreen(state: AppState) {
                                 state = state,
                                 onOpenApps = { goTo(1) },
                                 onOpenClientAdapter = { showClientAdapter = true },
+                                onOpenLsposed = {
+                                    if (!state.openLsposed()) {
+                                        Toast.makeText(
+                                            context,
+                                            "打不开 LSPosed，可能没安装或已被冻结",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                },
                             )
                         }
 
@@ -301,6 +310,7 @@ private fun LazyListScope.overviewItems(
     state: AppState,
     onOpenApps: () -> Unit,
     onOpenClientAdapter: () -> Unit,
+    onOpenLsposed: () -> Unit,
 ) {
     item { HeroStatusCard(state) }
 
@@ -317,7 +327,7 @@ private fun LazyListScope.overviewItems(
         item {
             FirstRunCard(
                 steps = guide,
-                onOpenLsposed = { state.openLsposed() },
+                onOpenLsposed = onOpenLsposed,
                 onOpenApps = onOpenApps,
             )
         }
@@ -398,6 +408,7 @@ private fun LazyListScope.overviewItems(
 @Composable
 private fun HeroStatusCard(state: AppState) {
     val colors = MiuixTheme.colorScheme
+    val context = LocalContext.current
     val now = System.currentTimeMillis()
     val summary = DiagnosticsPolicy.summarize(
         heartbeat = state.diagnostics.heartbeat,
@@ -458,7 +469,17 @@ private fun HeroStatusCard(state: AppState) {
             ) {
                 AppButton(
                     text = "打开 LSPosed",
-                    onClick = { state.openLsposed() },
+                    onClick = {
+                        // 以前这里不处理返回值：管理器被冻结时按钮毫无反应，
+                        // 用户只能怀疑是自己点错了
+                        if (!state.openLsposed()) {
+                            Toast.makeText(
+                                context,
+                                "打不开 LSPosed，可能没安装或已被冻结",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    },
                     modifier = Modifier.weight(1f),
                 )
                 AppButton(

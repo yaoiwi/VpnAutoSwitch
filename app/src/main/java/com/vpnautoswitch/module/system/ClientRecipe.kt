@@ -1,6 +1,15 @@
 package com.vpnautoswitch.module.system
 
 /**
+ * 外部控制入口的默认后缀。
+ *
+ * 放成顶层常量而不是 [ClientRecipes] 的成员：`ALL` 在 object 初始化时就要用到它，
+ * 写成成员会变成「初始化到一半读自己」，顺序一改就悄悄变成 null。
+ */
+internal val DEFAULT_START_SUFFIXES: List<String> = listOf("action.START_CLASH")
+internal val DEFAULT_STOP_SUFFIXES: List<String> = listOf("action.STOP_CLASH")
+
+/**
  * 已知 VPN 客户端的启动配方。
  *
  * 在这之前，「先试外部控制入口还是先启 VpnService」只能靠运行时猜：
@@ -21,6 +30,16 @@ internal data class ClientRecipe(
     val preferredMode: String,
     /** 一句人话，说明为什么这样排序，诊断里会原样显示 */
     val note: String,
+    /**
+     * 启动入口的后缀候选，按顺序试，拼成 `<包名>.<后缀>`。
+     *
+     * Clash 系一律是 `action.START_CLASH`，但 FlClash 用的是 `action.START`，
+     * 少一个 `_CLASH` 就永远 resolve 不到（#19）。后缀跟着包名走，所以改包版
+     * （`com.follow.clash.foss` 之类）不用额外适配。
+     */
+    val startSuffixes: List<String> = DEFAULT_START_SUFFIXES,
+    /** 停止入口，语义同上 */
+    val stopSuffixes: List<String> = DEFAULT_STOP_SUFFIXES,
 )
 
 internal object ClientRecipes {
@@ -46,6 +65,14 @@ internal object ClientRecipes {
             "Clash for Android",
             MODE_ACTIVITY,
             "导出了 action.START_CLASH，发这个入口等价于用户点连接",
+        ),
+        ClientRecipe(
+            "com.follow.clash",
+            "FlClash",
+            MODE_ACTIVITY,
+            "导出的是 action.START（没有 _CLASH 后缀），发这个入口等价于点连接",
+            startSuffixes = listOf("action.START"),
+            stopSuffixes = listOf("action.STOP"),
         ),
         ClientRecipe(
             "com.v2ray.ang",
@@ -85,8 +112,19 @@ internal object ClientRecipes {
         ),
     )
 
-    fun of(pkg: String): ClientRecipe? =
-        if (pkg.isEmpty()) null else ALL.firstOrNull { it.packageName == pkg }
+    /**
+     * 认包名找配方。
+     *
+     * 改包版（`com.follow.clash.foss`、`com.github.kr328.clash.foss` 之类）包名多一段，
+     * 精确匹配落空，但外部控制入口的后缀是跟着包名拼的，行为完全一样，所以按前缀再认一次。
+     * 认不出来返回 null，调用方按原来的顺序试，最坏结果和没有这张表一样。
+     */
+    fun of(pkg: String): ClientRecipe? {
+        if (pkg.isEmpty()) return null
+        ALL.firstOrNull { it.packageName == pkg }?.let { return it }
+        val base = ALL.firstOrNull { pkg.startsWith(it.packageName + ".") } ?: return null
+        return base.copy(packageName = pkg)
+    }
 
     /** 认不出来时返回包名本身，别在日志里留一个空名字 */
     fun labelOf(pkg: String): String = of(pkg)?.label ?: pkg
