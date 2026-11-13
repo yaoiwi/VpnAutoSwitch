@@ -178,15 +178,22 @@ internal object ExternalControl {
         return modeOf(ctx, pkg)
     }
 
-    fun remember(ctx: Context, pkg: String, mode: String) {
-        if (pkg.isEmpty()) return
+    /**
+     * 自动记住这次走通的方式。
+     *
+     * @return 是否真的写进去了。用户固定过就返回 false——调用方不能一边什么都没写，
+     * 一边在日志里说「remembered」，排障的人会以为记录已经变了。
+     */
+    fun remember(ctx: Context, pkg: String, mode: String): Boolean {
+        if (pkg.isEmpty() || mode.isEmpty()) return false
         // 用户固定过就不再改写，否则「测试外部控制」记下的 activity 会被某一次
         // 靠服务连上的成功覆盖掉，界面上看起来就是「选项自己变了」
-        if (pinnedMode(ctx, pkg) != null) return
+        if (pinnedMode(ctx, pkg) != null) return false
         val set = known(ctx)
         set.removeAll { it.startsWith("$pkg|") }
         set.add("$pkg|$mode")
         saveKnown(ctx, set)
+        return true
     }
 
     /** 一条固定记录的样子，给诊断和客户端适配界面显示 */
@@ -219,6 +226,19 @@ internal object ExternalControl {
             }
             return null
         }
+        if (ClientRecipes.pinConflicts(pkg, entry.mode)) {
+            // 固定成 service，可这个客户端明明导出了外部控制入口：服务起得来不代表
+            // 隧道建得起来（FlClash 就是「started」之后再无隧道）。继续听这条固定，
+            // 等于把唯一能用的路挡在外面。引擎每秒都会问一次，只记第一遍。
+            if (staleLogged.add("$pkg|conflict|${entry.mode}")) {
+                ModuleLog.append(
+                    ctx,
+                    "pinned ${entry.mode} for $pkg conflicts with the recipe " +
+                        "(${ClientRecipes.labelOf(pkg)} has an external control entry), learning again",
+                )
+            }
+            return null
+        }
         return entry.mode
     }
 
@@ -230,7 +250,10 @@ internal object ExternalControl {
             mode = entry.mode,
             version = entry.version,
             at = entry.at,
-            stale = PinCodec.isStale(entry, clientVersion(ctx, pkg)),
+            // 和配方矛盾也算过期：界面不能一边显示「已固定 service」，
+            // 引擎一边已经不理它了
+            stale = PinCodec.isStale(entry, clientVersion(ctx, pkg)) ||
+                ClientRecipes.pinConflicts(pkg, entry.mode),
         )
     }
 
@@ -690,6 +713,26 @@ internal object ExternalControl {
             if (startVpnService(ctx, pkg)) return "service"
         }
         return if (openUi(ctx, pkg)) "ui" else null
+    }
+
+    /**
+     * 这个客户端有没有能 resolve 到启动入口（只查，不发）。
+     *
+     * 用来判断「服务方式值不值得固定」：能查到入口的客户端，入口永远比
+     * 「服务起来了但隧道不建」可靠，不该把服务固定下来挡住它。
+     */
+    fun hasExternalStart(ctx: Context, pkg: String): Boolean {
+        if (pkg.isEmpty()) return false
+        return startSuffixes(pkg).any { suffix ->
+            try {
+                ctx.packageManager.resolveActivity(
+                    Intent("$pkg.$suffix").setPackage(pkg).addCategory(Intent.CATEGORY_DEFAULT),
+                    PackageManager.MATCH_DEFAULT_ONLY,
+                ) != null
+            } catch (t: Throwable) {
+                false
+            }
+        }
     }
 
     /**

@@ -94,6 +94,28 @@ class ClientRecipeTest {
     }
 
     @Test
+    fun `a service pin is rejected for clients that export a control entry`() {
+        // 服务起得来 ≠ 隧道建得起来：FlClash 的「started」之后一直没有隧道。
+        // 把这种成功固定成 service，会把唯一能用的入口挡在外面
+        assertTrue(ClientRecipes.pinConflicts("com.follow.clash", ClientRecipes.MODE_SERVICE))
+        assertTrue(
+            ClientRecipes.pinConflicts("com.github.metacubex.clash.meta", ClientRecipes.MODE_SERVICE),
+        )
+        // 改包版走同一条配方，同样适用
+        assertTrue(ClientRecipes.pinConflicts("com.follow.clash.foss", ClientRecipes.MODE_SERVICE))
+        // 没有外部控制入口的客户端，服务就是它唯一的方式，不算冲突
+        assertEquals(false, ClientRecipes.pinConflicts("com.v2ray.ang", ClientRecipes.MODE_SERVICE))
+        // 固定成 activity 永远不会和配方矛盾
+        assertEquals(false, ClientRecipes.pinConflicts("com.follow.clash", ClientRecipes.MODE_ACTIVITY))
+        assertEquals(false, ClientRecipes.pinConflicts("com.v2ray.ang", ClientRecipes.MODE_ACTIVITY))
+        // 认不出来的客户端不替它做判断
+        assertEquals(
+            false,
+            ClientRecipes.pinConflicts("com.example.unknown", ClientRecipes.MODE_SERVICE),
+        )
+    }
+
+    @Test
     fun `every recipe has at least one entry for both directions`() {
         ClientRecipes.ALL.forEach {
             assertTrue("${it.packageName} 没有启动入口", it.startSuffixes.isNotEmpty())

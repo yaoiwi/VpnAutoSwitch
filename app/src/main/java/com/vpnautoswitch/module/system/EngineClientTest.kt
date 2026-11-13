@@ -45,6 +45,9 @@ internal fun Engine.testClient(ctx: Context, pkg: String, mode: String) {
     // 清掉让下一轮重新从静默开始试
     ExternalControl.clearSilentFails(ctx, pkg)
     log(ctx, LogCat.START, "client test start: $pkg / $mode")
+    // 手动测试和引擎上一轮的自动尝试是两件事：不先清掉，隧道起来之后
+    // 会被记到那次尝试的方式上（日志 21:33:35 就是这么写出 service 的）
+    markPendingExternalMode(null)
 
     // startMode 会回报**实际走通**的那条路：测试「外部控制」时如果客户端没有
     // START_CLASH、退回 VpnService 连上了，固定的就该是 service，否则下一轮
@@ -77,15 +80,31 @@ internal fun Engine.pollClientTest(
 ) {
     if (token != clientTestToken) return
     if (hasVpnTransport(ctx)) {
-        // 手动测试成功就是用户明确选了这个方式，顺手固定住：
-        // 不然下一次靠另一条路径连上，remember 就把这里改掉了
+        // 一次测试成功只说明「此刻有隧道」，不说明是这次启动建起来的：service 方式
+        // 尤其不可靠——`startForegroundService` 返回非空只表示系统收下了这次调用，
+        // FlClash 的服务起来后并不建隧道（21:19:30 started → 21:19:32「进程仍在，
+        // 等隧道」→ 之后一直没有隧道）。
+        // 1.9.21 把这种「成功」当成结论固定下来，引擎此后只发服务启动请求，
+        // 把唯一能用的外部控制入口挡在外面（21:34:25 起连续三次 rejected）。
+        // 所以：能查到外部控制入口的客户端，服务方式只记不固定。
         ExternalControl.remember(ctx, pkg, mode)
-        ExternalControl.pin(ctx, pkg, mode)
+        val pinIt = mode == "activity" || !ExternalControl.hasExternalStart(ctx, pkg)
+        if (pinIt) ExternalControl.pin(ctx, pkg, mode)
+        // 这次连接是这个测试拉起来的，别再让引擎把它记到某次自动尝试头上
+        markPendingExternalMode(null)
         RuntimeDiagnostics.publishClientTest(
             ctx, pkg, mode, "success",
-            if (mode == "activity") "外部控制成功，已固定该方式" else "VpnService 启动成功，已固定该方式",
+            when {
+                !pinIt -> "VpnService 启动成功，已记住；该客户端有外部控制入口，服务方式不固定"
+                mode == "activity" -> "外部控制成功，已固定该方式"
+                else -> "VpnService 启动成功，已固定该方式"
+            },
         )
-        log(ctx, LogCat.START, "client test success: $pkg / $mode (pinned)")
+        log(
+            ctx,
+            LogCat.START,
+            "client test success: $pkg / $mode (${if (pinIt) "pinned" else "remembered only"})",
+        )
         return
     }
     if (attempt >= 30) {

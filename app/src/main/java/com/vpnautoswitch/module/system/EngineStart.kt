@@ -103,22 +103,44 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
             failureStreak > 0 -> log(ctx, LogCat.START, "vpn connected (after $failureStreak failed attempts)")
             firstUp -> log(ctx, LogCat.START, "vpn connected")
         }
-        // 只有「确实靠外部手段连上」才记录，always-on 能连上的客户端不该被误判
-        pendingExternalMode?.let { mode ->
-            ExternalControl.remember(ctx, cfg.vpnPackage, mode)
+        // 只有「确实靠外部手段连上」才记录，always-on 能连上的客户端不该被误判。
+        // 还要是**刚发生**的那一次：排队之后被取消的服务启动（日志里
+        // 「delayed service start cancelled」）也会写下 "service"，如果不管时刻，
+        // 半小时后用户自己点「测试外部控制」连上了，就会被记成 service。
+        val pendingMode = pendingExternalMode
+        val pendingAge = if (pendingMode == null) 0L else nowUp - pendingExternalModeAt
+        val pendingFresh = pendingMode != null && pendingAge <= PENDING_MODE_TTL_MS
+        if (pendingMode != null && !pendingFresh) {
+            log(
+                ctx,
+                "external mode '$pendingMode' is ${pendingAge / 1000}s old -> " +
+                    "this connection is not attributed to it",
+            )
+        }
+        if (pendingMode != null && pendingFresh) {
+            val written = ExternalControl.remember(ctx, cfg.vpnPackage, pendingMode)
             // 这一轮通了，说明当前这条路是好的：把「连续几轮没拉起来」的计数清掉，
             // 否则下次偶尔失败会很快攒到换路阈值，把一条本来能用的路换掉
             ExternalControl.clearPinFailures(ctx, cfg.vpnPackage)
             // 靠界面才连上，说明这一轮的静默启动白试了。连续两轮都这样就不再浪费那几秒
             // 初始化宽限，下一轮直接开界面；改用静默又连上了的，把计数清掉。
-            if (mode == "activity") {
+            if (pendingMode == "activity") {
                 ExternalControl.noteSilentFail(ctx, cfg.vpnPackage)
             } else {
                 ExternalControl.clearSilentFails(ctx, cfg.vpnPackage)
             }
-            log(ctx, LogCat.START, "external mode '$mode' works for ${cfg.vpnPackage}, remembered")
+            log(
+                ctx,
+                LogCat.START,
+                if (written) {
+                    "external mode '$pendingMode' works for ${cfg.vpnPackage}, remembered"
+                } else {
+                    "external mode '$pendingMode' works for ${cfg.vpnPackage}, " +
+                        "but a pin is in place so nothing was written"
+                },
+            )
         }
-        pendingExternalMode = null
+        markPendingExternalMode(null)
         if (!connectedNotified) {
             connectedNotified = true
             when {
@@ -342,7 +364,7 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
             cfg.allowVpnUi &&
                 ExternalControl.silentFails(ctx, cfg.vpnPackage) >= ExternalControl.SILENT_FAIL_LIMIT
         if (externalMode == "service" || (!skipSilent && externalAttempts <= SILENT_START_ATTEMPTS)) {
-            pendingExternalMode = "service"
+            markPendingExternalMode("service")
             log(ctx, LogCat.START, "external-only: restart VPN service without UI (attempt $externalAttempts)")
             // 固定成 VpnService 方式时没有外部控制兜底，重试到第三次还在原地打转。
             // 这时该说的是「换个方式」，不是「再试一次」——issue #18 的 Clash Meta
@@ -380,7 +402,7 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
                                 "都没把隧道拉起来。在客户端里手动连一次，确认它自己能连上",
                         )
                     } else {
-                        pendingExternalMode = if (scheme == "ui") "activity" else scheme
+                        markPendingExternalMode(if (scheme == "ui") "activity" else scheme)
                         if (scheme == "ui") uiShownAt = SystemClock.elapsedRealtime()
                         log(ctx, LogCat.START, "fallback chain: start via $scheme, will remember it once connected")
                     }
@@ -424,7 +446,7 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
             } else {
                 if (scheme == "ui") uiShownAt = SystemClock.elapsedRealtime()
                 lastStartAt = now
-                pendingExternalMode = if (scheme == "ui") "activity" else scheme
+                markPendingExternalMode(if (scheme == "ui") "activity" else scheme)
                 log(ctx, LogCat.START, "external-only: start via $scheme (silent attempts used up)")
             }
         } else {
@@ -499,7 +521,7 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
             "activity" -> {
                 val mode = ExternalControl.startMode(ctx, cfg.vpnPackage)
                 if (mode != null) {
-                    pendingExternalMode = mode
+                    markPendingExternalMode(mode)
                     externalAttempts++
                     lastExternalAt = now
                     lastStartAt = now
@@ -507,14 +529,14 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
                 } else if (cfg.allowVpnUi && ExternalControl.openUi(ctx, cfg.vpnPackage)) {
                     uiShownAt = SystemClock.elapsedRealtime()
                     lastStartAt = now
-                    pendingExternalMode = "activity"
+                    markPendingExternalMode("activity")
                     externalAttempts++
                     lastExternalAt = now
                     log(ctx, LogCat.START, "known client: bring client UI forward")
                 }
             }
             "service" -> {
-                pendingExternalMode = "service"
+                markPendingExternalMode("service")
                 externalAttempts++
                 lastExternalAt = now
                 // 宽限期按「这次启动」算：不盖这个戳，下一拍进外部控制分支时
@@ -550,7 +572,7 @@ internal fun Engine.tryExternalStart(ctx: Context, cfg: Config, now: Long): Bool
     }
     externalAttempts++
     lastExternalAt = now
-    pendingExternalMode = mode
+    markPendingExternalMode(mode)
     log(ctx, LogCat.START, "always-on did not connect -> external control START (via $mode)")
     return true
 }

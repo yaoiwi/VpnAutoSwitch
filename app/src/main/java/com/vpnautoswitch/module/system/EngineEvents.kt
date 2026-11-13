@@ -355,7 +355,12 @@ internal fun Engine.scheduleOff(ctx: Context?, reason: String, debounceMs: Long 
 internal fun Engine.scheduleDelayedServiceStart(ctx: Context, cfg: Config) {
     if (cfg.vpnPackage.isEmpty()) return
     val scheduledPackage = cfg.vpnPackage
-    pendingExternalMode = "service"
+    // 「这次是服务方式发起的」要等到**真的发出去**那一刻才记。排队之后经常被
+    // 取消（下面 allowed=false 那条），提前写下的 "service" 会留在引擎里，
+    // 把之后任何一次连上都记成 service：日志 21:31:58 / 21:32:53 两次
+    // 「delayed service start cancelled」，21:33:35 就写下了
+    // `external mode 'service' works`——而那一秒隧道其实是「测试外部控制」拉起来的，
+    // 同一秒上一行刚写着 `client test success: ... / activity (pinned)`。
     // 只有本轮第一次启动才先停掉残留实例：这时客户端可能还挂着上一次的会话，
     // 停一下再起才能干净地建新隧道。重试时绝不能再停——第二次 stopService 会把
     // 第一次刚刚开始建立的隧道推倒，日志 17:52:53→17:53:10 的 17 秒就是这么来的
@@ -389,6 +394,8 @@ internal fun Engine.scheduleDelayedServiceStart(ctx: Context, cfg: Config) {
                 lastForegroundTarget == scheduledPackage,
         )
         if (!allowed) {
+            // 这次启动没发出去，就不能再拿它解释接下来的连接
+            markPendingExternalMode(null)
             log(
                 ctx,
                 if (tunnelUp) {
@@ -399,6 +406,7 @@ internal fun Engine.scheduleDelayedServiceStart(ctx: Context, cfg: Config) {
             )
             return@postDelayed
         }
+        markPendingExternalMode("service")
         ExternalControl.startVpnService(ctx, scheduledPackage)
         // 原来等 600ms 是为了让 stopService 先落地；250ms 足够，用户感知上是半秒差距
     }, 250L)

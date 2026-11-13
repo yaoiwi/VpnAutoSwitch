@@ -312,13 +312,25 @@ internal object Engine {
     internal const val SILENT_START_ATTEMPTS = 2
 
     /**
+     * [pendingExternalMode] 的有效期。
+     *
+     * 超过这个时间的启动请求不再用来解释「隧道怎么起来的」：45 秒是日志里见过的最慢
+     * 一次（21:17:28→21:17:41 算快的，21:16 之前那轮 42.5 秒），再久就基本是
+     * 「用户自己手动连的」或者「别的路径连上的」，记到刚才那次尝试头上只会记错。
+     */
+    internal const val PENDING_MODE_TTL_MS = 45_000L
+
+    /**
      * 按固定的启动方式连了几轮都失败，就把它丢掉、换一条路。
      *
      * 固定值本来是为了「别每轮重新猜」，但客户端升级或者换了节点之后，这条路可能
      * 永远走不通。以前只会一直重试并写一条「去客户端适配测一次」的提示，用户不点
-     * 就永远卡着。攒满三轮（也就是三次打开目标应用都没连上）自动换路试试。
+     * 就永远卡着。现在**一轮之内**试满三次还不通就当场换路：固定成 service 时，
+     * 引擎根本不走外部控制入口，一直重试同一个注定失败的动作没有任何意义
+     * （日志 21:34:25→21:34:33 三次 rejected 之后仍然停在原地）。
+     * 丢掉固定不会丢信息——完整链路第一次试的仍是最可能的那个方式。
      */
-    internal const val PIN_DEMOTE_ROUNDS = 3
+    internal const val PIN_DEMOTE_ROUNDS = 1
 
     /**
      * 强制停止后隧道可能还要一会儿才消失：分批复查，仍连着就再停一次。
@@ -624,6 +636,26 @@ internal object Engine {
 
     /** 本轮是通过哪种外部方式发起启动的，连上后据此记住该客户端 */
     internal var pendingExternalMode: String? = null
+
+    /**
+     * [pendingExternalMode] 是在什么时刻写下的。
+     *
+     * 以前只有模式本身，没有时刻：一次「排队后被取消」的服务启动也会把 "service" 留在
+     * 这里（21:31:58、21:32:53 两条 cancelled），半小时后用户点「测试外部控制」连上了，
+     * 隧道就被记成 service——日志 21:33:35 那句 `external mode 'service' works`
+     * 就是这么写出来的，而同一秒上一行刚说 `client test success: ... / activity (pinned)`。
+     */
+    internal var pendingExternalModeAt = 0L
+
+    /**
+     * 记下「这一刀是谁发的」，并记时刻。
+     *
+     * 统一入口，避免再出现只在某几处写模式、不写时刻的漏网。
+     */
+    internal fun markPendingExternalMode(mode: String?) {
+        pendingExternalMode = mode
+        pendingExternalModeAt = if (mode == null) 0L else SystemClock.elapsedRealtime()
+    }
 
     internal var failureStreak = 0
     internal var failureLogged = false

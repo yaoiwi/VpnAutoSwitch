@@ -89,7 +89,7 @@ internal fun Engine.turnOff(reason: String) {
     lastOffAt = offStartedAt
     stopWatchdog()
     startToken++
-    pendingExternalMode = null
+    markPendingExternalMode(null)
     autoSession = false
     userOff = false
     // 顺带把当前的 always-on 打出来：「强停后 VPN 又回来」只有在 always_on 指向客户端时

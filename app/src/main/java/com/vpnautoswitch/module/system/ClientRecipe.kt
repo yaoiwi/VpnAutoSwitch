@@ -128,4 +128,16 @@ internal object ClientRecipes {
 
     /** 认不出来时返回包名本身，别在日志里留一个空名字 */
     fun labelOf(pkg: String): String = of(pkg)?.label ?: pkg
+
+    /**
+     * 这条固定记录和配方矛盾：固定成 service，可配方说这个客户端有外部控制入口。
+     *
+     * service 方式的「成功」只是 `startForegroundService` 没抛异常，不代表隧道建起来了
+     * ——FlClash 的服务起来之后并不连（日志 21:19:30「started VPN service」、
+     * 21:19:32「进程仍在，等隧道」，之后一直没有隧道）。这种固定会把真正能用的
+     * 外部控制入口挡在外面：`modeOf` 返回 "service"，引擎就只发服务启动请求，
+     * 一个连不上的方式被反复重试（1.9.21 那份状态报告就是卡在这里）。
+     */
+    fun pinConflicts(pkg: String, mode: String): Boolean =
+        mode == MODE_SERVICE && of(pkg)?.preferredMode == MODE_ACTIVITY
 }
