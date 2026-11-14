@@ -152,12 +152,18 @@ internal fun Engine.isNetworkAllowed(cfg: Config, pkg: String? = null): Boolean 
  *
  * 没有存活目标时退回全局判定：此时多半是 Wi-Fi 规则或用户手动开启的场景，
  * 全局开关才是唯一说得清的判据。
+ *
+ * @param targets 只算这些目标。多组时传命中组的应用，别让别的组留在后台的应用
+ *   （它在「仅 Wi-Fi」名单里）替这一组把网络类型判成可用。
  */
-internal fun Engine.anyTargetAllowedOnNetwork(cfg: Config): Boolean {
-    if (aliveTargets.isEmpty()) return isNetworkAllowed(cfg)
+internal fun Engine.anyTargetAllowedOnNetwork(
+    cfg: Config,
+    targets: Set<String> = aliveTargets,
+): Boolean {
+    if (targets.isEmpty()) return isNetworkAllowed(cfg)
     return EnginePolicy.anyTargetAllowed(
         lastTransport,
-        aliveTargets,
+        targets,
         cfg.networkOverride,
         cfg.allowWifi,
         cfg.allowMobile,
@@ -273,24 +279,47 @@ internal fun Engine.handleNetworkChanged() {
         return
     }
     val ssid = currentSsid
-    if (!ssid.isNullOrEmpty() && cfg.wifiOn.contains(ssid)) {
-        log(ctx, LogCat.NET, "wifi \"${ssidForLog(ctx, ssid)}\" -> turn on")
+    // 连上某个 Wi-Fi 可能是「切到另一组」的理由：旁路由组只配了 Wi-Fi，没配应用。
+    // cfg 换成命中组的等效配置，下面的 targets / wifiOn / 客户端都跟着变
+    val group = cfg.hitGroup(ruleProbe())
+    val effective = if (group == null) cfg else cfg.forClient(group.rule.vpnPackage, group.rule.id)
+    val targets = if (group == null) aliveTargets else group.matched.toSet()
+
+    if (!ssid.isNullOrEmpty() && effective.wifiOn.contains(ssid)) {
+        log(
+            ctx,
+            LogCat.NET,
+            "wifi \"${ssidForLog(ctx, ssid)}\" -> turn on" +
+                (group?.let { " · ${groupTag(it.rule)}" } ?: ""),
+        )
         // 这是一个新的开启意图，取消此前排队的关闭任务
         offToken++
-        ensureVpn(ctx, cfg)
+        // 隧道已经连着、但连着的是别的客户端：走切换，别直接开新的
+        val running = resolveActivePkg(ctx, cfg)
+        if (isVpnOn(ctx) && running.isNotEmpty() && running != effective.vpnPackage) {
+            requestSwitch(ctx, group?.rule ?: cfg.defaultRule(), SystemClock.elapsedRealtime())
+            startWatchdog()
+            return
+        }
+        ensureVpn(ctx, effective, rule = group?.rule)
         startWatchdog()
         return
     }
 
-    if (!anyTargetAllowedOnNetwork(cfg)) {
+    if (!anyTargetAllowedOnNetwork(effective, targets)) {
         if (isVpnOn(ctx)) {
             log(ctx, LogCat.NET, "network type disabled -> turn off")
             turnOff("network type disabled")
         }
         return
     }
-    if (aliveTargets.isNotEmpty() && offAppForeground == null) {
-        ensureVpn(ctx, cfg)
+    if (targets.isNotEmpty() && offAppForeground == null) {
+        val running = resolveActivePkg(ctx, cfg)
+        if (isVpnOn(ctx) && running.isNotEmpty() && running != effective.vpnPackage) {
+            requestSwitch(ctx, group?.rule ?: cfg.defaultRule(), SystemClock.elapsedRealtime())
+        } else {
+            ensureVpn(ctx, effective, rule = group?.rule)
+        }
         startWatchdog()
     }
 }

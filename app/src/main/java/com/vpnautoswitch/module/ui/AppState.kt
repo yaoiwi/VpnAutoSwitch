@@ -21,6 +21,7 @@ import com.vpnautoswitch.module.Config
 import com.vpnautoswitch.module.ConfigCleaner
 import com.vpnautoswitch.module.ModuleContract
 import com.vpnautoswitch.module.RuleConflicts
+import com.vpnautoswitch.module.VpnRule
 import com.vpnautoswitch.module.apps.AppInfo
 import com.vpnautoswitch.module.apps.AppsRepository
 import com.vpnautoswitch.module.system.Engine
@@ -36,6 +37,9 @@ import java.util.concurrent.Executors
 sealed class Screen {
     data object Main : Screen()
     data object Picker : Screen()
+
+    /** 规则组列表：一个组对应一个客户端 */
+    data object RuleGroups : Screen()
 }
 
 /**
@@ -335,6 +339,15 @@ class AppState(private val context: Context) {
     var appsLoading by mutableStateOf(false)
     var pickerMode by mutableIntStateOf(MODE_MULTI)
     var pickerSelection by mutableStateOf(setOf<String>())
+
+    /**
+     * 选择器正在为哪一组选东西；null 表示默认组（顶层配置）。
+     *
+     * 选择器只有一个页面，三处入口共用：默认组的目标应用、某个组的目标应用、
+     * 某个组的客户端。靠这个字段把结果写回对的地方。
+     */
+    var editingRuleId by mutableStateOf<String?>(null)
+        private set
     var diagnostics by mutableStateOf(Diagnostics.load(context, config))
     internal var clientTest by mutableStateOf(ClientTest.load(context))
         private set
@@ -571,19 +584,31 @@ class AppState(private val context: Context) {
         }
     }
 
-    fun openPicker(mode: Int) {
+    /**
+     * 打开应用选择器。
+     *
+     * @param ruleId 为哪一组选；null 是默认组。选完回到来时的页面，不会把用户
+     *   从规则组列表踢回首页
+     */
+    fun openPicker(mode: Int, ruleId: String? = null) {
+        editingRuleId = ruleId
         pickerMode = mode
         pickerSelection = when (mode) {
             MODE_SINGLE -> listOfNotNull(config.vpnPackage.takeIf { it.isNotEmpty() }).toSet()
             MODE_OFF -> config.offTargets
+            MODE_RULE_CLIENT -> listOfNotNull(ruleOf(ruleId)?.vpnPackage?.takeIf { it.isNotEmpty() }).toSet()
+            MODE_RULE_TARGETS -> ruleOf(ruleId)?.targets.orEmpty()
             else -> config.targets
         }
         screen = Screen.Picker
         loadApps()
     }
 
+    fun ruleOf(id: String?): VpnRule? =
+        id?.let { rid -> config.rules.firstOrNull { it.id == rid } }
+
     fun toggleSelection(packageName: String) {
-        pickerSelection = if (pickerMode == MODE_SINGLE) {
+        pickerSelection = if (pickerMode == MODE_SINGLE || pickerMode == MODE_RULE_CLIENT) {
             setOf(packageName)
         } else if (pickerSelection.contains(packageName)) {
             pickerSelection - packageName
@@ -594,6 +619,41 @@ class AppState(private val context: Context) {
 
     fun confirmPicker() {
         val selection = LinkedHashSet(pickerSelection)
+        val ruleId = editingRuleId
+        when (pickerMode) {
+            MODE_RULE_CLIENT -> {
+                val pkg = selection.firstOrNull().orEmpty()
+                if (ruleId != null && pkg.isNotEmpty()) {
+                    updateRule(ruleId) { it.copy(vpnPackage = pkg) }
+                    AppsRepository.invalidateInspection()
+                }
+                screen = Screen.RuleGroups
+                return
+            }
+            MODE_RULE_TARGETS -> {
+                if (ruleId != null) {
+                    // 同一个应用只能属于一组：从别的组和默认组里摘掉。
+                    // 留着的话，两个组都认为它是自己的目标，切换时会来回抢
+                    val dropped = config.rules.filter { it.id != ruleId }
+                        .sumOf { (it.targets intersect selection).size } +
+                        (config.targets intersect selection).size
+                    val next = config.rules.map {
+                        if (it.id == ruleId) it.copy(targets = selection)
+                        else it.copy(targets = it.targets - selection)
+                    }
+                    save(config.copy(rules = next, targets = config.targets - selection))
+                    if (dropped > 0) {
+                        Toast.makeText(
+                            context,
+                            "已从其他组移出 $dropped 个应用",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                }
+                screen = Screen.RuleGroups
+                return
+            }
+        }
         val (next, dropped) = when (pickerMode) {
             MODE_SINGLE -> config.copy(vpnPackage = pickerSelection.firstOrNull().orEmpty()) to 0
             MODE_OFF -> RuleConflicts.keepOff(config, selection)
@@ -616,7 +676,35 @@ class AppState(private val context: Context) {
     }
 
     fun closePicker() {
+        screen = if (editingRuleId != null) Screen.RuleGroups else Screen.Main
+        editingRuleId = null
+    }
+
+    // ---------------------------------------------------------------- 规则组
+
+    fun openRuleGroups() {
+        screen = Screen.RuleGroups
+    }
+
+    fun closeRuleGroups() {
         screen = Screen.Main
+        editingRuleId = null
+    }
+
+    /** 新建一组；返回新组的 id，调用方可以紧接着打开客户端选择 */
+    fun addRule(label: String, vpnPackage: String): String {
+        val id = VpnRule.newId()
+        save(config.copy(rules = config.rules + VpnRule(id = id, label = label, vpnPackage = vpnPackage)))
+        return id
+    }
+
+    fun updateRule(id: String, block: (VpnRule) -> VpnRule) {
+        save(config.copy(rules = config.rules.map { if (it.id == id) block(it) else it }))
+    }
+
+    fun removeRule(id: String) {
+        save(config.copy(rules = config.rules.filterNot { it.id == id }))
+        if (editingRuleId == id) editingRuleId = null
     }
 
     /** 导出配置到 SAF 选定的文件；返回是否成功 */
@@ -725,6 +813,12 @@ class AppState(private val context: Context) {
 
         /** 选择「打开时关闭 VPN」的应用 */
         const val MODE_OFF = 2
+
+        /** 给某个规则组选目标应用 */
+        const val MODE_RULE_TARGETS = 3
+
+        /** 给某个规则组选客户端（单选） */
+        const val MODE_RULE_CLIENT = 4
 
         /** 高级设置三个折叠分组的 id，界面和默认展开状态都用它 */
         const val ADV_GROUP_CLOSE = "close"

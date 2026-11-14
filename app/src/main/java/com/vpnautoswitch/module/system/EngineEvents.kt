@@ -29,20 +29,24 @@ import de.robv.android.xposed.XposedBridge
 internal fun Engine.handleForeground(pkg: String) {
     val ctx = context() ?: return
     beat(ctx)
-    val cfg = ConfigRepo.getOrNull(ctx)
-    if (cfg == null) {
+    val raw = ConfigRepo.getOrNull(ctx)
+    if (raw == null) {
         // 「读不到配置」和「用户没配置」是两件事。这里绝不能往下走：
         // 下面的 `vpnPackage.isEmpty()` 分支会把正在用的 VPN 当成「模块已停用」直接关掉。
         noteConfigMissing(ctx, pkg)
         return
     }
+    // 这个应用属于哪个组：决定用哪份 targets 判它是不是目标应用，以及拉起哪个客户端。
+    // 不属于任何组就是默认组，行为和以前一样
+    val owner = raw.rules.firstOrNull { it.enabled && pkg in it.targets }
+    val cfg = if (owner == null) raw else raw.forClient(owner.vpnPackage, owner.id)
     // 上一次前台不是它 => 这次是「重新打开」，而不是应用内部换页 / 弹窗后 resume。
     // 从 VPN 客户端本身退回来也不算：用户多半是刚在里面点了断开，别立刻给他连回去。
     val freshOpen = EnginePolicy.isFreshOpen(lastForeground, pkg, cfg.vpnPackage)
     lastForeground = pkg
-    val foregroundKind = EnginePolicy.foregroundKind(pkg, cfg.targets, cfg.offTargets)
+    val foregroundKind = EnginePolicy.foregroundKind(pkg, cfg.targets, raw.offTargets)
 
-    if (!cfg.enabled || cfg.vpnPackage.isEmpty()) {
+    if (!raw.enabled || !raw.hasAnyClient()) {
         offAppForeground = null
         startToken++
         if (VpnSwitcher.isActive(ctx.contentResolver)) {
@@ -98,12 +102,16 @@ internal fun Engine.handleForeground(pkg: String) {
     lastForegroundSeenAt = SystemClock.elapsedRealtime()
 
     if (userOff) {
-        if (!EnginePolicy.shouldResumeAfterUserOff(freshOpen)) {
+        val blocked = userOffRule
+        // 手动关闭压的是别的组：这次打开的是另一组的目标，照常连
+        val sameGroup = blocked == null || blocked == owner?.id.orEmpty()
+        if (sameGroup && !EnginePolicy.shouldResumeAfterUserOff(freshOpen)) {
             // 应用内部的页面切换 / 从系统面板返回，不算「重新打开」，继续让 VPN 保持关闭
             return
         }
         userOff = false
-        // 新一轮「用户主动打开」，抖动重试次数重新开始算
+        userOffRule = null
+        // 新一轮「用户主动打开」，抖动重试次数重新开始
         flapRetries = 0
         log(ctx, LogCat.DIAG, "$pkg reopened -> auto enable resumed")
     }
@@ -111,8 +119,27 @@ internal fun Engine.handleForeground(pkg: String) {
     if (freshOpen) wasConnected = false
 
     logForeground(ctx, pkg, freshOpen)
+
+    // 打开的是另一组的应用，而隧道还挂在上一组：立刻切，不等看门狗那一拍。
+    // 切换是串行的（先关、确认断开、再开），这里只要把请求发出去，
+    // 后半段由 noteVpnDown 接力
+    val running = resolveActivePkg(ctx, raw)
+    if (isVpnOn(ctx) && running.isNotEmpty() &&
+        cfg.vpnPackage.isNotEmpty() && running != cfg.vpnPackage
+    ) {
+        if (requestSwitch(ctx, owner ?: raw.defaultRule(), SystemClock.elapsedRealtime())) {
+            startWatchdog()
+        } else {
+            log(ctx, LogCat.DIAG, "switch to ${cfg.vpnPackage} postponed by cooldown")
+            // 冷却里也不能就这么走了：关闭链可能已经把看门狗停了，
+            // 不排下一次就没人再判，用户会卡在旧客户端上一路用下去
+            startWatchdog()
+        }
+        return
+    }
+
     if (isNetworkAllowed(cfg, pkg)) {
-        ensureVpn(ctx, cfg, pkg)
+        ensureVpn(ctx, cfg, pkg, owner)
     } else {
         log(ctx, LogCat.DIAG, "network type disabled, skip enabling")
     }
@@ -210,13 +237,15 @@ internal fun Engine.handleProcessDied(pkg: String, detail: String? = null) {
 internal fun Engine.handleTaskRemoved(pkg: String) {
     val ctx = context() ?: return
     val cfg = ConfigRepo.get(ctx)
+    // 属于某个规则组的目标也算数：不然划掉 NAS 应用时这一整条路径不接管
+    val inGroup = cfg.rules.any { it.enabled && pkg in it.targets }
     val verdict = EnginePolicy.taskRemovalVerdict(
         enabled = cfg.enabled,
         featureEnabled = cfg.disconnectOnTaskRemoved,
         paused = automationPaused,
         offAppForeground = offAppForeground != null,
         wifiSuppressed = wifiSuppressed,
-        target = cfg.targets.contains(pkg),
+        target = inGroup || cfg.targets.contains(pkg),
         aliveTarget = aliveTargets.contains(pkg),
     )
     if (verdict != EnginePolicy.TaskRemovalVerdict.HANDLE) {

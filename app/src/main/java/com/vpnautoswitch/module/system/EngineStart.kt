@@ -22,6 +22,7 @@ import android.widget.Toast
 import com.vpnautoswitch.module.BuildConfig
 import com.vpnautoswitch.module.Config
 import com.vpnautoswitch.module.ModuleContract
+import com.vpnautoswitch.module.VpnRule
 import de.robv.android.xposed.XposedBridge
 
 // ---------------------------------------------------------------- VPN 控制
@@ -30,8 +31,19 @@ import de.robv.android.xposed.XposedBridge
  * @param origin 触发这次开启意图的包名。只用于「关闭被取消」那条日志：
  *   以前取 lastForeground，从桌面点开应用时那里记的是桌面，日志会写成
  *   「off cancelled: com.android.launcher 回到前台」，看起来像被桌面打断了。
+ * @param rule 这一轮命中的规则组。为空表示默认组（顶层配置）。只用来记
+ *   [Engine.activeRuleId] 和 `userOff` 的归属，控制逻辑全部读 [cfg]。
  */
-internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null) {
+internal fun Engine.ensureVpn(
+    ctx: Context,
+    cfg: Config,
+    origin: String? = null,
+    rule: VpnRule? = null,
+) {
+    // 记下这一轮在拉谁。关闭和切换都以它为准：切换中途配置里「命中的组」和
+    // 「正在跑的客户端」正好相反，靠配置反推会关错人
+    activePkg = cfg.vpnPackage
+    activeRuleId = rule?.id.orEmpty()
     // 有开启意图就说明现在要用了：先撤掉强停后那段「不许客户端自启」的窗口，
     // 否则下面重新启动 VpnService 会被自己的闸门挡掉
     ClientStartGuard.release()
@@ -73,6 +85,7 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
         val adopted = VpnSwitcher.adopt(ctx)
         // 已经连上了，说明用户「保持关闭」的意图已经结束（例如他自己又手动连上了）
         userOff = false
+        userOffRule = null
         // 记一笔「这个客户端确实能在这台机器上连上」。之后如果一直拉不起来，
         // 有这条记录就不该再劝用户「先手动连一次」——他已经连上过了
         ExternalControl.markConnected(ctx, cfg.vpnPackage)
@@ -260,6 +273,8 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
         connectedNotified = false
         autoSession = false
         userOff = true
+        // 只压住掉下来的这一组：用户关掉 Clash 之后打开内网穿透的应用，那一组该照常连
+        userOffRule = activeRuleId
         startToken++
         stopWatchdog()
         lastOffAt = now
@@ -289,8 +304,12 @@ internal fun Engine.ensureVpn(ctx: Context, cfg: Config, origin: String? = null)
         return
     }
 
-    // 已经被用户手动关掉，等下次打开目标应用
-    if (userOff) return
+    // 已经被用户手动关掉，等下次打开目标应用。
+    // 只有「压住的是这一组」才停手：手动关掉 Clash 不该顺带压死内网穿透
+    if (userOff) {
+        val blocked = userOffRule
+        if (blocked == null || blocked == rule?.id.orEmpty()) return
+    }
 
     // 从这里往下模块真的要动手了，记下这轮是模块拉起的
     autoSession = true

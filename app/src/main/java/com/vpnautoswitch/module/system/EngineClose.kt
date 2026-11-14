@@ -27,7 +27,12 @@ import de.robv.android.xposed.XposedBridge
 internal fun Engine.turnOff(reason: String) {
     val ctx = context() ?: return
     beat(ctx)
-    val cfg = ConfigRepo.get(ctx)
+    val raw = ConfigRepo.get(ctx)
+    // 关的是「正在跑的那个」，不是「配置里现在命中的那个」。切换中途两者正好相反：
+    // 命中组已经是 B，隧道还挂在 A 上，照配置关等于关掉一个还没起来的客户端，
+    // A 一直留着，B 永远起不来。
+    val running = resolveActivePkg(ctx, raw).ifEmpty { raw.vpnPackage }
+    val cfg = raw.forClient(running, activeRuleId.ifEmpty { null })
     val generation = ++offGeneration
     // 用户刚手动关过 VPN、现在这条隧道是他自己又连回来的：模块不该去强停它。
     // 但 [userOff] 会一直挂到下次打开目标应用，中间客户端完全可能自己把隧道拉起来
@@ -95,6 +100,7 @@ internal fun Engine.turnOff(reason: String) {
     markPendingExternalMode(null)
     autoSession = false
     userOff = false
+    userOffRule = null
     // 顺带把当前的 always-on 打出来：「强停后 VPN 又回来」只有在 always_on 指向客户端时
     // 才可能是系统重连，指向空/别的应用就只能是客户端自己或 ROM 拉起来的。
     // 以前这行信息缺失，只能靠「有没有 came back」去猜，白绕好几轮。
@@ -106,7 +112,8 @@ internal fun Engine.turnOff(reason: String) {
     )
     // 「VPN 已关闭」不在这里发：这条链随时可能因为「目标应用又回到前台」整轮作废，
     // 那时隧道一直连着，先说关闭就是假消息。改由 noteVpnDown 在确认断开时补上。
-    offToastPending = wasActive
+    // 切换时也不发：下一秒就要开另一组，一关一开两条提示只会让人以为出错了。
+    offToastPending = wasActive && !hasPendingSwitch()
 
     // 清掉 always-on 未必能断开「用户手动连上的」VPN，稍等一下确认。
     // 外部控制模式没有设置项可清，直接把校验提前，尽快进入停止链路。
@@ -179,15 +186,21 @@ internal fun Engine.closeChainValid(ctx: Context, expectedPackage: String, gener
  * 那属于另一轮，不该把第一轮的耗时覆盖成很短的假数据。
  */
 internal fun Engine.noteVpnDown(ctx: Context) {
+    // 隧道确实没了：这一轮到此为止，下次启动会重新记 activePkg
+    activePkg = ""
+    activeRuleId = ""
     // 提示改成「真的断了才说」：请求发出后可能被目标应用打断，那时隧道一直没断
     if (offToastPending) {
         offToastPending = false
         toast(ctx, "VPN 已关闭", ConfigRepo.get(ctx).toastEnabled)
     }
     val started = offStartedAt
-    if (started == 0L) return
-    offStartedAt = 0L
-    RuntimeDiagnostics.publishTiming(ctx, "off", SystemClock.elapsedRealtime() - started, lastOffReason)
+    if (started != 0L) {
+        offStartedAt = 0L
+        RuntimeDiagnostics.publishTiming(ctx, "off", SystemClock.elapsedRealtime() - started, lastOffReason)
+    }
+    // 切换的第二段：旧的确认断开了，现在才轮到开新的
+    resumePendingSwitch(ctx)
 }
 
 /**

@@ -293,6 +293,18 @@ internal object DiagnosticsReport {
                 }
             )
             appendLine("目标应用：${config.targets.size} · 打开即关闭：${config.offTargets.size} · Wi-Fi 开/关：${config.wifiOn.size}/${config.wifiOff.size}")
+            if (config.rules.isNotEmpty()) {
+                // 多组时上面那行只是默认组。用户报「切错了」时，报告里得能看出每个组
+                // 各配了哪个客户端、几个应用，不然只能让他自己截图
+                config.rules.forEach { rule ->
+                    val wifi = if (rule.wifiOn.isEmpty()) "" else " · Wi-Fi ${rule.wifiOn.size} 个"
+                    val off = if (rule.enabled) "" else " · 已停用"
+                    appendLine(
+                        "规则组「${rule.displayName()}」：${rule.vpnPackage} · " +
+                            "${rule.targets.size} 个应用$wifi$off"
+                    )
+                }
+            }
             appendLine("配置来源：" + when {
                 diagnostics.configSource.isEmpty() -> "未上报"
                 diagnostics.configSource == "provider" -> "实时（provider）"

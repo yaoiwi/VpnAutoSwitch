@@ -18,7 +18,14 @@ object ConfigCleaner {
 
     /** 只查询，不写盘。返回配置里那些已经装不出来的包。 */
     fun findMissing(context: Context, config: Config): Set<String> {
-        val all = config.targets + config.offTargets
+        val all = buildSet<String> {
+            addAll(config.targets)
+            addAll(config.offTargets)
+            config.rules.forEach { rule ->
+                addAll(rule.targets)
+                if (rule.vpnPackage.isNotEmpty()) add(rule.vpnPackage)
+            }
+        }
         if (all.isEmpty()) return emptySet()
         return all.filterNot { AppsRepository.isInstalled(context, it) }.toSet()
     }
@@ -41,7 +48,10 @@ object ConfigCleaner {
     fun prunePackage(context: Context, packageName: String): Boolean {
         if (packageName.isBlank()) return false
         val config = Config.load(context)
-        if (packageName !in config.targets && packageName !in config.offTargets) return false
+        val inUse = packageName in config.targets ||
+            packageName in config.offTargets ||
+            config.rules.any { packageName == it.vpnPackage || packageName in it.targets }
+        if (!inUse) return false
         if (AppsRepository.isInstalled(context, packageName)) return false
         Config.save(context, config.withoutPackages(setOf(packageName)))
         return true
@@ -55,5 +65,15 @@ internal fun Config.withoutPackages(gone: Set<String>): Config {
         targets = targets - gone,
         offTargets = offTargets - gone,
         networkOverride = networkOverride.filterKeys { it !in gone },
+        rules = rules.map { rule ->
+            // 客户端被卸载：整组停用，但不清空。应用清单重配一遍太伤了，
+            // 用户重装回来只要把开关重新打开；留着一个拉不起来的包，
+            // 模块每轮都会白试一次。
+            if (rule.vpnPackage in gone) {
+                rule.copy(enabled = false)
+            } else {
+                rule.copy(targets = rule.targets - gone)
+            }
+        },
     )
 }

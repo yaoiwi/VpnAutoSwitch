@@ -28,19 +28,24 @@ internal fun Engine.onAppLaunching(packageName: String) {
 
 internal fun Engine.prewarm(pkg: String) {
     val ctx = context() ?: return
-    val cfg = ConfigRepo.getOrNull(ctx)
-    if (cfg == null) {
+    val raw = ConfigRepo.getOrNull(ctx)
+    if (raw == null) {
         noteConfigMissing(ctx, pkg)
         return
     }
-    if (!cfg.enabled || cfg.vpnPackage.isEmpty()) return
+    // 这个应用属于哪个组：命中组就用组的客户端和目标表，否则按默认组
+    val owner = raw.rules.firstOrNull { it.enabled && pkg in it.targets }
+    if (owner == null && !raw.targets.contains(pkg)) return
+    val cfg = if (owner == null) raw else raw.forClient(owner.vpnPackage, owner.id)
+    if (!cfg.enabled || !cfg.hasAnyClient()) return
     if (pkg == cfg.vpnPackage || pkg == BuildConfig.APPLICATION_ID) return
-    if (!cfg.targets.contains(pkg)) return
     // 开机早期注册的网络回调可能一直没来，这里按当下网络补一次判断：
     // 否则 lastTransport 是 0、wifiSuppressed 还是初始的 false，Wi-Fi 规则等于没配。
     probeNetwork(ctx)
-    refreshWifiSuppression(ctx, cfg)
-    if (automationPaused || userOff || wifiSuppressed || offAppForeground != null) return
+    refreshWifiSuppression(ctx, raw)
+    // 手动关闭只压住被关的那一组：prewarm 的是另一组的应用就照常探
+    val offBlocked = userOff && (userOffRule == null || userOffRule == owner?.id.orEmpty())
+    if (automationPaused || offBlocked || wifiSuppressed || offAppForeground != null) return
     if (screenOffActive) return
     if (!isNetworkAllowed(cfg, pkg)) return
     // 已经连着就不用插手，resumed 之后走正常流程
@@ -53,7 +58,7 @@ internal fun Engine.prewarm(pkg: String) {
     lastPrewarmAt = now
 
     log(ctx, LogCat.DIAG, "$pkg launching -> prewarm")
-    ensureVpn(ctx, cfg, pkg)
+    ensureVpn(ctx, cfg, pkg, owner)
     // 点了又立刻退出时没人收尾，交给看门狗发现「没有目标存活」后再关
     startWatchdog()
 }

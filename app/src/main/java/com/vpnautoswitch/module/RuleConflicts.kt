@@ -68,12 +68,31 @@ object RuleConflicts {
     /** 导入的旧配置可能带着交叉项，一次性按「关优先」清掉。 */
     fun normalize(config: Config): Pair<Config, RuleConflict> {
         val before = find(config)
-        if (before.isEmpty) return config to before
+        // 组间重复：一个应用只能属于一组，保留列表里靠前的那个。
+        // 两个组都认它当目标的话，打开它时切到哪一组取决于判定顺序，用户看到的是「随机」
+        val seen = LinkedHashSet<String>(config.targets)
+        val dup = LinkedHashSet<String>()
+        val cleanedRules = config.rules.map { rule ->
+            val taken = rule.targets intersect seen
+            dup.addAll(taken)
+            seen.addAll(rule.targets)
+            if (taken.isEmpty()) rule else rule.copy(targets = rule.targets - taken)
+        }
+        //「打开即关闭」的应用也不该留在任何组里，同样按关优先摘掉
+        val offDup = config.offTargets
+        val cleanedRules2 = cleanedRules.map { rule ->
+            val taken = rule.targets intersect offDup
+            dup.addAll(taken)
+            if (taken.isEmpty()) rule else rule.copy(targets = rule.targets - taken)
+        }
+        val apps = before.apps + dup
+        if (apps.isEmpty() && before.wifi.isEmpty()) return config to before
         val cleaned = config.copy(
             targets = LinkedHashSet(config.targets - config.offTargets),
             wifiOn = LinkedHashSet(config.wifiOn - config.wifiOff),
             networkOverride = config.networkOverride - config.offTargets,
+            rules = cleanedRules2,
         )
-        return cleaned to before
+        return cleaned to RuleConflict(apps, before.wifi)
     }
 }

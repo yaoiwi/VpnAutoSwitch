@@ -93,4 +93,34 @@ class RuleConflictsTest {
         assertTrue(before.isEmpty)
         assertEquals(c, cleaned)
     }
+
+    @Test
+    fun `normalize moves an app out of the later group`() {
+        // 同一应用在两个组里时，判定顺序决定切到谁，用户看到的就是「随机」
+        val a = VpnRule(id = "g1", vpnPackage = "com.a", targets = setOf("chrome", "yt"))
+        val b = VpnRule(id = "g2", vpnPackage = "com.b", targets = setOf("chrome", "nas"))
+        val (cleaned, before) = RuleConflicts.normalize(Config(rules = listOf(a, b)))
+        assertEquals(setOf("chrome"), before.apps)
+        assertEquals(setOf("chrome", "yt"), cleaned.rules[0].targets)
+        assertEquals(setOf("nas"), cleaned.rules[1].targets)
+    }
+
+    @Test
+    fun `normalize also strips app from a group when it is an off target`() {
+        val a = VpnRule(id = "g1", vpnPackage = "com.a", targets = setOf("chrome", "bank"))
+        val (cleaned, before) =
+            RuleConflicts.normalize(Config(rules = listOf(a), offTargets = setOf("bank")))
+        assertEquals(setOf("bank"), before.apps)
+        assertEquals(setOf("chrome"), cleaned.rules[0].targets)
+    }
+
+    @Test
+    fun `normalize leaves groups without overlap alone`() {
+        val a = VpnRule(id = "g1", vpnPackage = "com.a", targets = setOf("chrome"))
+        val b = VpnRule(id = "g2", vpnPackage = "com.b", targets = setOf("nas"))
+        val c = Config(rules = listOf(a, b))
+        val (cleaned, before) = RuleConflicts.normalize(c)
+        assertTrue(before.isEmpty)
+        assertEquals(c, cleaned)
+    }
 }

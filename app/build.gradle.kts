@@ -13,8 +13,8 @@ fun signingValue(env: String, prop: String): String? =
         ?: signingProps.getProperty(prop)?.takeIf { it.isNotBlank() }
 
 // 版本只在这里维护；CI 通过 :app:printVersionName 读取，避免解析脚本
-val appVersionCode = 146
-val appVersionName = "1.9.25"
+val appVersionCode = 147
+val appVersionName = "1.10.0"
 
 val storePath = signingValue("KEYSTORE_FILE", "storeFile")
 val storePwd = signingValue("KEYSTORE_PASSWORD", "storePassword")
@@ -179,4 +179,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.13.0")
 
     testImplementation("junit:junit:4.13.2")
+    // 单测跑在 JVM 上，android.jar 里的 org.json 只是会抛「Stub!」的空壳。
+    // 配置的序列化 / 迁移全靠 JSONObject，用一个真实实现才能测到真东西
+    testImplementation("org.json:json:20240303")
 }

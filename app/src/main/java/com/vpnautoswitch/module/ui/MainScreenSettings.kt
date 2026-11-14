@@ -199,6 +199,16 @@ internal fun LazyListScope.settingsItems(
                 summary = ssidSummary(state.config.wifiOff, "连上这些 Wi-Fi 时关闭 VPN 且不再自动开启"),
                 onClick = { onEditSsid("off") },
             )
+            SettingsActionWithArrow(
+                title = "规则组",
+                icon = MiuixIcons.Layers,
+                summary = if (state.config.rules.isEmpty()) {
+                    "按场景换用不同的 VPN 客户端；现在只有默认组"
+                } else {
+                    "共 ${state.config.rules.size + 1} 组：默认组 + ${state.config.rules.size} 个规则组"
+                },
+                onClick = { state.openRuleGroups() },
+            )
             if (!state.config.allowWifi && !state.config.allowMobile) {
                 Text(
                     text = "两个都关闭后，任何网络下都不会自动开关 VPN",

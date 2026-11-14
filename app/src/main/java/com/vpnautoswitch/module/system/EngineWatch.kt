@@ -26,8 +26,8 @@ import de.robv.android.xposed.XposedBridge
 
 internal fun Engine.watchdogTick() {
     val ctx = context() ?: return
-    val cfg = ConfigRepo.getOrNull(ctx)
-    if (cfg == null) {
+    val raw = ConfigRepo.getOrNull(ctx)
+    if (raw == null) {
         // 配置读不到就先不动：下面第一段判断会把空配置当成「模块已停用」，
         // 直接把用户正在用的 VPN 关掉，而且连一句日志都不留
         noteConfigMissing(ctx, "watchdog")
@@ -50,7 +50,7 @@ internal fun Engine.watchdogTick() {
         return procs
     }
 
-    if (!cfg.enabled || cfg.vpnPackage.isEmpty()) {
+    if (!raw.enabled || !raw.hasAnyClient()) {
         if (active) turnOff("module disabled")
         aliveTargets.clear()
         watchdogRunning = false
@@ -82,6 +82,30 @@ internal fun Engine.watchdogTick() {
         log(ctx, LogCat.DIAG, "$staleSuppressor is gone, auto vpn available again")
     }
 
+    // 这一拍由哪一组驱动。后面全部用这一组的等效配置：targets / wifiOn / 客户端
+    // 都换成组里的，其余开关还是全局的
+    val hit = raw.hitGroup(ruleProbe())
+    val cfg = if (hit == null) raw else raw.forClient(hit.rule.vpnPackage, hit.rule.id)
+    // 只算命中组自己的目标。别的组留在后台的应用不该替这一组决定「该不该开」
+    val targets = if (hit == null) aliveTargets else hit.matched.toSet()
+
+    // 命中组换客户端了：串行切换，先关、确认断开后再开（见 EngineSwitch）。
+    // 不能直接开新的：系统只有一条隧道，旧客户端的自恢复会把它顶回来，两边互踢。
+    // want 在没命中组时取默认组——从规则组的应用切回普通应用，也要切回去
+    val want = hit?.rule ?: raw.defaultRule()
+    val running = resolveActivePkg(ctx, raw)
+    if (active && running.isNotEmpty() && want.vpnPackage.isNotEmpty() &&
+        running != want.vpnPackage
+    ) {
+        if (requestSwitch(ctx, want, SystemClock.elapsedRealtime())) return
+        // 冷却里：保持当前这一组。目标应用还开着的话，下一拍会再判断一次。
+        // 不能只 postDelayed——watchdogRunning 还是 false，下一次 startWatchdog 进来
+        // 会以为已经在跑，直接 return，看门狗就此断掉
+        watchdogRunning = true
+        handler.postDelayed(watchdog, RECONCILE_INTERVAL_MS)
+        return
+    }
+
     // 「指定 Wi-Fi 开 VPN」比目标应用优先：命中时不管目标进程在不在，都不该因为
     // 「没有目标进程」被关掉。原来只有网络回调认这一级，看门狗没有——在命中 wifiOn 的
     // 网络下退出目标应用，reconcile 仍按「没有目标进程」关 VPN，和 judge() 的顺序对不上（#20）
@@ -97,11 +121,11 @@ internal fun Engine.watchdogTick() {
             return
         }
         // 没连着时不硬顶用户：手动关掉后等下一个网络回调，免得每 5 秒又把 VPN 顶开
-        if (userOff) {
+        if (userOffBlocks(hit)) {
             watchdogRunning = false
             return
         }
-        ensureVpn(ctx, cfg)
+        ensureVpn(ctx, cfg, rule = hit?.rule)
         val connected = hasVpnTransport(ctx)
         connectingTicks = if (connected) 0 else connectingTicks + 1
         handler.postDelayed(
@@ -117,7 +141,7 @@ internal fun Engine.watchdogTick() {
         return
     }
 
-    if (aliveTargets.isEmpty()) {
+    if (targets.isEmpty()) {
         // 兜底：目标进程都没了，VPN 却还开着（例如进程死亡事件被系统吞了），
         // 只要这轮是模块拉起的、且没有「打开即关闭」的应用在压制，就直接关掉。
         if (autoSession && offAppForeground == null && (active || hasVpnTransport(ctx))) {
@@ -130,7 +154,7 @@ internal fun Engine.watchdogTick() {
 
     // 「打开即关闭」的应用还活着就不再拉起 VPN；它退出后恢复自动开启
     // 用户手动关掉了 VPN：他要求保持关闭，看门狗不再轮询
-    if (userOff) {
+    if (userOffBlocks(hit)) {
         watchdogRunning = false
         return
     }
@@ -142,7 +166,7 @@ internal fun Engine.watchdogTick() {
         return
     }
 
-    if (!anyTargetAllowedOnNetwork(cfg)) {
+    if (!anyTargetAllowedOnNetwork(cfg, targets)) {
         if (active) {
             log(ctx, LogCat.DIAG, "reconcile: network type disabled -> off")
             turnOff("network type disabled")
@@ -153,7 +177,7 @@ internal fun Engine.watchdogTick() {
         return
     }
 
-    if (!EnginePolicy.shouldEnsureForProcessState(anyTargetAlive(ctx, processes()))) {
+    if (!EnginePolicy.shouldEnsureForProcessState(anyTargetAlive(ctx, processes(), targets))) {
         log(ctx, LogCat.DIAG, "reconcile: target process gone -> off")
         aliveTargets.clear()
         scheduleOff(ctx, "watchdog")
@@ -164,7 +188,7 @@ internal fun Engine.watchdogTick() {
         if (!active && !ExternalControl.isKnown(ctx, cfg.vpnPackage) && !hasVpnTransport(ctx)) {
             log(ctx, LogCat.DIAG, "reconcile: vpn is off but target alive -> enable")
         }
-        ensureVpn(ctx, cfg)
+        ensureVpn(ctx, cfg, rule = hit?.rule)
         // 没连上就快步重试：原来的固定 5 秒一拍会让「第一次没成功」再白等 5 秒
         val connected = hasVpnTransport(ctx)
         connectingTicks = if (connected) 0 else connectingTicks + 1
@@ -217,17 +241,19 @@ internal fun Engine.isProcessAlive(
 }
 
 /**
+ * @param targets 只看这些目标；默认是全局存活集合。多组时传命中组的应用
  * @return true 还在运行；false 已经结束；null 无法判断（列表被系统裁剪时）
  */
 internal fun Engine.anyTargetAlive(
     ctx: Context,
     snapshot: List<ActivityManager.RunningAppProcessInfo>? = null,
+    targets: Set<String> = aliveTargets,
 ): Boolean? {
     val processes = snapshot ?: runningProcesses(ctx) ?: return null
 
     if (processes.none { it.uid != Process.myUid() }) return null
 
-    return aliveTargets.any { pkg ->
+    return targets.any { pkg ->
         processes.any { it.processName == pkg || it.processName.startsWith("$pkg:") }
     }
 }

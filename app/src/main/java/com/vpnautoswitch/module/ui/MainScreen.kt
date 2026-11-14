@@ -315,12 +315,18 @@ private fun LazyListScope.overviewItems(
     item { HeroStatusCard(state) }
 
     // 装完到第一次连上之间有四道坎：重启、选客户端、给触发条件、手动授权一次。
-    // 这四件事以前散在四处提示里，用户得自己拼；现在合成一张清单，做完就消失
+    // 这四件事以前散在四处提示里，用户得自己拼；现在合成一张清单，做完就消失。
+    // 只配了规则组、没配默认组也是配好了，所以这几项要把组算进去，否则清单永远差一步
+    val anyClient = state.config.vpnPackage.ifEmpty {
+        state.config.rules.firstOrNull { it.enabled && it.vpnPackage.isNotEmpty() }
+            ?.vpnPackage.orEmpty()
+    }
     val guide = FirstRunGuide.steps(
         moduleState = state.diagnostics.moduleState,
-        vpnPackage = state.config.vpnPackage,
-        targets = state.config.targets.size,
-        wifiRules = state.config.wifiOn.size + state.config.wifiOff.size,
+        vpnPackage = anyClient,
+        targets = state.config.targets.size + state.config.rules.sumOf { it.targets.size },
+        wifiRules = state.config.wifiOn.size + state.config.wifiOff.size +
+            state.config.rules.count { it.wifiOn.isNotEmpty() },
         everConnected = state.diagnostics.everConnected,
     )
     if (!FirstRunGuide.isComplete(guide)) {
@@ -395,7 +401,13 @@ private fun LazyListScope.overviewItems(
                 title = "客户端适配",
                 icon = MiuixIcons.Link,
                 summary = if (state.config.vpnPackage.isEmpty()) {
-                    "先选择默认 VPN 客户端，再检测启动方式"
+                    // 只有规则组、没有默认组时也能用，但适配测试只认默认组那个客户端，
+                    // 直接说清楚，免得用户以为「配了组所以这里坏了」
+                    if (state.config.rules.isNotEmpty()) {
+                        "只测默认组的客户端；规则组的那几个会按已知方式直接拉"
+                    } else {
+                        "先选择默认 VPN 客户端，再检测启动方式"
+                    }
                 } else {
                     "检测 VpnService / 外部控制，测试并记住可用方式"
                 },

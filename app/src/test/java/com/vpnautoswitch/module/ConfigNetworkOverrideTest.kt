@@ -52,7 +52,7 @@ class ConfigNetworkOverrideTest {
 
     @Test
     fun `schema is bumped for the new fields`() {
-        // 3 = 日志里的 SSID 脱敏开关。旧版模块读到新配置只会忽略这个键
-        assertEquals(3, Config.SCHEMA)
+        // 4 = 规则组。缺这个键时和 3 完全一样，旧版模块读到只会忽略
+        assertEquals(4, Config.SCHEMA)
     }
 }

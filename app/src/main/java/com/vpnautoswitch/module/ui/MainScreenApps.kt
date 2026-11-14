@@ -48,6 +48,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Layers
 import top.yukonga.miuix.kmp.icon.extended.GridView
 import top.yukonga.miuix.kmp.icon.extended.Hide
 import top.yukonga.miuix.kmp.icon.extended.Image
@@ -94,6 +95,19 @@ internal fun LazyListScope.appsItems(
                 icon = MiuixIcons.GridView,
                 summary = "长按可批量管理；点列表里的应用可以为它单独设置网络条件",
                 onClick = { state.openPicker(AppState.MODE_MULTI) },
+            )
+            // 上面这张表是「默认组」。配了规则组之后，组里的应用不在这张表里，
+            // 不给入口的话用户会以为它们丢了
+            SettingsActionWithArrow(
+                title = "规则组",
+                icon = MiuixIcons.Layers,
+                summary = if (state.config.rules.isEmpty()) {
+                    "让不同的应用用不同的 VPN 客户端"
+                } else {
+                    "${state.config.rules.size} 个组 · " +
+                        "${state.config.rules.sumOf { it.targets.size }} 个应用"
+                },
+                onClick = { state.openRuleGroups() },
             )
         }
     }

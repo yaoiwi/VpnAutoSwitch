@@ -47,10 +47,15 @@ fun AppPickerScreen(state: AppState) {
     BackHandler { state.closePicker() }
 
     var query by remember { mutableStateOf("") }
-    val single = state.pickerMode == AppState.MODE_SINGLE
+    val single = state.pickerMode == AppState.MODE_SINGLE ||
+        state.pickerMode == AppState.MODE_RULE_CLIENT
     val offMode = state.pickerMode == AppState.MODE_OFF
+    val ruleMode = state.pickerMode == AppState.MODE_RULE_TARGETS ||
+        state.pickerMode == AppState.MODE_RULE_CLIENT
 
     val title = when {
+        state.pickerMode == AppState.MODE_RULE_CLIENT -> "选择这一组的 VPN"
+        state.pickerMode == AppState.MODE_RULE_TARGETS -> "这一组的目标应用"
         single -> "选择默认 VPN"
         offMode -> "打开时关闭 VPN"
         else -> "选择目标应用"
@@ -112,6 +117,15 @@ fun AppPickerScreen(state: AppState) {
                             Text(
                                 text = "打开这些应用时，如果 VPN 正在连接就自动断开，并在它们退出前保持关闭。" +
                                     "与「目标应用」重叠时以关闭为准。",
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
+                                fontSize = 12.sp,
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
+                        if (ruleMode) {
+                            Text(
+                                text = "打开这些应用时改用这一组的客户端。同一个应用只能属于一个组，" +
+                                    "选中后会从别的组里移出。",
                                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
                                 fontSize = 12.sp,
                                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,

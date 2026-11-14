@@ -67,11 +67,31 @@ internal fun Engine.currentRule(cfg: Config): Pair<String, String> {
 internal fun ruleTraceText(excluded: List<String>): String =
     if (excluded.isEmpty()) "" else "已排除：" + excluded.joinToString(" · ")
 
+/** 这一拍的现场：组匹配只看 SSID、网络类型、还活着的目标应用和当前前台 */
+internal fun Engine.ruleProbe(): RuleProbe = RuleProbe(
+    ssid = currentSsid,
+    isWifi = lastTransport == 1,
+    aliveTargets = aliveTargets,
+    foreground = lastForeground,
+)
+
+/**
+ * 手动关闭还压不压得住这一拍。
+ *
+ * [Engine.userOffRule] 为空（单组时代、或用户关的是默认组）时压住全部；
+ * 记了组就只压那一组，打开别的组的应用照常连。
+ */
+internal fun Engine.userOffBlocks(hit: GroupHit?): Boolean {
+    if (!userOff) return false
+    val blocked = userOffRule ?: return true
+    return hit?.rule?.id == blocked
+}
+
 internal fun Engine.judge(cfg: Config, ctx: Context?): RuleVerdict {
-    val excluded = ArrayList<String>(8)
+    val excluded = ArrayList<String>(9)
     fun verdict(rule: String, detail: String) = RuleVerdict(rule, detail, ruleTraceText(excluded))
 
-    if (!cfg.enabled || cfg.vpnPackage.isEmpty()) {
+    if (!cfg.enabled || !cfg.hasAnyClient()) {
         return verdict("disabled", "模块已关闭或未选择 VPN 客户端")
     }
     excluded += "模块开关"
@@ -91,6 +111,17 @@ internal fun Engine.judge(cfg: Config, ctx: Context?): RuleVerdict {
         return verdict("offTarget", "打开 $pkg 时保持断开")
     }
     excluded += "打开即关闭"
+
+    // 哪一组在驱动这一拍。组里网络命中本来就排在应用命中之前，见 [Config.hitGroup]
+    val hit = cfg.hitGroup(ruleProbe())
+
+    // 「指定 Wi-Fi 开 VPN」压过目标应用：组的 Wi-Fi 规则和默认组的都算
+    if (hit?.reason == REASON_WIFI) {
+        return verdict(
+            "wifiOn",
+            "Wi-Fi \"${ssidForLog(ctx, currentSsid)}\" 命中${groupTag(hit.rule)}的开启规则",
+        )
+    }
     if (isWifiOnActive(cfg)) {
         return verdict(
             "wifiOn",
@@ -98,14 +129,23 @@ internal fun Engine.judge(cfg: Config, ctx: Context?): RuleVerdict {
         )
     }
     excluded += "Wi-Fi开"
-    if (!anyTargetAllowedOnNetwork(cfg)) {
+
+    // 下面都只关心「命中组自己的目标」：别的组留在后台的应用不该替这一组做决定
+    val driving = if (hit == null) aliveTargets else hit.matched.toSet()
+    val effective = if (hit == null) cfg else cfg.forClient(hit.rule.vpnPackage, hit.rule.id)
+    if (!anyTargetAllowedOnNetwork(effective, driving)) {
         return verdict("networkDisabled", "当前网络类型已关闭自动开关")
     }
     excluded += "网络类型"
-    if (userOff) {
+    if (userOffBlocks(hit)) {
         return verdict("userOff", "已手动关闭，等待重新打开目标应用")
     }
     excluded += "手动关闭"
+    if (hit != null && hit.matched.isNotEmpty()) {
+        val sample = hit.matched.take(3).joinToString("、")
+        val more = if (hit.matched.size > 3) " 等 ${hit.matched.size} 个" else ""
+        return verdict("target", "目标应用在前台：$sample$more · ${groupTag(hit.rule)}")
+    }
     if (aliveTargets.isNotEmpty()) {
         val sample = aliveTargets.take(3).joinToString("、")
         val more = if (aliveTargets.size > 3) " 等 ${aliveTargets.size} 个" else ""
@@ -129,13 +169,21 @@ internal fun Engine.publishRuntime(ctx: Context?) {
         // 免得每次心跳都多做几次跨进程调用
         val connected = hasVpnTransport(context)
         val expectedOn = rule == "target" || rule == "wifiOn"
+        // 诊断要针对「这一拍该用哪个客户端」：多组时不能拿顶层那个去查事实，
+        // 否则报告里说的客户端和实际要拉的根本不是同一个
+        val focus = if (expectedOn) {
+            cfg.hitGroup(ruleProbe())?.let { cfg.forClient(it.rule.vpnPackage, it.rule.id) }
+                ?: cfg.forClient(activePkg.ifEmpty { cfg.vpnPackage }, activeRuleId.ifEmpty { null })
+        } else {
+            cfg
+        }
         val readiness = if (expectedOn && !connected) {
-            ReadinessPolicy.assess(Packages.factsOf(context, cfg.vpnPackage))
+            ReadinessPolicy.assess(Packages.factsOf(context, focus.vpnPackage))
         } else {
             ClientReadiness.READY
         }
         val blocked = if (expectedOn && !connected) {
-            startBlock(context, cfg, readiness, connected)
+            startBlock(context, focus, readiness, connected)
         } else {
             null
         }
@@ -161,7 +209,7 @@ internal fun Engine.publishRuntime(ctx: Context?) {
             trace = verdict.trace,
             // 连上了就不用查设置；只有可能要给「从没连上过」下结论时才读一次，
             // 而且这句写在节流 return 之后，平时根本走不到
-            everConnected = connected || ExternalControl.everConnected(context, cfg.vpnPackage),
+            everConnected = connected || ExternalControl.everConnected(context, focus.vpnPackage),
         )
     } catch (t: Throwable) {
         // 诊断失败不能影响控制逻辑

@@ -73,6 +73,15 @@ internal object Engine {
     internal const val RECONCILE_INTERVAL_MS = 5_000L
 
     /**
+     * 两组之间切换的最小间隔。
+     *
+     * 用户「返回桌面 → 点开另一个应用 → 又点回来」就能在十秒内触发三次切换，
+     * 每次都要关掉重开客户端，比只用一组还慢。冷却期内保持当前这一组，
+     * 等下一次心跳再决定——目标应用还开着的话，五秒后自然会切过去。
+     */
+    internal const val SWITCH_COOLDOWN_MS = 10_000L
+
+    /**
      * 已经发起连接、隧道还没起来时的对账间隔。
      *
      * 原来固定 5 秒一拍：第一次尝试没连上，用户就要多等 5 秒才轮到第二次。
@@ -521,10 +530,50 @@ internal object Engine {
     internal var autoSession = false
 
     /**
+     * 这一轮实际拉起来的是哪个客户端。
+     *
+     * 没有多组之前它就是 `cfg.vpnPackage`，现在配置里可能有五六组、每组一个客户端，
+     * 关的时候必须关「正在跑的那个」，不能关「配置里当前命中的那个」——切换中途
+     * 两者正好相反，照配置关会把还没起来的客户端关一遍，旧的那个一直留着。
+     *
+     * 空串表示还没开过、或刚关完。模块重启后这个值会丢，[Engine.turnOff] 里
+     * 有兜底：先看 always_on 指着谁。
+     */
+    internal var activePkg = ""
+
+    /** [activePkg] 属于哪个组；默认组（顶层配置）为空串 */
+    internal var activeRuleId = ""
+
+    /**
+     * 上一次切换组到现在还没切完时，目标是哪一组。
+     *
+     * 切换不能「直接开新的」：系统只有一条隧道，直接开会顶掉旧的，旧客户端的
+     * 自动重连再把它顶回来，两边互踢。所以流程是「先关、确认断开、再开」，
+     * 中间这个空档用这两个字段记住要开谁。
+     */
+    internal var pendingSwitchRuleId: String? = null
+
+    /** 待切换的目标客户端。跟着 [pendingSwitchRuleId] 一起记，默认组也能切回去 */
+    internal var pendingSwitchPkg: String? = null
+    internal var pendingSwitchAt = 0L
+
+    /** 上一次真正发起切换的时刻，用来压冷却 */
+    internal var lastSwitchAt = 0L
+
+    /**
      * 用户手动关掉了 VPN（下拉磁贴 / 在 VPN 客户端里点断开）。
      * 置 true 后不再自动重连，直到他重新打开目标应用（不是应用内部的页面切换）。
      */
     internal var userOff = false
+
+    /**
+     * [userOff] 压住的是哪一组。
+     *
+     * 只有一组的时候这个字段永远是 null，行为没变。多组时它必须记清楚：
+     * 用户手动关掉 Clash，然后打开内网穿透的应用，那一组应该照常连——
+     * 不记的话一次手动关闭会把所有组都压死，只能退出应用再进。
+     */
+    internal var userOffRule: String? = null
 
     /** 最近出现在前台的包：用来区分「重新打开应用」和「应用内部 resume」 */
     internal var lastForeground: String? = null

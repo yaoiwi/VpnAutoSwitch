@@ -57,6 +57,7 @@ fun App(state: AppState) {
             when (state.screen) {
                 Screen.Main -> MainScreen(state)
                 Screen.Picker -> AppPickerScreen(state)
+                Screen.RuleGroups -> RuleGroupScreen(state)
             }
         }
     }
