@@ -614,6 +614,15 @@ internal object Engine {
      */
     internal var lastOffAt = 0L
 
+    /**
+     * 最近一次关闭的原因原文，形如 `com.chrome.canary task removed`。
+     *
+     * 只给诊断用：用户说「VPN 自己断了」时，报告里直接写清是哪条规则关的，
+     * 不用再让他导日志。断开确认（[noteVpnDown]）时才连耗时一起写出去，
+     * 所以这里记的是「最后一次真的关成功」的那条原因。
+     */
+    internal var lastOffReason = ""
+
     /** 心跳与运行时快照的写入节流，见 [BEAT_MIN_INTERVAL_MS] / [RUNTIME_REWRITE_MS] */
     internal var lastBeatAt = 0L
     internal var lastRuntimeAt = 0L

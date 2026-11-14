@@ -105,6 +105,8 @@ data class Diagnostics(
     val lastOnAt: Long = 0L,
     val lastOffMs: Long = 0L,
     val lastOffAt: Long = 0L,
+    /** 上次关闭的原因原文（`com.chrome.canary task removed` 之类），空表示没记录 */
+    val lastOffReason: String = "",
     val heartbeatFresh: Boolean = false,
     val moduleState: DiagnosticsPolicy.ModuleState = DiagnosticsPolicy.ModuleState.NEVER,
     /** 快捷磁贴暂停了自动联动 */
@@ -227,6 +229,7 @@ data class Diagnostics(
                 lastOnAt = timing?.optLong("onAt", 0L) ?: 0L,
                 lastOffMs = timing?.optLong("offMs", 0L) ?: 0L,
                 lastOffAt = timing?.optLong("offAt", 0L) ?: 0L,
+                lastOffReason = timing?.optString("offReason").orEmpty(),
                 heartbeatFresh = DiagnosticsPolicy.isHeartbeatFresh(heartbeat, now),
                 moduleState = DiagnosticsPolicy.moduleState(
                     heartbeat,

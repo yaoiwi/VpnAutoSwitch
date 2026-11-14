@@ -100,8 +100,11 @@ internal object RuntimeDiagnostics {
      * [kind] 取 "on" / "off"，读改写同一个 JSON，两个方向互不覆盖——
      * 状态诊断里就能直接看到「上次开启 1.2 秒 / 上次关闭 0.7 秒」，
      * 慢的时候不用再靠猜是客户端建隧道慢还是模块在重试。
+     *
+     * [reason] 只在关闭时有意义：把「为什么关」和耗时一起存下来，
+     * 用户报「VPN 自己断了」时报告里直接有答案，不用再翻几百行日志。
      */
-    fun publishTiming(ctx: Context, kind: String, costMs: Long) {
+    fun publishTiming(ctx: Context, kind: String, costMs: Long, reason: String = "") {
         try {
             val prev = try {
                 Settings.Secure.getString(ctx.contentResolver, TIMING_KEY)
@@ -112,6 +115,11 @@ internal object RuntimeDiagnostics {
             val json = prev ?: JSONObject().put("schema", SCHEMA)
             json.put("${kind}Ms", costMs.coerceAtLeast(0L))
             json.put("${kind}At", System.currentTimeMillis())
+            if (kind == "off" && reason.isNotBlank()) {
+                // 原文里带包名，展示时再翻成人话；这里不做截断，
+                // Wi-Fi 名之类会带上 SSID，但 SSID 在写日志时已经过 SsidMask
+                json.put("offReason", reason)
+            }
             Settings.Secure.putString(ctx.contentResolver, TIMING_KEY, json.toString())
         } catch (t: Throwable) {
             XposedBridge.log("[$TAG] timing snapshot failed: $t")

@@ -577,4 +577,27 @@ class DiagnosticsPolicyTest {
             )
         )
     }
+
+    @Test
+    fun `off reason turns package suffix into a sentence`() {
+        assertEquals(
+            "划掉任务（com.chrome.canary）",
+            DiagnosticsPolicy.offReasonLabel("com.chrome.canary task removed"),
+        )
+        assertEquals(
+            "打开即关闭（com.tencent.mm）",
+            DiagnosticsPolicy.offReasonLabel("opened com.tencent.mm"),
+        )
+        assertEquals("息屏", DiagnosticsPolicy.offReasonLabel("screen off"))
+        assertEquals("手动关闭", DiagnosticsPolicy.offReasonLabel("disable"))
+    }
+
+    @Test
+    fun `unknown off reason is kept verbatim and empty stays empty`() {
+        // 新加的关闭路径还没写进翻译表时，宁可在报告里难看，也不能变成空字符串
+        assertEquals("some future reason", DiagnosticsPolicy.offReasonLabel("some future reason"))
+        assertEquals("", DiagnosticsPolicy.offReasonLabel("   "))
+        // 只有后缀、没有包名：认不出来就原样留着，别拼出「划掉任务（）」这种半个句子
+        assertEquals("task removed", DiagnosticsPolicy.offReasonLabel(" task removed"))
+    }
 }

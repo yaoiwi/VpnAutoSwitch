@@ -419,5 +419,34 @@ object DiagnosticsPolicy {
         "forceStop" -> "强制停止客户端"
         else -> "开关 VPN"
     }
+
+    /**
+     * 把关闭原因原文翻成报告里的一句话。
+     *
+     * 原文在 system_server 侧拼，形如 `com.chrome.canary task removed`：
+     * 直接贴进报告用户还得自己断句，报「VPN 自己断了」时也说不清是哪条规则。
+     * 认不出来的句式原样返回——宁可难看，也别把信息丢掉。
+     */
+    fun offReasonLabel(raw: String): String {
+        val reason = raw.trim()
+        if (reason.isEmpty()) return ""
+        return when {
+            reason.endsWith(TASK_REMOVED) ->
+                "划掉任务（${reason.removeSuffix(TASK_REMOVED)}）"
+            reason.startsWith("opened ") ->
+                "打开即关闭（${reason.removePrefix("opened ")}）"
+            reason.startsWith("wifi off:") ->
+                "Wi-Fi 关闭：${reason.removePrefix("wifi off:").trim()}"
+            reason == "wifi off" -> "Wi-Fi 关闭"
+            reason == "network type disabled" -> "当前网络类型不允许"
+            reason == "screen off" -> "息屏"
+            reason == "module disabled" -> "模块被停用"
+            reason == "automation resumed without target" -> "恢复自动化时没有目标应用"
+            reason == "disable" -> "手动关闭"
+            else -> reason
+        }
+    }
+
+    private const val TASK_REMOVED = " task removed"
 }
 

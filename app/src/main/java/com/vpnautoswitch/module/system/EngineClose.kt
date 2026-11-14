@@ -87,6 +87,9 @@ internal fun Engine.turnOff(reason: String) {
     // 以前按「主链 15s + 窗口 8s」压住预热，结果正常关闭也要等 23 秒客户端才变热。
     offStartedAt = SystemClock.elapsedRealtime()
     lastOffAt = offStartedAt
+    // 记在「请求关闭」这一刻：真正确认断开是在几百毫秒后，那时 reason 已经传不到这里了。
+    // 如果这条链中途作废（目标又回到前台），noteVpnDown 不会写出去，报告里仍是上一次的。
+    lastOffReason = reason
     stopWatchdog()
     startToken++
     markPendingExternalMode(null)
@@ -184,7 +187,7 @@ internal fun Engine.noteVpnDown(ctx: Context) {
     val started = offStartedAt
     if (started == 0L) return
     offStartedAt = 0L
-    RuntimeDiagnostics.publishTiming(ctx, "off", SystemClock.elapsedRealtime() - started)
+    RuntimeDiagnostics.publishTiming(ctx, "off", SystemClock.elapsedRealtime() - started, lastOffReason)
 }
 
 /**

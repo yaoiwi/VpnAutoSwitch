@@ -278,6 +278,13 @@ internal object DiagnosticsReport {
                 }
             )
             appendLine(
+                "上次关闭：" + if (diagnostics.lastOffReason.isNotBlank()) {
+                    DiagnosticsPolicy.offReasonLabel(diagnostics.lastOffReason)
+                } else {
+                    "未记录"
+                }
+            )
+            appendLine(
                 "状态通知：" + when {
                     !config.statusNotification -> "未启用"
                     !diagnostics.notifyPermission -> "无通知权限"
@@ -506,6 +513,10 @@ internal object DiagnosticsReport {
                     "${formatMs(diagnostics.lastOffMs)}（${ago(diagnostics.lastOffAt, now)}）")
                 if (slow) {
                     append("\n开启偏慢：看运行日志里是客户端建隧道慢，还是模块在反复重试")
+                }
+                if (diagnostics.lastOffReason.isNotBlank()) {
+                    append("\n上次关闭原因：")
+                    append(DiagnosticsPolicy.offReasonLabel(diagnostics.lastOffReason))
                 }
             },
         )
