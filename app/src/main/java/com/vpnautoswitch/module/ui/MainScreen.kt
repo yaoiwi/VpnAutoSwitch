@@ -82,7 +82,7 @@ fun MainScreen(state: AppState) {
         }
     }
     var showLog by remember { mutableStateOf(false) }
-    /** 每次自检弹窗点「完整日志」就加一，日志区靠它决定要不要滚进视野 */
+    /** 每次自检弹窗点「看全部日志」就加一，日志区靠它决定要不要滚进视野 */
     var openLogSignal by remember { mutableIntStateOf(0) }
     var showClientAdapter by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }

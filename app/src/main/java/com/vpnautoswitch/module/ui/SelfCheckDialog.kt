@@ -37,7 +37,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 /**
  * 自检弹窗：只放「结论」。
  *
- * 原始日志不在这里列，弹窗底部的「完整日志」把用户带回设置页的日志区——
+ * 原始日志不在这里列，弹窗底部的「看全部日志」把用户带回设置页的日志区——
  * 检查项和日志各归各位，弹窗不会被一大段等宽小字撑开。
  */
 @Composable
@@ -137,7 +137,7 @@ internal fun SelfCheckDialog(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 AppButton(
-                    text = "复制",
+                    text = "复制报告",
                     onClick = {
                         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         cm.setPrimaryClip(
@@ -177,7 +177,8 @@ internal fun SelfCheckDialog(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 AppButton(
-                    text = "完整日志",
+                    // 它是跳转不是导出：名字得带动作，不然会被当成复制按钮，点了就在等 toast
+                    text = "看全部日志",
                     onClick = {
                         onDismiss()
                         onOpenLog()

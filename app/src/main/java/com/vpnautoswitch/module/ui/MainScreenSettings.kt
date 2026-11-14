@@ -140,7 +140,7 @@ internal fun LazyListScope.settingsItems(
     /** null 表示未搜索、显示全部；否则只显示集合内的分组 */
     visibleSections: Set<String>?,
     onToggleLog: () -> Unit,
-    /** 无条件展开日志（自检弹窗的「完整日志」） */
+    /** 无条件展开日志（自检弹窗的「看全部日志」） */
     onOpenLog: () -> Unit,
     onRefresh: () -> Unit,
     onExport: () -> Unit,
@@ -583,32 +583,13 @@ internal fun LazyListScope.settingsItems(
         // 返回键只会关掉上面那个，用户会以为下面那份还开着
         var showClientAdapter by remember { mutableStateOf(false) }
         AppCard(modifier = Modifier.fillMaxWidth()) {
-            // 日志和报告常常被贴进 issue，而 SSID 里带着姓名、房号、公司名。
-            // 默认遮起来，需要自己看原文时再打开
-            SettingsSwitch(
-                title = "显示完整 Wi-Fi 名称",
-                summary = if (state.config.fullSsid) {
-                    "日志和报告里写完整名称。贴到公开场合前留意一下"
-                } else {
-                    "日志和报告里遮成 Ho***Fi(8)，避免贴出去时带上家庭或公司名称"
-                },
-                icon = MiuixIcons.Show,
-                checked = state.config.fullSsid,
-                onCheckedChange = { state.save(state.config.copy(fullSsid = it)) },
-            )
-            SettingsActionWithArrow(
-                title = "一键自检",
-                icon = MiuixIcons.Info,
-                summary = "检查模块、VPN 客户端、网络规则与最近失败",
-                onClick = {
-                    state.refreshDiagnostics()
-                    showSelfCheck = true
-                },
-            )
+            // 三处「复制」拿到的东西不一样，标题里带行数：
+            // 点之前就知道这份是不是全的，不用点完再猜
+            val lines = state.diagnostics.log.lines().filter { it.isNotBlank() }
             // 一键拿走：结论、检查项、设备信息和全部日志都在这一份里，
             // 不用先开弹窗复制、再滚到日志区复制一次
             SettingsActionWithArrow(
-                title = "复制报告 + 全部日志",
+                title = "复制全部（报告 + ${lines.size} 行日志）",
                 icon = MiuixIcons.Copy,
                 summary = "结论、检查项、设备信息和全部日志，一份贴进 issue",
                 onClick = {
@@ -639,7 +620,16 @@ internal fun LazyListScope.settingsItems(
                     ).show()
                 },
             )
-            val lines = state.diagnostics.log.lines().filter { it.isNotBlank() }
+            // 排在自检前面：用户最该点的是它，放下面还得先滚过去
+            SettingsActionWithArrow(
+                title = "一键自检",
+                icon = MiuixIcons.Info,
+                summary = "检查模块、VPN 客户端、网络规则与最近失败",
+                onClick = {
+                    state.refreshDiagnostics()
+                    showSelfCheck = true
+                },
+            )
             SettingsActionWithArrow(
                 title = if (showLog) "收起运行日志" else "展开运行日志",
                 icon = MiuixIcons.Notes,
@@ -648,8 +638,21 @@ internal fun LazyListScope.settingsItems(
                 summary = if (lines.isEmpty()) "暂无记录" else "共 ${lines.size} 条",
                 onClick = onToggleLog,
             )
+            // 日志和报告常常被贴进 issue，而 SSID 里带着姓名、房号、公司名。
+            // 默认遮起来，需要自己看原文时再打开
+            SettingsSwitch(
+                title = "显示完整 Wi-Fi 名称",
+                summary = if (state.config.fullSsid) {
+                    "日志和报告里写完整名称。贴到公开场合前留意一下"
+                } else {
+                    "日志和报告里遮成 Ho***Fi(8)，避免贴出去时带上家庭或公司名称"
+                },
+                icon = MiuixIcons.Show,
+                checked = state.config.fullSsid,
+                onCheckedChange = { state.save(state.config.copy(fullSsid = it)) },
+            )
             if (showLog) {
-                // 从自检弹窗点「完整日志」过来时，日志刚展开、还在屏幕外，
+                // 从自检弹窗点「看全部日志」过来时，日志刚展开、还在屏幕外，
                 // 这里把它顶进视野，不然用户会以为按钮没反应
                 val bring = remember { BringIntoViewRequester() }
                 LaunchedEffect(openLogSignal) {
@@ -766,9 +769,10 @@ private fun LogBody(
             .padding(horizontal = 12.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // 四个等宽按钮，宽度一致才不会在窄屏上互相挤压
+        // 「复制」带上是多少条：「导出完整日志」和它拿到的量差得很远，
+        // 两个都叫「复制/导出」时用户分不清哪个是全的
         AppButton(
-            text = "复制",
+            text = if (shown.isEmpty()) "复制 0 条" else "复制 ${shown.size} 条",
             onClick = copyLog,
             modifier = Modifier.weight(1f),
         )
@@ -784,8 +788,18 @@ private fun LogBody(
             },
             modifier = Modifier.weight(1f),
         )
+    }
+    // 两行之间要留空：miuix 按钮自带高度，贴着排会连成一整块
+    Spacer(modifier = Modifier.height(2.dp))
+    // 拆成两行：改名后比原来的「导出全部」长两个字，四个挤一行窄屏会被截成「导出完整…」
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         AppButton(
-            text = "导出全部",
+            text = "导出完整日志",
             onClick = { exportLauncher.launch("vpn-autoswitch-log.txt") },
             modifier = Modifier.weight(1f),
         )
