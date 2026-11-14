@@ -72,6 +72,49 @@ internal fun Engine.watchdogTick() {
         return
     }
 
+    // 「打开即关闭」的应用退出后先把残留标记清掉。它要是赖在这里，
+    // 下面 wifiOn 那一级会被一个已经不存在的应用一直挡住
+    val staleSuppressor = offAppForeground
+    if (staleSuppressor != null && !isProcessAlive(ctx, staleSuppressor, processes())) {
+        offAppForeground = null
+        log(ctx, LogCat.DIAG, "$staleSuppressor is gone, auto vpn available again")
+    }
+
+    // 「指定 Wi-Fi 开 VPN」比目标应用优先：命中时不管目标进程在不在，都不该因为
+    // 「没有目标进程」被关掉。原来只有网络回调认这一级，看门狗没有——在命中 wifiOn 的
+    // 网络下退出目标应用，reconcile 仍按「没有目标进程」关 VPN，和 judge() 的顺序对不上（#20）
+    if (isWifiOnActive(cfg)) {
+        // 「打开即关闭」的应用在前台时它优先：既不拉起，也不在这里关
+        if (offAppForeground != null) {
+            watchdogRunning = false
+            return
+        }
+        // 已经连着就只是保持，不再往下走去关它
+        if (active || hasVpnTransport(ctx)) {
+            handler.postDelayed(watchdog, RECONCILE_INTERVAL_MS)
+            return
+        }
+        // 没连着时不硬顶用户：手动关掉后等下一个网络回调，免得每 5 秒又把 VPN 顶开
+        if (userOff) {
+            watchdogRunning = false
+            return
+        }
+        ensureVpn(ctx, cfg)
+        val connected = hasVpnTransport(ctx)
+        connectingTicks = if (connected) 0 else connectingTicks + 1
+        handler.postDelayed(
+            watchdog,
+            EnginePolicy.reconcileDelay(
+                connected = connected,
+                connectingTicks = connectingTicks,
+                maxFastTicks = RECONCILE_CONNECTING_TICKS,
+                fastMs = RECONCILE_CONNECTING_MS,
+                normalMs = RECONCILE_INTERVAL_MS,
+            ),
+        )
+        return
+    }
+
     if (aliveTargets.isEmpty()) {
         // 兜底：目标进程都没了，VPN 却还开着（例如进程死亡事件被系统吞了），
         // 只要这轮是模块拉起的、且没有「打开即关闭」的应用在压制，就直接关掉。
@@ -92,12 +135,9 @@ internal fun Engine.watchdogTick() {
 
     val suppressor = offAppForeground
     if (suppressor != null) {
-        if (isProcessAlive(ctx, suppressor, processes())) {
-            watchdogRunning = false
-            return
-        }
-        offAppForeground = null
-        log(ctx, LogCat.DIAG, "$suppressor is gone, auto vpn available again")
+        // 死掉的残留上面已经清过，走到这里说明它确实还活着
+        watchdogRunning = false
+        return
     }
 
     if (!anyTargetAllowedOnNetwork(cfg)) {
