@@ -123,7 +123,7 @@ internal fun Engine.publishRuntime(ctx: Context?) {
         val detail = verdict.detail
         // 通知自己按「规则 + 连接状态」去重，成本只有一次 Settings 读取；
         // 放在快照的节流之前，开关刚改完也能立刻生效，不用等下一次状态变化
-        StatusNotification.sync(context, cfg, rule, detail, connectedSince())
+        StatusNotification.sync(context, cfg, rule, detail, connectedSince(), isVpnOn(context))
 
         // 「命中了规则但没连上」时才有必要解释卡在哪。其余时候不去查包和设置，
         // 免得每次心跳都多做几次跨进程调用

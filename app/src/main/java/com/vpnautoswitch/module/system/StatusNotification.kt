@@ -43,17 +43,15 @@ internal object StatusNotification {
      * [detail] 直接用 `currentRule` 的中文说明，不在通知层再翻译一遍，避免两处文案分叉。
      * [sinceMs] 是隧道连上的墙钟时刻，只在已连接时非 0，用于通知里的正计时。
      */
-    fun sync(ctx: Context, cfg: Config, rule: String, detail: String, sinceMs: Long) {
+    fun sync(ctx: Context, cfg: Config, rule: String, detail: String, sinceMs: Long, on: Boolean) {
         clearLegacy(ctx)
         if (!cfg.statusNotification || !cfg.enabled || cfg.vpnPackage.isEmpty()) {
             cancel(ctx)
             return
         }
-        val connected = try {
-            VpnSwitcher.isActive(ctx.contentResolver)
-        } catch (t: Throwable) {
-            false
-        }
+        // 由调用方给：接管标记或真实隧道任一成立都算连着（只读标记会把客户端
+        // 自己连上的隧道显示成未连接）
+        val connected = on
         val key = "$rule|$detail|$connected"
         if (key == lastKey) return
 

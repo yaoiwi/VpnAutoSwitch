@@ -35,8 +35,10 @@ internal fun Engine.watchdogTick() {
         return
     }
 
-    // 这一拍只读一次常驻状态：原来 1~3 个分支各读一遍 Settings.Secure
-    val active = VpnSwitcher.isActive(ctx.contentResolver)
+    // 这一拍只读一次常驻状态：原来 1~3 个分支各读一遍 Settings.Secure。
+    // 用 isVpnOn 而不是只看接管标记：客户端自己连上的隧道也要算「开着」，
+    // 否则 hit 关闭规则时模块以为已经关了，什么都不做（#20）
+    val active = isVpnOn(ctx)
     // 进程列表同理：一次 tick 里最多用到两处，原来各构造一遍
     var procs: List<ActivityManager.RunningAppProcessInfo>? = null
     var procsLoaded = false

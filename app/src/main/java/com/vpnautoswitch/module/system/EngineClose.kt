@@ -49,7 +49,7 @@ internal fun Engine.turnOff(reason: String) {
     // 手动连上的 VPN 没有接管标记，也要提示「已关闭」。
     // 这里必须绕开 400ms 缓存：turnOff 常常紧跟在一次「隧道还没建好」的采样之后，
     // 读到旧值就会把 wasActive 判成 false，后面的「VPN 已关闭」直接不发。
-    val wasActive = VpnSwitcher.isActive(ctx.contentResolver) || hasVpnTransport(ctx, fresh = true)
+    val wasActive = isVpnOn(ctx, fresh = true)
     // 外部控制模式（重启 VpnService）不会写 always_on，因此 disable 会被跳过；
     // 用返回值区分「真的关掉了设置」和「只是请求客户端自己断开」
     val settingCleared = VpnSwitcher.disable(ctx, cfg.restoreOriginal, cfg.vpnPackage)
@@ -775,6 +775,19 @@ internal fun Engine.hasVpnTransport(ctx: Context, fresh: Boolean = false): Boole
     transportValue = value
     return value
 }
+
+/**
+ * 「VPN 现在是开着的吗」。
+ *
+ * 接管标记和隧道任一成立就算开。只看 [VpnSwitcher.isActive] 会把客户端自己连上的隧道
+ * 当成关着——切到关闭规则的 Wi-Fi 后模块什么都不做，VPN 一直挂着（#20）；
+ * 反过来只看隧道，又会在「刚断开、标记还没清」的那一拍判成开着。
+ *
+ * 注意别拿它当「模块有没有接管」用：`VpnSwitcher.enable / disable` 里判断要不要记录、
+ * 恢复用户原始的 always-on 设置，读的必须是 [VpnSwitcher.isActive]。
+ */
+internal fun Engine.isVpnOn(ctx: Context, fresh: Boolean = false): Boolean =
+    VpnSwitcher.isActive(ctx.contentResolver) || hasVpnTransport(ctx, fresh)
 
 internal fun Engine.toast(ctx: Context, message: String, enabled: Boolean) {
     if (!enabled) return

@@ -262,7 +262,8 @@ internal fun Engine.handleNetworkChanged() {
     // 指定 Wi-Fi 规则优先于「网络类型总开关」
     val hit = refreshWifiSuppression(ctx, cfg)
     if (hit != null) {
-        if (VpnSwitcher.isActive(ctx.contentResolver)) {
+        // 客户端自己连上的隧道也要算「开着」，不然这里会打一行 keep off 就收工（#20）
+        if (isVpnOn(ctx)) {
             log(ctx, LogCat.NET, "wifi \"$hit\" -> turn off")
             turnOff("wifi off: ${ssidForLog(ctx, hit)}")
         } else {
@@ -282,7 +283,7 @@ internal fun Engine.handleNetworkChanged() {
     }
 
     if (!anyTargetAllowedOnNetwork(cfg)) {
-        if (VpnSwitcher.isActive(ctx.contentResolver)) {
+        if (isVpnOn(ctx)) {
             log(ctx, LogCat.NET, "network type disabled -> turn off")
             turnOff("network type disabled")
         }
