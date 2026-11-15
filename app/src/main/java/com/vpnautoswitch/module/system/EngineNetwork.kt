@@ -295,11 +295,18 @@ internal fun Engine.handleNetworkChanged() {
         // 这是一个新的开启意图，取消此前排队的关闭任务
         offToken++
         // 隧道已经连着、但连着的是别的客户端：走切换，别直接开新的
-        val running = resolveActivePkg(ctx, cfg)
-        if (isVpnOn(ctx) && running.isNotEmpty() && running != effective.vpnPackage) {
-            requestSwitch(ctx, group?.rule ?: cfg.defaultRule(), SystemClock.elapsedRealtime())
-            startWatchdog()
-            return
+        when (maybeSwitch(ctx, group?.rule ?: cfg.defaultRule(), isVpnOn(ctx), cfg)) {
+            SwitchDecision.STARTED, SwitchDecision.UNKNOWN -> {
+                startWatchdog()
+                return
+            }
+            // 冷却里这一拍不动，不代表不切了：排下一拍，别让用户卡在旧客户端上
+            SwitchDecision.DEFERRED -> {
+                log(ctx, LogCat.NET, "switch to ${effective.vpnPackage} postponed by cooldown")
+                startWatchdog()
+                return
+            }
+            SwitchDecision.NONE -> Unit
         }
         ensureVpn(ctx, effective, rule = group?.rule)
         startWatchdog()
@@ -314,11 +321,13 @@ internal fun Engine.handleNetworkChanged() {
         return
     }
     if (targets.isNotEmpty() && offAppForeground == null) {
-        val running = resolveActivePkg(ctx, cfg)
-        if (isVpnOn(ctx) && running.isNotEmpty() && running != effective.vpnPackage) {
-            requestSwitch(ctx, group?.rule ?: cfg.defaultRule(), SystemClock.elapsedRealtime())
-        } else {
-            ensureVpn(ctx, effective, rule = group?.rule)
+        when (maybeSwitch(ctx, group?.rule ?: cfg.defaultRule(), isVpnOn(ctx), cfg)) {
+            SwitchDecision.NONE -> ensureVpn(ctx, effective, rule = group?.rule)
+            // 认不出隧道归谁时什么都不做：adopt 会把旧客户端的隧道记成这一组的
+            SwitchDecision.UNKNOWN -> Unit
+            SwitchDecision.DEFERRED ->
+                log(ctx, LogCat.NET, "switch to ${effective.vpnPackage} postponed by cooldown")
+            SwitchDecision.STARTED -> Unit
         }
         startWatchdog()
     }

@@ -559,6 +559,23 @@ internal object Engine {
     internal var lastSwitchAt = 0L
 
     /**
+     * 切换途中连上时要说的那句提示（「已切换到 X」），由 [Engine.resumePendingSwitch]
+     * 放下、[Engine.ensureVpn] 连上时取走。隧道一直起不来就自然过期，不会留到下次误报。
+     */
+    internal var switchToast: String? = null
+    internal var switchToastAt = 0L
+
+    /** 同一目标连续切了几次没成，以及冷却到什么时候；见 [SwitchTrouble] */
+    internal var switchTrouble = SwitchTrouble()
+    internal var switchBlockLoggedAt = 0L
+
+    /** 上一次试图切换、但认不出隧道归谁：这行日志按分钟节流 */
+    internal var unknownClientLoggedAt = 0L
+
+    /** 正在执行切换的第二段（关完拉起新的），用来把「off cancelled」那条日志换成切换的说法 */
+    internal var switchInProgress = false
+
+    /**
      * 用户手动关掉了 VPN（下拉磁贴 / 在 VPN 客户端里点断开）。
      * 置 true 后不再自动重连，直到他重新打开目标应用（不是应用内部的页面切换）。
      */

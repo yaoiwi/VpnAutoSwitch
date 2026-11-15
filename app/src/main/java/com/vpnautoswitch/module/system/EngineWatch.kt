@@ -93,17 +93,23 @@ internal fun Engine.watchdogTick() {
     // 不能直接开新的：系统只有一条隧道，旧客户端的自恢复会把它顶回来，两边互踢。
     // want 在没命中组时取默认组——从规则组的应用切回普通应用，也要切回去
     val want = hit?.rule ?: raw.defaultRule()
-    val running = resolveActivePkg(ctx, raw)
-    if (active && running.isNotEmpty() && want.vpnPackage.isNotEmpty() &&
-        running != want.vpnPackage
-    ) {
-        if (requestSwitch(ctx, want, SystemClock.elapsedRealtime())) return
-        // 冷却里：保持当前这一组。目标应用还开着的话，下一拍会再判断一次。
-        // 不能只 postDelayed——watchdogRunning 还是 false，下一次 startWatchdog 进来
-        // 会以为已经在跑，直接 return，看门狗就此断掉
-        watchdogRunning = true
-        handler.postDelayed(watchdog, RECONCILE_INTERVAL_MS)
-        return
+    when (maybeSwitch(ctx, want, active, raw)) {
+        SwitchDecision.STARTED -> return
+        SwitchDecision.DEFERRED -> {
+            // 冷却里：保持当前这一组。目标应用还开着的话，下一拍会再判断一次。
+            // 不能只 postDelayed——watchdogRunning 还是 false，下一次 startWatchdog 进来
+            // 会以为已经在跑，直接 return，看门狗就此断掉
+            watchdogRunning = true
+            handler.postDelayed(watchdog, RECONCILE_INTERVAL_MS)
+            return
+        }
+        // 隧道开着但认不出归谁：这一拍不动它，下一拍再看
+        SwitchDecision.UNKNOWN -> {
+            watchdogRunning = true
+            handler.postDelayed(watchdog, RECONCILE_INTERVAL_MS)
+            return
+        }
+        SwitchDecision.NONE -> Unit
     }
 
     // 「指定 Wi-Fi 开 VPN」比目标应用优先：命中时不管目标进程在不在，都不该因为

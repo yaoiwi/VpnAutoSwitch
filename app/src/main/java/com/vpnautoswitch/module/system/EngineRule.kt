@@ -164,9 +164,15 @@ internal fun Engine.publishRuntime(ctx: Context?) {
         val verdict = judge(cfg, context)
         val rule = verdict.rule
         val detail = verdict.detail
+        // 这一拍实际该用哪个客户端。多组时顶层 cfg.vpnPackage 只是默认组的：
+        // 通知栏的图标、点开的应用、诊断里查的包都得跟着命中组走，否则两个组
+        // 用不同客户端时，显示的永远是默认组那个
+        val driving = cfg.hitGroup(ruleProbe())
+            ?.let { cfg.forClient(it.rule.vpnPackage, it.rule.id) }
+            ?: cfg.forClient(activePkg, activeRuleId)
         // 通知自己按「规则 + 连接状态」去重，成本只有一次 Settings 读取；
         // 放在快照的节流之前，开关刚改完也能立刻生效，不用等下一次状态变化
-        StatusNotification.sync(context, cfg, rule, detail, connectedSince(), isVpnOn(context))
+        StatusNotification.sync(context, driving, rule, detail, connectedSince(), isVpnOn(context))
 
         // 「命中了规则但没连上」时才有必要解释卡在哪。其余时候不去查包和设置，
         // 免得每次心跳都多做几次跨进程调用
@@ -174,13 +180,7 @@ internal fun Engine.publishRuntime(ctx: Context?) {
         val expectedOn = rule == "target" || rule == "wifiOn"
         // 诊断要针对「这一拍该用哪个客户端」：多组时不能拿顶层那个去查事实，
         // 否则报告里说的客户端和实际要拉的根本不是同一个
-        // 同理传 activeRuleId 而不是 ifEmpty { null }：空串是默认组，null 是「按包名猜」
-        val focus = if (expectedOn) {
-            cfg.hitGroup(ruleProbe())?.let { cfg.forClient(it.rule.vpnPackage, it.rule.id) }
-                ?: cfg.forClient(activePkg.ifEmpty { cfg.vpnPackage }, activeRuleId)
-        } else {
-            cfg
-        }
+        val focus = if (expectedOn) driving else cfg
         val readiness = if (expectedOn && !connected) {
             ReadinessPolicy.assess(Packages.factsOf(context, focus.vpnPackage))
         } else {

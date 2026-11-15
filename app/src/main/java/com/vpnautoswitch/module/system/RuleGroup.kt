@@ -115,3 +115,46 @@ internal fun switchStillWanted(pendingRuleId: String, hit: GroupHit?): Boolean =
  */
 internal fun Config.ruleOfPackage(packageName: String): VpnRule? =
     rules.firstOrNull { it.vpnPackage == packageName && it.enabled }
+
+// ---------------------------------------------------------------- 切换失败退避
+
+/** 同一目标在多长时间内重来，算「上一次没切完」 */
+internal const val SWITCH_RETRY_WINDOW_MS = 30_000L
+
+/** 连续几次没成就先停手 */
+internal const val MAX_SWITCH_FAILS = 3
+
+/** 停手多久：给客户端自己恢复的时间，也不至于永远不切 */
+internal const val SWITCH_BACKOFF_MS = 120_000L
+
+/**
+ * 切换的连续失败记录。
+ *
+ * 关闭链一直确认不了断开（客户端赖着、强停被拦），切换就被丢弃；10 秒冷却一过
+ * 又发起一次，于是每 30 秒断一次网。纯数据 + 纯函数，好让单测直接推演。
+ */
+internal data class SwitchTrouble(
+    /** 上一次发起切换的目标组；默认组是空串，null 表示还没切过 */
+    val ruleId: String? = null,
+    /** 同一目标连续发起了几次 */
+    val fails: Int = 0,
+    /** 上一次发起切换的时刻 */
+    val lastAt: Long = 0L,
+    /** 压到这一刻为止 */
+    val blockedUntil: Long = 0L,
+)
+
+internal fun SwitchTrouble.blocked(ruleId: String, now: Long): Boolean =
+    now < blockedUntil && ruleId == this.ruleId
+
+internal fun SwitchTrouble.noteAttempt(ruleId: String, now: Long): SwitchTrouble {
+    // 换了个目标就不算「连续」：用户来回切两个应用是正常操作，不该被当成卡死
+    val repeated = ruleId == this.ruleId && now - lastAt <= SWITCH_RETRY_WINDOW_MS
+    val fails = if (repeated) this.fails + 1 else 1
+    val until = when {
+        fails >= MAX_SWITCH_FAILS -> now + SWITCH_BACKOFF_MS
+        blockedUntil > now -> blockedUntil
+        else -> 0L
+    }
+    return SwitchTrouble(ruleId = ruleId, fails = fails, lastAt = now, blockedUntil = until)
+}

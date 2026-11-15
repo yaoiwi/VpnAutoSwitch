@@ -123,19 +123,25 @@ internal fun Engine.handleForeground(pkg: String) {
     // 打开的是另一组的应用，而隧道还挂在上一组：立刻切，不等看门狗那一拍。
     // 切换是串行的（先关、确认断开、再开），这里只要把请求发出去，
     // 后半段由 noteVpnDown 接力
-    val running = resolveActivePkg(ctx, raw)
-    if (isVpnOn(ctx) && running.isNotEmpty() &&
-        cfg.vpnPackage.isNotEmpty() && running != cfg.vpnPackage
-    ) {
-        if (requestSwitch(ctx, owner ?: raw.defaultRule(), SystemClock.elapsedRealtime())) {
+    when (maybeSwitch(ctx, owner ?: raw.defaultRule(), isVpnOn(ctx), raw)) {
+        SwitchDecision.STARTED -> {
             startWatchdog()
-        } else {
+            return
+        }
+        SwitchDecision.DEFERRED -> {
             log(ctx, LogCat.DIAG, "switch to ${cfg.vpnPackage} postponed by cooldown")
             // 冷却里也不能就这么走了：关闭链可能已经把看门狗停了，
             // 不排下一次就没人再判，用户会卡在旧客户端上一路用下去
             startWatchdog()
+            return
         }
-        return
+        // 隧道开着但认不出归谁：别 adopt，否则后面会把旧客户端的隧道记成新组的
+        SwitchDecision.UNKNOWN -> {
+            startWatchdog()
+            return
+        }
+        // 不切：隧道本来就该是这一组，往下照常走
+        SwitchDecision.NONE -> Unit
     }
 
     if (isNetworkAllowed(cfg, pkg)) {

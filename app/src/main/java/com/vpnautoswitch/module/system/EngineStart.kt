@@ -59,11 +59,14 @@ internal fun Engine.ensureVpn(
     if (cancelledOff) {
         offToastPending = false
         pendingPrewarm = null
-        log(
-            ctx,
-            "off cancelled: ${origin ?: lastForegroundTarget ?: lastForeground ?: "目标应用"} 回到前台，" +
-                "本轮不做关闭",
-        )
+        // 切组的第二段也走这里，但那是「计划内的关」，不是用户回到前台打断的
+        if (!switchInProgress) {
+            log(
+                ctx,
+                "off cancelled: ${origin ?: lastForegroundTarget ?: lastForeground ?: "目标应用"} 回到前台，" +
+                    "本轮不做关闭",
+            )
+        }
     }
     // 关闭意图已经被开启取代：主链排队的复查都失效了，busy 标志和守卫请求也要作废，
     // 否则守卫会在兜底时长后跳出来，把用户刚连上的 VPN 又关掉一次
@@ -154,9 +157,14 @@ internal fun Engine.ensureVpn(
             )
         }
         markPendingExternalMode(null)
+        // 连上了就说明这条路能走：上一轮的连续失败计数作废
+        switchTrouble = SwitchTrouble()
         if (!connectedNotified) {
             connectedNotified = true
+            val switched = takeSwitchToast()
             when {
+                // 切组收尾：用户刚看到「正在切换到 X」，这里得给个明确的结尾
+                switched != null -> toast(ctx, switched, cfg.toastEnabled)
                 // 这一轮关闭刚被「目标应用回到前台」取消，VPN 从头到尾没断过：
                 // 状态没变，不提示「已开启」也不算漏话
                 cancelledOff ->

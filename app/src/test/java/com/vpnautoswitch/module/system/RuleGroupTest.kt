@@ -180,4 +180,73 @@ class RuleGroupTest {
         assertEquals("g3", hit?.rule?.id)
         assertEquals(REASON_WIFI, hit?.reason)
     }
+
+    @Test
+    fun `foreground beats a background group listed first`() {
+        // 前一组的应用还在后台（进程没死），用户切到了后一组的应用：
+        // 按列表顺序会选 g1，实际该跟着前台走，否则用户点了没反应
+        val hit = cfg(science, nas).hitGroup(
+            RuleProbe(
+                ssid = null,
+                isWifi = false,
+                aliveTargets = setOf("com.android.chrome", "com.synology.dsfile"),
+                foreground = "com.synology.dsfile",
+            ),
+        )
+        assertEquals("g2", hit?.rule?.id)
+        assertEquals(listOf("com.synology.dsfile"), hit?.matched)
+    }
+
+    @Test
+    fun `without a foreground the earlier group keeps the hit`() {
+        // 没有前台信息（刚解锁、回调没来）时退回列表顺序，行为与 1.10.0 一致
+        val hit = cfg(science, nas).hitGroup(
+            RuleProbe(
+                ssid = null,
+                isWifi = false,
+                aliveTargets = setOf("com.android.chrome", "com.synology.dsfile"),
+            ),
+        )
+        assertEquals("g1", hit?.rule?.id)
+    }
+
+    // ------------------------------------------------------------ 切换失败退避
+
+    @Test
+    fun `three attempts in a row park the switch for a while`() {
+        val t0 = 1_000_000L
+        var trouble = SwitchTrouble()
+        // 冷却 10 秒，所以每次重来都落在 30 秒的重试窗口里
+        trouble = trouble.noteAttempt("g2", t0)
+        trouble = trouble.noteAttempt("g2", t0 + 11_000)
+        assertFalse(trouble.blocked("g2", t0 + 11_001))
+        trouble = trouble.noteAttempt("g2", t0 + 22_000)
+        assertEquals(MAX_SWITCH_FAILS, trouble.fails)
+        // 第三次发起时还允许（当次已经发了），失败后才开始压
+        assertTrue(trouble.blocked("g2", t0 + 22_001))
+        assertTrue(trouble.blocked("g2", t0 + 22_000 + SWITCH_BACKOFF_MS - 1))
+        assertFalse(trouble.blocked("g2", t0 + 22_000 + SWITCH_BACKOFF_MS))
+    }
+
+    @Test
+    fun `switching to another group is not blocked by the parked one`() {
+        // 用户打开另一个组的应用：换目标就是新情况，不该被上一组的退避连坐
+        val t0 = 1_000_000L
+        var trouble = SwitchTrouble()
+        repeat(MAX_SWITCH_FAILS) { i -> trouble = trouble.noteAttempt("g2", t0 + i * 11_000L) }
+        assertTrue(trouble.blocked("g2", t0 + 30_000))
+        assertFalse(trouble.blocked("g3", t0 + 30_000))
+    }
+
+    @Test
+    fun `attempts spaced beyond the retry window start over`() {
+        // 每次间隔都超过 30 秒：不是「连续失败」，只是不时用一下，不该攒到阈值
+        val t0 = 1_000_000L
+        var trouble = SwitchTrouble()
+        repeat(MAX_SWITCH_FAILS + 2) { i ->
+            trouble = trouble.noteAttempt("g1", t0 + i * (SWITCH_RETRY_WINDOW_MS + 1_000))
+        }
+        assertEquals(1, trouble.fails)
+        assertFalse(trouble.blocked("g1", t0 + 600_000))
+    }
 }
