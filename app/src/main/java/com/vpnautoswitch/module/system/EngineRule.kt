@@ -122,7 +122,10 @@ internal fun Engine.judge(cfg: Config, ctx: Context?): RuleVerdict {
             "Wi-Fi \"${ssidForLog(ctx, currentSsid)}\" 命中${groupTag(hit.rule)}的开启规则",
         )
     }
-    if (isWifiOnActive(cfg)) {
+    // 默认组的 Wi-Fi 规则只在没有组命中时才算数。组一旦命中（应用触发），
+    // 看门狗用的是那一组的配置，那里没有这条 Wi-Fi 规则——这里要是照旧返回
+    // wifiOn，首页和通知写着「Wi-Fi 命中开启规则」，实际开的却是组里的客户端
+    if (hit == null && isWifiOnActive(cfg)) {
         return verdict(
             "wifiOn",
             "Wi-Fi \"${ssidForLog(ctx, currentSsid)}\" 命中开启规则",
@@ -171,9 +174,10 @@ internal fun Engine.publishRuntime(ctx: Context?) {
         val expectedOn = rule == "target" || rule == "wifiOn"
         // 诊断要针对「这一拍该用哪个客户端」：多组时不能拿顶层那个去查事实，
         // 否则报告里说的客户端和实际要拉的根本不是同一个
+        // 同理传 activeRuleId 而不是 ifEmpty { null }：空串是默认组，null 是「按包名猜」
         val focus = if (expectedOn) {
             cfg.hitGroup(ruleProbe())?.let { cfg.forClient(it.rule.vpnPackage, it.rule.id) }
-                ?: cfg.forClient(activePkg.ifEmpty { cfg.vpnPackage }, activeRuleId.ifEmpty { null })
+                ?: cfg.forClient(activePkg.ifEmpty { cfg.vpnPackage }, activeRuleId)
         } else {
             cfg
         }

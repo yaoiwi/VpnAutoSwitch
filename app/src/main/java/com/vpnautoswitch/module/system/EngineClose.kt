@@ -32,7 +32,9 @@ internal fun Engine.turnOff(reason: String) {
     // 命中组已经是 B，隧道还挂在 A 上，照配置关等于关掉一个还没起来的客户端，
     // A 一直留着，B 永远起不来。
     val running = resolveActivePkg(ctx, raw).ifEmpty { raw.vpnPackage }
-    val cfg = raw.forClient(running, activeRuleId.ifEmpty { null })
+    // activeRuleId 空串就是默认组，别写成 ifEmpty { null }：null 在 forClient 里是
+    // 「没指定、按包名猜」，默认组和某个规则组共用同一客户端时会拿到那个组的应用清单
+    val cfg = raw.forClient(running, activeRuleId)
     val generation = ++offGeneration
     // 用户刚手动关过 VPN、现在这条隧道是他自己又连回来的：模块不该去强停它。
     // 但 [userOff] 会一直挂到下次打开目标应用，中间客户端完全可能自己把隧道拉起来

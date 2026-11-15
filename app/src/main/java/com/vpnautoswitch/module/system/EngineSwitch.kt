@@ -42,7 +42,6 @@ internal fun Engine.requestSwitch(ctx: Context, rule: VpnRule, now: Long): Boole
     if (now - lastSwitchAt < SWITCH_COOLDOWN_MS) return false
     lastSwitchAt = now
     pendingSwitchRuleId = rule.id
-    pendingSwitchPkg = rule.vpnPackage
     pendingSwitchAt = now
     log(
         ctx,
@@ -57,14 +56,12 @@ internal fun Engine.requestSwitch(ctx: Context, rule: VpnRule, now: Long): Boole
  * 关闭链确认隧道没了之后，把待切换的组拉起来。
  *
  * 不在这里检查「是不是同一组」：requestSwitch 只在两个客户端不同的时候才发起，
- * 这里唯一要防的是「等待期间目标应用已经退出了」——那种情况再开就是凭空连一个
- * 用户已经不需要的 VPN。
+ * 这里要防的是「等待期间现场已经变了」——用户切回了上一组的应用、或者目标应用
+ * 已经退出。这两种情况再开就是凭空连一个用户已经不需要的 VPN。
  */
 internal fun Engine.resumePendingSwitch(ctx: Context) {
     val ruleId = pendingSwitchRuleId ?: return
-    val pkg = pendingSwitchPkg.orEmpty()
     pendingSwitchRuleId = null
-    pendingSwitchPkg = null
     if (SystemClock.elapsedRealtime() - pendingSwitchAt > PENDING_SWITCH_TTL_MS) {
         log(ctx, LogCat.START, "switch dropped: 排队的请求已经过期")
         return
@@ -78,34 +75,23 @@ internal fun Engine.resumePendingSwitch(ctx: Context) {
     } ?: return
     if (rule.vpnPackage.isEmpty()) return
     if (!cfg.enabled || automationPaused || screenOffActive || wifiSuppressed) return
-    // 触发它的应用已经不在前台、也没活在后台：别开了，等它再回来。
-    // 前台优先——用户切回上一组的应用时，上一组的目标往往还留在 aliveTargets 里，
-    // 只看后者会把已经不需要的那一组又拉起来
-    val ssid = currentSsid
-    val wifiHit = ssid != null && ssid in rule.wifiOn
-    val fg = lastForeground
-    val wanted = wifiHit || if (!fg.isNullOrEmpty()) {
-        fg in rule.targets
-    } else {
-        aliveTargets.any { it in rule.targets }
-    }
-    if (!wanted) {
-        log(ctx, LogCat.START, "switch to ${groupTag(rule)} dropped: 触发它的应用已经不在")
+    // 现场重新算一遍命中的是谁，而不是拼接「前台 / 存活目标 / SSID」三种条件：
+    // 判定顺序（组内 Wi-Fi 优先、前台压过往后台的进程）就在这里，重写一遍迟早会走岔。
+    // 命中组已经换人（或者回到没有组的界面）就说明用户不需要这次切换了。
+    val nowHit = cfg.hitGroup(ruleProbe())
+    if (!switchStillWanted(ruleId, nowHit)) {
+        log(
+            ctx,
+            LogCat.START,
+            "switch to ${groupTag(rule)} dropped: 现在命中${nowHit?.let { groupTag(it.rule) } ?: "默认组"}",
+        )
         return
     }
-    log(ctx, LogCat.START, "switch: starting ${rule.vpnPackage} (${groupTag(rule)})")
     // 包名以配置里最新的为准：等待期间用户可能把这一组的客户端换掉了
-    val target = if (pkg.isNotEmpty()) pkg else rule.vpnPackage
-    ensureVpn(ctx, cfg.forClient(target, rule.id), rule = rule)
+    log(ctx, LogCat.START, "switch: starting ${rule.vpnPackage} (${groupTag(rule)})")
+    ensureVpn(ctx, cfg.forClient(rule.vpnPackage, rule.id), rule = rule)
     startWatchdog()
 }
 
 /** 切换还欠着一条「开新的」没做完 */
 internal fun Engine.hasPendingSwitch(): Boolean = pendingSwitchRuleId != null
-
-internal fun Engine.clearPendingSwitch(): Boolean {
-    val had = pendingSwitchRuleId != null
-    pendingSwitchRuleId = null
-    pendingSwitchAt = 0L
-    return had
-}

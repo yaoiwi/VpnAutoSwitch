@@ -549,12 +549,10 @@ internal object Engine {
      *
      * 切换不能「直接开新的」：系统只有一条隧道，直接开会顶掉旧的，旧客户端的
      * 自动重连再把它顶回来，两边互踢。所以流程是「先关、确认断开、再开」，
-     * 中间这个空档用这两个字段记住要开谁。
+     * 中间这个空档用这个字段记住要开谁。空串是默认组。
      */
     internal var pendingSwitchRuleId: String? = null
 
-    /** 待切换的目标客户端。跟着 [pendingSwitchRuleId] 一起记，默认组也能切回去 */
-    internal var pendingSwitchPkg: String? = null
     internal var pendingSwitchAt = 0L
 
     /** 上一次真正发起切换的时刻，用来压冷却 */

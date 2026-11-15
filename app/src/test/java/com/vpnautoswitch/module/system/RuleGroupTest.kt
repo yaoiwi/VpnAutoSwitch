@@ -3,6 +3,7 @@ package com.vpnautoswitch.module.system
 import com.vpnautoswitch.module.Config
 import com.vpnautoswitch.module.VpnRule
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -148,5 +149,35 @@ class RuleGroupTest {
         val unnamed = science.copy(label = "")
         assertTrue(groupTag(unnamed).contains("clash"))
         assertEquals("组「科学上网」", groupTag(science))
+    }
+
+    @Test
+    fun `a pending switch to a group survives only while that group still hits`() {
+        val hit = GroupHit(science, REASON_TARGET, listOf("com.android.chrome"))
+        assertTrue(switchStillWanted("g1", hit))
+        assertFalse(switchStillWanted("g2", hit))
+        assertFalse(switchStillWanted("g1", null))
+    }
+
+    @Test
+    fun `a pending switch back to the default group needs nothing to hit`() {
+        // 默认组不在 rules 里：没有组命中才算「回到默认组」
+        assertTrue(switchStillWanted("", null))
+        assertFalse(switchStillWanted("", GroupHit(nas, REASON_TARGET, listOf("com.synology.dsfile"))))
+    }
+
+    @Test
+    fun `wifi hit wins over an app hit from another group`() {
+        // 连上家里的网络时，哪怕正在用科学上网组的应用，也该走旁路由那一组
+        val hit = cfg(science, homeProxy).hitGroup(
+            RuleProbe(
+                ssid = "HomeWiFi",
+                isWifi = true,
+                aliveTargets = setOf("com.android.chrome"),
+                foreground = "com.android.chrome",
+            ),
+        )
+        assertEquals("g3", hit?.rule?.id)
+        assertEquals(REASON_WIFI, hit?.reason)
     }
 }

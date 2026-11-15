@@ -98,6 +98,17 @@ private fun shortPackage(pkg: String): String {
 }
 
 /**
+ * 排队中的切换是否还该继续。
+ *
+ * 判断依据是「现在命中哪一组」，而不是临场再拼一套条件（前台在不在、目标还活着吗、
+ * SSID 还是不是那条）。判定顺序只在 [hitGroup] 里维护，别处重写一遍迟早走岔。
+ *
+ * @param pendingRuleId 排队时记下的组 id；空串表示默认组
+ */
+internal fun switchStillWanted(pendingRuleId: String, hit: GroupHit?): Boolean =
+    if (pendingRuleId.isEmpty()) hit == null else hit?.rule?.id == pendingRuleId
+
+/**
  * 一个包属于哪个组；不属于任何组返回 null（= 默认组）。
  *
  * 只给界面用：编辑某一组的应用清单时，要先知道「这个客户端现在被谁用着」。

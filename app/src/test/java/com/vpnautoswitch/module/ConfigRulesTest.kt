@@ -77,4 +77,38 @@ class ConfigRulesTest {
         assertEquals(cfg.targets, d.targets)
         assertEquals(cfg.wifiOn, d.wifiOn)
     }
+
+    @Test
+    fun `forClient with the default group id keeps the top level targets`() {
+        // 默认组和规则组共用同一个客户端时，空串必须只换包名。
+        // 传 null 会落到「按包名猜组」的分支，把规则组的应用清单拿过来
+        val cfg = Config(
+            vpnPackage = "com.github.metacubex.clash.meta",
+            targets = setOf("org.mozilla.firefox"),
+            rules = listOf(rule),
+        )
+        val d = cfg.forClient("com.github.metacubex.clash.meta", "")
+        assertEquals(setOf("org.mozilla.firefox"), d.targets)
+        assertEquals(emptySet<String>(), d.wifiOn)
+    }
+
+    @Test
+    fun `forClient with a null id guesses by package`() {
+        // 这是 null 的既有语义，调用点别拿它表示「默认组」
+        val cfg = Config(
+            vpnPackage = "com.v2ray.ang",
+            targets = setOf("org.mozilla.firefox"),
+            rules = listOf(rule),
+        )
+        val guess = cfg.forClient(rule.vpnPackage, null)
+        assertEquals(rule.targets, guess.targets)
+    }
+
+    @Test
+    fun `forClient by rule id uses that group's list`() {
+        val cfg = Config(vpnPackage = "com.v2ray.ang", rules = listOf(rule))
+        val g = cfg.forClient(rule.vpnPackage, rule.id)
+        assertEquals(rule.targets, g.targets)
+        assertEquals(rule.wifiOn, g.wifiOn)
+    }
 }
