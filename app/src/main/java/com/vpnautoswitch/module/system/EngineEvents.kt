@@ -282,6 +282,18 @@ internal fun Engine.handleTaskRemoved(pkg: String) {
         log(ctx, LogCat.DIAG, "$pkg -> task removed ignored（刚打开客户端界面，判定为被挤到后台）")
         return
     }
+    // 进程还在前台：#21 里 bard 明明在用，task 回调却先到——Android 16 上
+    // activityResumed 挂不上，lastForeground 只能靠 startActivity 更新，容易被
+    // toast、系统界面盖掉。于是 VPN 连上两秒就被关，用户看到的是「闪一下」。
+    // 真被划掉的应用会掉出前台（SERVICE / CACHED），这里不会把用户的操作放过。
+    if (isProcessForeground(ctx, pkg)) {
+        log(
+            ctx,
+            LogCat.DIAG,
+            "$pkg -> task removed ignored（进程仍在前台，判定为系统收走任务记录）",
+        )
+        return
+    }
     log(ctx, LogCat.DIAG, "$pkg -> task removed")
     applyTaskRemoval(ctx, cfg, pkg)
 }

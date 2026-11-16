@@ -1,6 +1,7 @@
 package com.vpnautoswitch.module.system
 
 import android.content.Context
+import android.os.SystemClock
 
 // 客户端启动方式测试：外部控制 / 直接起 VpnService，测完固定
 
@@ -12,6 +13,7 @@ import android.content.Context
  */
 internal fun Engine.testClient(ctx: Context, pkg: String, mode: String) {
     val token = ++clientTestToken
+    clientTestUpAt = 0L
     val cfg = ConfigRepo.get(ctx)
     when {
         pkg.isEmpty() -> {
@@ -79,37 +81,60 @@ internal fun Engine.pollClientTest(
     attempt: Int,
 ) {
     if (token != clientTestToken) return
+    val now = SystemClock.elapsedRealtime()
     if (hasVpnTransport(ctx)) {
-        // 一次测试成功只说明「此刻有隧道」，不说明是这次启动建起来的：service 方式
-        // 尤其不可靠——`startForegroundService` 返回非空只表示系统收下了这次调用，
-        // FlClash 的服务起来后并不建隧道（21:19:30 started → 21:19:32「进程仍在，
-        // 等隧道」→ 之后一直没有隧道）。
-        // 1.9.21 把这种「成功」当成结论固定下来，引擎此后只发服务启动请求，
-        // 把唯一能用的外部控制入口挡在外面（21:34:25 起连续三次 rejected）。
-        // 所以：能查到外部控制入口的客户端，服务方式只记不固定。
-        ExternalControl.remember(ctx, pkg, mode)
-        val pinIt = mode == "activity" || !ExternalControl.hasExternalStart(ctx, pkg)
-        if (pinIt) ExternalControl.pin(ctx, pkg, mode)
-        // 这次连接是这个测试拉起来的，别再让引擎把它记到某次自动尝试头上
-        markPendingExternalMode(null)
-        RuntimeDiagnostics.publishClientTest(
-            ctx, pkg, mode, "success",
-            when {
-                !pinIt -> "VpnService 启动成功，已记住；该客户端有外部控制入口，服务方式不固定"
-                mode == "activity" -> "外部控制成功，已固定该方式"
-                else -> "VpnService 启动成功，已固定该方式"
-            },
-        )
+        when {
+            clientTestUpAt == 0L -> {
+                // 第一帧隧道只能说明「这次启动产生了隧道」，不说明它能留住。#21 的
+                // ApexVpnService 就是这样：服务起来、隧道连上，两秒后进程自己退出，
+                // 五秒后隧道掉。旧逻辑看到这一帧就判成功并固定了服务方式，之后每次
+                // 自动启动都走这条死路——用户看到的是「闪一下就连上又断」。
+                clientTestUpAt = now
+                RuntimeDiagnostics.publishClientTest(
+                    ctx, pkg, mode, "running", "已连上，正在确认连接能保持…",
+                )
+            }
+            EnginePolicy.clientTestStillHolding(clientTestUpAt, now) -> {
+                // 一次测试成功只说明「此刻有隧道」，不说明是这次启动建起来的：service 方式
+                // 尤其不可靠——`startForegroundService` 返回非空只表示系统收下了这次调用，
+                // FlClash 的服务起来后并不建隧道（21:19:30 started → 21:19:32「进程仍在，
+                // 等隧道」→ 之后一直没有隧道）。
+                // 1.9.21 把这种「成功」当成结论固定下来，引擎此后只发服务启动请求，
+                // 把唯一能用的外部控制入口挡在外面（21:34:25 起连续三次 rejected）。
+                // 所以：能查到外部控制入口的客户端，服务方式只记不固定。
+                ExternalControl.remember(ctx, pkg, mode)
+                val pinIt = mode == "activity" || !ExternalControl.hasExternalStart(ctx, pkg)
+                if (pinIt) ExternalControl.pin(ctx, pkg, mode)
+                // 这次连接是这个测试拉起来的，别再让引擎把它记到某次自动尝试头上
+                markPendingExternalMode(null)
+                RuntimeDiagnostics.publishClientTest(
+                    ctx, pkg, mode, "success",
+                    when {
+                        !pinIt -> "VpnService 启动成功，已记住；该客户端有外部控制入口，服务方式不固定"
+                        mode == "activity" -> "外部控制成功，已固定该方式"
+                        else -> "VpnService 启动成功，已固定该方式"
+                    },
+                )
+                log(
+                    ctx,
+                    LogCat.START,
+                    "client test success: $pkg / $mode (${if (pinIt) "pinned" else "remembered only"})",
+                )
+                return
+            }
+        }
+    } else if (clientTestUpAt != 0L) {
+        // 隧道曾经出现过又没了：这条路保持不住，重新计时，别把它当成功
         log(
             ctx,
             LogCat.START,
-            "client test success: $pkg / $mode (${if (pinIt) "pinned" else "remembered only"})",
+            "client test: tunnel lasted ${now - clientTestUpAt}ms then dropped, keep probing",
         )
-        return
+        clientTestUpAt = 0L
     }
-    if (attempt >= 30) {
+    if (attempt >= 40) {
         RuntimeDiagnostics.publishClientTest(
-            ctx, pkg, mode, "failure", "15 秒内没有检测到 VPN transport",
+            ctx, pkg, mode, "failure", "20 秒内没有检测到能保持的 VPN 连接",
         )
         log(ctx, LogCat.START, "client test timeout: $pkg / $mode")
         return

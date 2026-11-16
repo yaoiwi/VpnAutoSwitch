@@ -943,4 +943,24 @@ class EnginePolicyTest {
                 )
             }
     }
+
+    @Test
+    fun `client test needs the tunnel to hold before it counts`() {
+        // 还没看到隧道：不可能是成功
+        assertFalse(EnginePolicy.clientTestStillHolding(0L, 99_999L))
+        // 只看到一帧：也不能算。这一帧之后客户端可能两秒就自己退了
+        assertFalse(
+            EnginePolicy.clientTestStillHolding(
+                1_000L,
+                1_000L + EnginePolicy.CLIENT_TEST_HOLD_MS - 1,
+            ),
+        )
+        // 连续保持够了才算
+        assertTrue(
+            EnginePolicy.clientTestStillHolding(
+                1_000L,
+                1_000L + EnginePolicy.CLIENT_TEST_HOLD_MS,
+            ),
+        )
+    }
 }

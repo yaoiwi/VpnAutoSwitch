@@ -247,6 +247,25 @@ internal fun Engine.isProcessAlive(
 }
 
 /**
+ * 这个包现在是不是「前台进程」。
+ *
+ * 不依赖 activityResumed hook —— Android 16/17 上它挂不上（日志里
+ * `hook activityResumed not installed (0 methods)`），前台只能靠 startActivity 更新，
+ * 很容易被 toast、系统界面覆盖。#21 就是这样：应用还在用，task 回调先到，
+ * VPN 连上两秒就被关了。
+ *
+ * 这个值直接读进程的 importance：真被划掉的应用会掉到 SERVICE / CACHED，
+ * 还在被使用的才是 FOREGROUND。
+ */
+internal fun Engine.isProcessForeground(ctx: Context, pkg: String): Boolean {
+    val processes = runningProcesses(ctx) ?: return false
+    return processes.any {
+        (it.processName == pkg || it.processName.startsWith("$pkg:")) &&
+            it.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
+    }
+}
+
+/**
  * @param targets 只看这些目标；默认是全局存活集合。多组时传命中组的应用
  * @return true 还在运行；false 已经结束；null 无法判断（列表被系统裁剪时）
  */

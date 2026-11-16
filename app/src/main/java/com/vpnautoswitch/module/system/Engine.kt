@@ -627,6 +627,14 @@ internal object Engine {
     internal var reapplyCount = 0
     internal var externalAttempts = 0
     internal var clientTestToken = 0
+
+    /**
+     * 客户端测试第一次看到隧道的时刻；0 表示还没看到。
+     *
+     * 看到隧道不等于这条路能用（见 [EngineClientTest.pollClientTest]）：有些客户端
+     * 能建隧道，两三秒后自己退出，隧道只活 5 秒。
+     */
+    internal var clientTestUpAt = 0L
     internal var lastExternalAt = 0L
     /** 本轮接管是否已经提示过「VPN 已开启」，避免设置写完但隧道没起来就误报 */
     internal var connectedNotified = false

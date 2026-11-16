@@ -594,4 +594,19 @@ internal object EnginePolicy {
         sinceForceStopMs < forceStopGuardMs -> PrewarmGate.SKIP_FORCE_STOP
         else -> PrewarmGate.GO
     }
+
+    /** 客户端测试里，隧道要连续保持多久才算「这条路能用」 */
+    const val CLIENT_TEST_HOLD_MS = 6_000L
+
+    /**
+     * 客户端测试看到的隧道是否已经稳住。
+     *
+     * 有的客户端能建隧道，两三秒后自己退出，隧道只活五秒（#21）。看到第一帧就
+     * 判成功并把启动方式固定下来，之后每次自动启动都走这条死路，用户看到的是
+     * 「闪一下就连上又断」。所以要连续保持一段才认。
+     *
+     * @param upSince 第一次看到隧道的时刻；0 表示还没看到
+     */
+    fun clientTestStillHolding(upSince: Long, now: Long): Boolean =
+        upSince != 0L && now - upSince >= CLIENT_TEST_HOLD_MS
 }
