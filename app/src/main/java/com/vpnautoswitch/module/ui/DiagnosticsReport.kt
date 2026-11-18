@@ -292,7 +292,12 @@ internal object DiagnosticsReport {
                     else -> "模块尚未上报"
                 }
             )
-            appendLine("目标应用：${config.targets.size} · 打开即关闭：${config.offTargets.size} · Wi-Fi 开/关：${config.wifiOn.size}/${config.wifiOff.size}")
+            appendLine(
+                "目标应用：${config.targets.size} · 打开即关闭：${config.offTargets.size} · " +
+                    "Wi-Fi 开/关：${config.wifiOn.size}/${config.wifiOff.size}" +
+                    (if (config.wifiOnOnly && config.wifiOn.isNotEmpty()) " · 离开即断开" else "") +
+                    (if (config.wifiOffResume && config.wifiOff.isNotEmpty()) " · 离开即恢复" else ""),
+            )
             if (config.rules.isNotEmpty()) {
                 // 多组时上面那行只是默认组。用户报「切错了」时，报告里得能看出每个组
                 // 各配了哪个客户端、几个应用，不然只能让他自己截图

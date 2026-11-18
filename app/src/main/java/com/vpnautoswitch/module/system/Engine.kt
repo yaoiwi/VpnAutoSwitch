@@ -775,6 +775,23 @@ internal object Engine {
     /** 当前 Wi-Fi 命中「指定 Wi-Fi 关 VPN」规则：期间不再自动开启 */
     internal var wifiSuppressed = false
 
+    /**
+     * 上一拍是否停在「指定 Wi-Fi 开 VPN」的网络上。
+     *
+     * 只用来抓「刚刚离开」的那一次（[EnginePolicy.shouldDropAfterLeavingWifiOn]）。
+     * 每拍都按当前值覆盖，模块重启后是 false，第一次网络切换不会被误判成「离开」。
+     */
+    internal var wasOnWifiRule = false
+
+    /**
+     * 上一拍是否停在「指定 Wi-Fi 关 VPN」的网络上。
+     *
+     * 和 [wasOnWifiRule] 对称，用来抓「刚刚离开」的那一次
+     * （[EnginePolicy.shouldStartAfterLeavingWifiOff]）。同样每拍覆盖，
+     * 模块重启后是 false，不会把第一次网络切换误判成「离开关闭网络」。
+     */
+    internal var wasOnWifiOffRule = false
+
     /** 当前默认网络的传输类型：0 未知 / 1 Wi-Fi / 2 移动数据 / 3 其他 */
     internal var lastTransport = 0
     internal var networkCallback: ConnectivityManager.NetworkCallback? = null

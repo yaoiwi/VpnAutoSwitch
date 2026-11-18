@@ -52,7 +52,8 @@ class ConfigNetworkOverrideTest {
 
     @Test
     fun `schema is bumped for the new fields`() {
-        // 4 = 规则组。缺这个键时和 3 完全一样，旧版模块读到只会忽略
-        assertEquals(4, Config.SCHEMA)
+        // 6 = 离开「指定 Wi-Fi 关 VPN」的网络后恢复。缺这个键时和 5 完全一样，
+        // 旧版模块读到只会忽略，行为不变
+        assertEquals(6, Config.SCHEMA)
     }
 }

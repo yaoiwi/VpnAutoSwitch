@@ -276,6 +276,38 @@ internal fun Engine.handleNetworkChanged() {
             log(ctx, LogCat.NET, "wifi \"${ssidForLog(ctx, hit)}\" -> keep off")
         }
         stopWatchdog()
+        // 命中关闭规则时不在开启名单里，别把上一拍的「在开启网络上」带到下一次判断
+        wasOnWifiRule = false
+        wasOnWifiOffRule = true
+        return
+    }
+    // 上一拍在「指定 Wi-Fi 关 VPN」的网络上，这一拍离开了：记下来，等下面判完
+    // wifiOn 再决定要不要开（可能刚好切到了另一条「开 VPN」的网络，那条会自己开）
+    val leavingWifiOff = EnginePolicy.shouldStartAfterLeavingWifiOff(
+        resumeOnLeave = cfg.wifiOffResume && cfg.wifiOff.isNotEmpty(),
+        wasOnWifi = wasOnWifiOffRule,
+        nowOnWifi = false,
+        vpnOn = isVpnOn(ctx),
+        offAppOpen = offAppForeground != null,
+        userOff = userOff,
+    )
+    wasOnWifiOffRule = false
+    // 离开「指定 Wi-Fi 开 VPN」的网络：网络回调比看门狗快，就地关掉，不用等那 5 秒
+    val nowOnWifiRule = lastTransport == 1 &&
+        currentSsid?.let { cfg.wifiOn.contains(it) } == true
+    val leavingWifiOn = EnginePolicy.shouldDropAfterLeavingWifiOn(
+        onlyOnWifi = cfg.wifiOnOnly && cfg.wifiOn.isNotEmpty(),
+        wasOnWifi = wasOnWifiRule,
+        nowOnWifi = nowOnWifiRule,
+        vpnOn = isVpnOn(ctx),
+        moduleDriven = autoSession,
+        offAppOpen = offAppForeground != null,
+        userOff = userOff,
+    )
+    wasOnWifiRule = nowOnWifiRule
+    if (leavingWifiOn) {
+        log(ctx, LogCat.NET, "left wifi-on network -> turn off")
+        turnOff("left wifi-on network")
         return
     }
     val ssid = currentSsid
@@ -318,6 +350,18 @@ internal fun Engine.handleNetworkChanged() {
             log(ctx, LogCat.NET, "network type disabled -> turn off")
             turnOff("network type disabled")
         }
+        return
+    }
+
+    // 刚离开「指定 Wi-Fi 关 VPN」的网络：把 VPN 开回来。这一步不看当前有没有目标应用——
+    // 这个开关的意思就是「出了这条网络就恢复」，非要等目标应用才开等于没实现。
+    // 网络类型总开关还是要尊重，所以放在上面那一级之后
+    if (leavingWifiOff) {
+        log(ctx, LogCat.NET, "left wifi-off network -> turn on")
+        // 新的开启意图，取消此前排队的关闭任务
+        offToken++
+        ensureVpn(ctx, effective, rule = group?.rule)
+        startWatchdog()
         return
     }
     if (targets.isNotEmpty() && offAppForeground == null) {

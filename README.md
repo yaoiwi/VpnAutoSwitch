@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/Kotlin-2.4-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin" />
   <img src="https://img.shields.io/badge/Compose-1.12-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white" alt="Compose" />
   <img src="https://img.shields.io/badge/Miuix-0.9.4-FF6B00?style=flat-square" alt="Miuix" />
-  <img src="https://img.shields.io/badge/Release-1.10.3-brightgreen?style=flat-square" alt="Release" />
+  <img src="https://img.shields.io/badge/Release-1.10.4-brightgreen?style=flat-square" alt="Release" />
   <img src="https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square" alt="License" />
 </p>
 
@@ -46,7 +46,7 @@
 
 ## 📖 使用文档
 
-1. 打开 [Release](https://github.com/yaoiwi/VpnAutoSwitch/releases/latest)，下载 `VpnAutoSwitch-1.10.3.apk`（覆盖安装即可，配置会保留）。也可以在 **LSPosed 管理器 → 仓库** 里搜「VPN 自动开关」，装完之后能直接收到更新。
+1. 打开 [Release](https://github.com/yaoiwi/VpnAutoSwitch/releases/latest)，下载 `VpnAutoSwitch-1.10.4.apk`（覆盖安装即可，配置会保留）。也可以在 **LSPosed 管理器 → 仓库** 里搜「VPN 自动开关」，装完之后能直接收到更新。
 2. 打开 **LSPosed 管理器 → 模块**，启用本模块，**作用域只勾选「系统框架」**，然后重启手机。
 3. 打开 App：
    - 「目标应用」选择需要自动连接 VPN 的应用；
@@ -87,6 +87,7 @@
 | 「划掉」默认即断开 | 从最近任务划掉目标应用后，即使前台服务让进程还活着也会断开；可在「高级」关闭「划掉任务即断开」，关闭后只有主进程结束才断开。任务回调不可用时仍按进程结束断开 |
 | 划掉后何时断开 | 同时选了多个目标时才有区别，三档可选：只断正在用的那个、划掉任意一个就断（默认）、所有目标都退出后才断。有目标还停在前台时不会断 |
 | 与系统常驻 VPN 共用设置 | 模块开启期间该设置指向你的客户端，关闭时恢复原值；只对主用户生效，深度定制 ROM 可能需要按日志适配 |
+| 透明代理不在范围内 | 判断「开着没有」依赖系统的 VPN 记录与 `TRANSPORT_VPN`。TPROXY / TUN2SOCKS / BPF2SOCKS 走 iptables 策略路由，两者都不产生，模块无法确认它到底开没开——判据不准会反复拉起或该关时没关。这类客户端通常自带广播控制（如 AsteriskNG 的 `PROXY_START` / `PROXY_STOP`），可以用 MacroDroid、Tasker 按应用触发 |
 
 ---
 

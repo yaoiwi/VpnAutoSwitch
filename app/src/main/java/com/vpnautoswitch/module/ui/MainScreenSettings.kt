@@ -54,6 +54,7 @@ import com.vpnautoswitch.module.ui.hyper.SettingsSwitch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.BasicComponent
+import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.icon.MiuixIcons
@@ -190,13 +191,15 @@ internal fun LazyListScope.settingsItems(
             SettingsActionWithArrow(
                 title = "指定 Wi-Fi 开 VPN",
                 icon = MiuixIcons.Share,
-                summary = ssidSummary(state.config.wifiOn, "连上这些 Wi-Fi 时始终开启 VPN"),
+                summary = ssidSummary(state.config.wifiOn, "连上这些 Wi-Fi 时始终开启 VPN") +
+                    if (state.config.wifiOnOnly && state.config.wifiOn.isNotEmpty()) " · 离开即断开" else "",
                 onClick = { onEditSsid("on") },
             )
             SettingsActionWithArrow(
                 title = "指定 Wi-Fi 关 VPN",
                 icon = MiuixIcons.Blocklist,
-                summary = ssidSummary(state.config.wifiOff, "连上这些 Wi-Fi 时关闭 VPN 且不再自动开启"),
+                summary = ssidSummary(state.config.wifiOff, "连上这些 Wi-Fi 时关闭 VPN 且不再自动开启") +
+                    if (state.config.wifiOffResume && state.config.wifiOff.isNotEmpty()) " · 离开即恢复" else "",
                 onClick = { onEditSsid("off") },
             )
             SettingsActionWithArrow(
@@ -951,11 +954,43 @@ internal fun SsidRuleDialog(mode: String, state: AppState, onDismiss: () -> Unit
                 text = if (isOn) {
                     "连上列表里的 Wi-Fi 时立即开启 VPN，不看当前打开了哪个应用。"
                 } else {
-                    "连上列表里的 Wi-Fi 时立即关闭 VPN，并且在断开前不再自动开启。"
+                    "连上列表里的 Wi-Fi 时立即关闭 VPN。离开后要不要自动恢复，由下面的开关决定。"
                 },
                 fontSize = 12.sp,
                 color = colors.onSurfaceVariantSummary,
             )
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = if (isOn) "离开时断开" else "离开后自动开", fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = if (isOn) {
+                            "只在这些 Wi-Fi 下保持连接。断开后即使目标应用还开着，也把 VPN 关掉"
+                        } else {
+                            "从这些 Wi-Fi 断开后自动把 VPN 开回来；你手动关过的那次不算"
+                        },
+                        fontSize = 11.sp,
+                        color = colors.onSurfaceVariantSummary,
+                    )
+                }
+                Switch(
+                    checked = if (isOn) state.config.wifiOnOnly else state.config.wifiOffResume,
+                    onCheckedChange = {
+                        state.save(
+                            if (isOn) {
+                                state.config.copy(wifiOnOnly = it)
+                            } else {
+                                state.config.copy(wifiOffResume = it)
+                            },
+                        )
+                    },
+                )
+            }
             Spacer(modifier = Modifier.height(10.dp))
             Text(
                 text = "当前 Wi-Fi：${current.ifEmpty { "未连接" }}",

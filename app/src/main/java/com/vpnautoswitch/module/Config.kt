@@ -73,6 +73,24 @@ data class Config(
     /** 连上这些 Wi-Fi 时始终关闭 VPN，且不再自动开启 */
     val wifiOff: Set<String> = emptySet(),
     /**
+     * 离开 [wifiOn] 里的 Wi-Fi 后是否断开 VPN。
+     *
+     * 默认关。多数人把「指定 Wi-Fi 开 VPN」理解成「在这条网络上总是开」，切到移动数据
+     * 还要接着用；打开后语义变成「只在这些 Wi-Fi 下保持连接」——离开的瞬间就断开，
+     * 哪怕目标应用还挂在后台。由用户自己选，别默认替所有人改行为。
+     */
+    val wifiOnOnly: Boolean = false,
+    /**
+     * 离开 [wifiOff] 里的 Wi-Fi 后是否把 VPN 开回来。
+     *
+     * 默认关。原来的语义是「只在这条网络上关」，离开后照旧停在关闭状态；打开后变成
+     * 「到家断开、出门恢复」。同样由用户自己选——有人把「公司 Wi-Fi 关 VPN」当成
+     * 「在公司别用」，也有人当成「只在这不连」，两种都合理，不能替他们决定。
+     *
+     * 只对模块自己关掉的那次生效：用户手动关的照样不恢复。
+     */
+    val wifiOffResume: Boolean = false,
+    /**
      * 单个应用覆盖全局网络条件。
      *
      * 上面两个开关是「默认值」，这里只影响被点名的应用：比如全局允许 Wi-Fi 与移动数据，
@@ -215,6 +233,8 @@ data class Config(
         o.put("md3Wallpaper", md3Wallpaper)
         o.put("wifiOn", JSONArray(wifiOn.toList()))
         o.put("wifiOff", JSONArray(wifiOff.toList()))
+        o.put("wifiOnOnly", wifiOnOnly)
+        o.put("wifiOffResume", wifiOffResume)
         val ov = JSONObject()
         networkOverride.forEach { (pkg, mode) -> if (mode.isNotEmpty()) ov.put(pkg, mode) }
         o.put("netOverride", ov)
@@ -244,8 +264,10 @@ data class Config(
          * 3：多了 [Config.fullSsid]。旧版本读到新配置只会忽略这个键，行为不变。
          * 4：多了 [Config.rules]。键缺省时和 3 完全一样；旧模块读到只会忽略，
          *   降级成「只认默认组」，不会误把别的组的应用当成自己的目标。
+         * 5：多了 [Config.wifiOnOnly]。缺省 false，和 4 的行为一致。
+         * 6：多了 [Config.wifiOffResume]。缺省 false，和 5 的行为一致。
          */
-        const val SCHEMA = 4
+        const val SCHEMA = 6
 
         /** 界面风格：HyperOS / Miuix 那套 */
         const val THEME_HYPER = "hyper"
@@ -321,6 +343,8 @@ data class Config(
                     hapticFeedback = o.optBoolean("haptic", true),
                     wifiOn = readSet(o.optJSONArray("wifiOn")),
                     wifiOff = readSet(o.optJSONArray("wifiOff")),
+                    wifiOnOnly = o.optBoolean("wifiOnOnly", false),
+                    wifiOffResume = o.optBoolean("wifiOffResume", false),
                     networkOverride = readOverrides(o.optJSONObject("netOverride")),
                     statusNotification = o.optBoolean("statusNotif", false),
                     sortAppsByName = o.optBoolean("sortApps", false),

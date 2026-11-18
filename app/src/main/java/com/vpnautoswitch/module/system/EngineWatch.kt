@@ -68,6 +68,28 @@ internal fun Engine.watchdogTick() {
         return
     }
 
+    // 「指定 Wi-Fi 关 VPN」离开后自动开：必须在 wifiSuppressed 那一级之前。
+    // 离开之后这个缓存字段还是上一拍的 true，直接 return 就永远轮不到开
+    val nowOnWifiOff = lastTransport == 1 &&
+        currentSsid?.let { raw.wifiOff.contains(it) } == true
+    val leavingWifiOff = EnginePolicy.shouldStartAfterLeavingWifiOff(
+        resumeOnLeave = raw.wifiOffResume && raw.wifiOff.isNotEmpty(),
+        wasOnWifi = wasOnWifiOffRule,
+        nowOnWifi = nowOnWifiOff,
+        vpnOn = active,
+        offAppOpen = offAppForeground != null,
+        userOff = userOff,
+    )
+    wasOnWifiOffRule = nowOnWifiOff
+    if (leavingWifiOff) {
+        val group = raw.hitGroup(ruleProbe())
+        val effective = if (group == null) raw else raw.forClient(group.rule.vpnPackage, group.rule.id)
+        log(ctx, LogCat.NET, "left wifi-off network -> turn on")
+        ensureVpn(ctx, effective, rule = group?.rule)
+        startWatchdog()
+        return
+    }
+
     if (wifiSuppressed) {
         if (active) turnOff("wifi off")
         watchdogRunning = false
@@ -110,6 +132,27 @@ internal fun Engine.watchdogTick() {
             return
         }
         SwitchDecision.NONE -> Unit
+    }
+
+    // 「只在这些 Wi-Fi 下保持连接」（wifiOnOnly）：离开的那一刻断开。
+    // 必须放在 wifiOn 那一级之前——离开之后 isWifiOnActive 已经是假，再往下走
+    // 只会落到「没有目标进程」，目标应用还挂在后台的话就永远关不掉
+    val onWifiRule = lastTransport == 1 && currentSsid?.let { raw.wifiOn.contains(it) } == true
+    val leavingWifiOn = EnginePolicy.shouldDropAfterLeavingWifiOn(
+        onlyOnWifi = raw.wifiOnOnly && raw.wifiOn.isNotEmpty(),
+        wasOnWifi = wasOnWifiRule,
+        nowOnWifi = onWifiRule,
+        vpnOn = active,
+        moduleDriven = autoSession,
+        offAppOpen = offAppForeground != null,
+        userOff = userOffBlocks(hit),
+    )
+    wasOnWifiRule = onWifiRule
+    if (leavingWifiOn) {
+        log(ctx, LogCat.STOP, "left wifi-on network -> turn off")
+        turnOff("left wifi-on network")
+        watchdogRunning = false
+        return
     }
 
     // 「指定 Wi-Fi 开 VPN」比目标应用优先：命中时不管目标进程在不在，都不该因为

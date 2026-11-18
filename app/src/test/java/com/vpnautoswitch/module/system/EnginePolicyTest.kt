@@ -963,4 +963,91 @@ class EnginePolicyTest {
             ),
         )
     }
+
+    private fun leaving(
+        onlyOnWifi: Boolean = true,
+        wasOnWifi: Boolean = true,
+        nowOnWifi: Boolean = false,
+        vpnOn: Boolean = true,
+        moduleDriven: Boolean = true,
+        offAppOpen: Boolean = false,
+        userOff: Boolean = false,
+    ) = EnginePolicy.shouldDropAfterLeavingWifiOn(
+        onlyOnWifi = onlyOnWifi,
+        wasOnWifi = wasOnWifi,
+        nowOnWifi = nowOnWifi,
+        vpnOn = vpnOn,
+        moduleDriven = moduleDriven,
+        offAppOpen = offAppOpen,
+        userOff = userOff,
+    )
+
+    @Test
+    fun `leaving the wifi-on network turns the vpn off`() {
+        assertTrue(leaving())
+    }
+
+    @Test
+    fun `staying on the network keeps it on`() {
+        // 还在这条网络上：不能关。从 A 换到 B 也是如此——两条都在名单里，
+        // 这一拍看到的仍然是「在名单内的网络上」
+        assertFalse(leaving(nowOnWifi = true))
+        // 第一次跑起来就离开了（模块刚重启，wasOnWifi 是初始值）：不误判成「离开」
+        assertFalse(leaving(wasOnWifi = false))
+    }
+
+    @Test
+    fun `leaving does nothing when the setting is off or the tunnel is not ours`() {
+        // 开关没打开：维持原来的「在这条网络上总是开」
+        assertFalse(leaving(onlyOnWifi = false))
+        // VPN 本来就没开
+        assertFalse(leaving(vpnOn = false))
+        // 用户自己连的，不是模块拉起的
+        assertFalse(leaving(moduleDriven = false))
+        // 「打开即关闭」的应用还压着，交给它自己的链路收尾
+        assertFalse(leaving(offAppOpen = true))
+        // 用户手动关过，本来就该保持断着
+        assertFalse(leaving(userOff = true))
+    }
+
+    private fun resuming(
+        resumeOnLeave: Boolean = true,
+        wasOnWifi: Boolean = true,
+        nowOnWifi: Boolean = false,
+        vpnOn: Boolean = false,
+        offAppOpen: Boolean = false,
+        userOff: Boolean = false,
+    ) = EnginePolicy.shouldStartAfterLeavingWifiOff(
+        resumeOnLeave = resumeOnLeave,
+        wasOnWifi = wasOnWifi,
+        nowOnWifi = nowOnWifi,
+        vpnOn = vpnOn,
+        offAppOpen = offAppOpen,
+        userOff = userOff,
+    )
+
+    @Test
+    fun `leaving the wifi-off network turns the vpn back on`() {
+        assertTrue(resuming())
+    }
+
+    @Test
+    fun `resume only fires on the transition, not on every tick`() {
+        // 还在这条网络上：它是关着的那条，不能开
+        assertFalse(resuming(nowOnWifi = true))
+        // 上一拍就不在：不是「刚离开」，别在别处打开应用时把它顶起来
+        assertFalse(resuming(wasOnWifi = false))
+        // 隧道本来就开着，没事可做
+        assertFalse(resuming(vpnOn = true))
+    }
+
+    @Test
+    fun `resume does nothing when the switch is off or the user closed it himself`() {
+        // 开关没打开：维持原来的「只在这条网络上关」
+        assertFalse(resuming(resumeOnLeave = false))
+        // 用户刚在通知栏点掉，不该被我们顶回来
+        assertFalse(resuming(userOff = true))
+        // 「打开即关闭」的应用还压着
+        assertFalse(resuming(offAppOpen = true))
+    }
 }

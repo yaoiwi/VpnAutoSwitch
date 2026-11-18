@@ -609,4 +609,43 @@ internal object EnginePolicy {
      */
     fun clientTestStillHolding(upSince: Long, now: Long): Boolean =
         upSince != 0L && now - upSince >= CLIENT_TEST_HOLD_MS
+
+    /**
+     * 离开「指定 Wi-Fi 开 VPN」的网络时，这一拍要不要主动断开。
+     *
+     * 只在「上一拍还在这条网络上、这一拍已经离开」的那一次成立：每拍都判的话，
+     * 在外面打开目标应用会立刻被关掉，变成「开了又断」。
+     *
+     * 另外几种情况都不动它：VPN 本来就没开、不是模块拉起的（用户自己连的）、
+     * 「打开即关闭」的应用还压着、用户手动关过（他本来就想关着）。
+     */
+    fun shouldDropAfterLeavingWifiOn(
+        onlyOnWifi: Boolean,
+        wasOnWifi: Boolean,
+        nowOnWifi: Boolean,
+        vpnOn: Boolean,
+        moduleDriven: Boolean,
+        offAppOpen: Boolean,
+        userOff: Boolean,
+    ): Boolean = onlyOnWifi && wasOnWifi && !nowOnWifi && vpnOn && moduleDriven &&
+        !offAppOpen && !userOff
+
+    /**
+     * 离开「指定 Wi-Fi 关 VPN」的网络时，这一拍要不要主动把 VPN 开回来。
+     *
+     * 和上面那条对称，但方向相反：这里是「上一拍在关闭名单里、这一拍离开了」。
+     * 每拍都判的话，在别处打开目标应用会立刻又被判成「刚离开」再开一次，
+     * 所以同样只看那一次翻转。
+     *
+     * 另外几种情况都不动它：VPN 本来就开着（没事可做）、「打开即关闭」的应用
+     * 还压着、用户手动关过（他刚在通知栏点掉，不该被我们顶回来）。
+     */
+    fun shouldStartAfterLeavingWifiOff(
+        resumeOnLeave: Boolean,
+        wasOnWifi: Boolean,
+        nowOnWifi: Boolean,
+        vpnOn: Boolean,
+        offAppOpen: Boolean,
+        userOff: Boolean,
+    ): Boolean = resumeOnLeave && wasOnWifi && !nowOnWifi && !vpnOn && !offAppOpen && !userOff
 }
