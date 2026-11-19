@@ -701,7 +701,7 @@ internal fun LazyListScope.settingsItems(
                         }
                         CheckAction.OpenLsposed -> {
                             if (!state.openLsposed()) {
-                                Toast.makeText(context, "没有找到 LSPosed 管理器", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "没有找到框架管理器（LSPosed / Vector）", Toast.LENGTH_SHORT).show()
                             }
                         }
                         CheckAction.OpenClientAdapter -> {

@@ -755,19 +755,25 @@ class AppState(private val context: Context) {
      * 返回 null，以前直接 return false，界面只提示「没有找到」——用户手里明明装着，
      * 却没有任何可操作的东西（#15 那位就卡在这里）。现在退回应用详情页，
      * 至少能点「启用」或解除冻结。
+     *
+     * 包名不再写死：Vector 是 LSPosed 改名后的延续，管理器换成了
+     * `org.matrix.vector.manager`，写死一个包名会让 Vector 用户看到「没安装」（#26）。
      */
-    fun openLsposed(): Boolean = try {
-        val intent = context.packageManager.getLaunchIntentForPackage(LSPOSED_PACKAGE)
-        if (intent != null) {
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(intent)
-            true
-        } else {
-            openAppDetails(LSPOSED_PACKAGE)
+    fun openLsposed(): Boolean {
+        val pkg = LspManager.resolve(context) ?: return false
+        return try {
+            val intent = context.packageManager.getLaunchIntentForPackage(pkg)
+            if (intent != null) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+                true
+            } else {
+                openAppDetails(pkg)
+            }
+        } catch (t: Throwable) {
+            // 部分 ROM 会拦掉后台启动 Activity（抛 SecurityException），没装则是 ActivityNotFound
+            openAppDetails(pkg)
         }
-    } catch (t: Throwable) {
-        // 部分 ROM 会拦掉后台启动 Activity（抛 SecurityException），没装则是 ActivityNotFound
-        openAppDetails(LSPOSED_PACKAGE)
     }
 
     /** 系统「设置 → VPN」；极少数 ROM 没有这个页面，退回设置首页 */
@@ -804,9 +810,6 @@ class AppState(private val context: Context) {
             ?: AppsRepository.labelOf(context, packageName)
 
     companion object {
-
-        /** LSPosed 管理器的包名，跳转和包状态查询都用它 */
-        const val LSPOSED_PACKAGE = "org.lsposed.manager"
 
         const val MODE_MULTI = 0
         const val MODE_SINGLE = 1

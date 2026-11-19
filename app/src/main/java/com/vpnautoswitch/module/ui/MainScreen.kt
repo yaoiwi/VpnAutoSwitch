@@ -226,7 +226,7 @@ fun MainScreen(state: AppState) {
                                     if (!state.openLsposed()) {
                                         Toast.makeText(
                                             context,
-                                            "打不开 LSPosed，可能没安装或已被冻结",
+                                            "打不开框架管理器（LSPosed / Vector），可能没安装或已被冻结",
                                             Toast.LENGTH_SHORT
                                         ).show()
                                     }
@@ -487,7 +487,7 @@ private fun HeroStatusCard(state: AppState) {
                         if (!state.openLsposed()) {
                             Toast.makeText(
                                 context,
-                                "打不开 LSPosed，可能没安装或已被冻结",
+                                "打不开框架管理器（LSPosed / Vector），可能没安装或已被冻结",
                                 Toast.LENGTH_SHORT
                             ).show()
                         }
