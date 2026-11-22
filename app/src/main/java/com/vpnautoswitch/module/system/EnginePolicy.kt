@@ -610,6 +610,32 @@ internal object EnginePolicy {
     fun clientTestStillHolding(upSince: Long, now: Long): Boolean =
         upSince != 0L && now - upSince >= CLIENT_TEST_HOLD_MS
 
+    /** 接管标记与隧道不一致，撑到这个时长就判为陈旧 */
+    const val STALE_ACTIVE_MS = 20_000L
+
+    /**
+     * 刚发起连接时，通知继续按「已连接」显示的宽限。
+     *
+     * 隧道从写完设置到真的起来要一两秒，慢的客户端能到十秒。这段时间里按隧道判会在
+     * 通知栏闪一下「未连接」，看着像开失败了。比最慢的成功案例再留一点余量。
+     */
+    const val DISPLAY_CONNECTING_MS = 15_000L
+
+    /**
+     * 「标记说开着、隧道却没了」这个状态，现在能不能清掉。
+     *
+     * 用户在客户端里手动断开、或者客户端被系统杀掉之后，接管标记还是 1。
+     * 磁贴、通知、以及关闭链里「能不能动 VPN」都读它，于是一直显示「已连接」，
+     * 或者把别人的隧道当成自己的。
+     *
+     * 不能一看到不一致就清：客户端可能只是断了一拍又自己连回来。所以要求连续
+     * [STALE_ACTIVE_MS] 都看不到隧道——这个时长比最慢的冷启动还长一截。
+     *
+     * @param staleSince 第一次发现不一致的时刻，0 表示这一拍才刚发现
+     */
+    fun staleActiveExpired(now: Long, staleSince: Long): Boolean =
+        staleSince != 0L && now - staleSince >= STALE_ACTIVE_MS
+
     /**
      * 离开「指定 Wi-Fi 开 VPN」的网络时，这一拍要不要主动断开。
      *

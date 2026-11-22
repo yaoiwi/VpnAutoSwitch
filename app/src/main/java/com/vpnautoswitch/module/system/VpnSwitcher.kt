@@ -59,6 +59,24 @@ internal object VpnSwitcher {
         false
     }
 
+    /**
+     * 只清「接管标记」，不碰 always-on 设置。
+     *
+     * 用在标记陈旧的时候：隧道早就没了（用户手动断开、客户端被杀），标记却还是 1，
+     * 磁贴和通知就会一直说「已连接」。
+     *
+     * 不能拿 [disable] 顶替：那会去恢复用户原本的常驻 VPN 设置，而这条隧道并不是
+     * 在关闭流程里断的，改设置反而可能把别的客户端弄乱。
+     */
+    fun markIdle(ctx: Context) {
+        try {
+            Settings.Secure.putInt(ctx.contentResolver, KEY_ACTIVE, 0)
+            refreshTile(ctx)
+        } catch (t: Throwable) {
+            XposedBridge.log("$TAG mark idle failed: $t")
+        }
+    }
+
     /** 系统当前的「始终开启的 VPN」应用 */
     fun currentAlwaysOn(ctx: Context): String? = try {
         Settings.Secure.getString(ctx.contentResolver, KEY_ALWAYS_ON_APP)

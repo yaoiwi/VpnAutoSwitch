@@ -481,6 +481,15 @@ internal object Engine {
     internal var transportAt = 0L
     internal var transportValue = false
 
+    /**
+     * 「接管标记还在、隧道却没了」是从什么时候开始的，0 表示当前没发现这种不一致。
+     *
+     * 客户端自己断开或被系统杀掉之后，标记不会自己回 0。磁贴、通知都看它，
+     * 会一直说「已连接」。撑过 [EnginePolicy.STALE_ACTIVE_MS] 就清掉，
+     * 让显示回到真实状态，见 [sweepStaleActive]。
+     */
+    internal var staleActiveSince = 0L
+
     /** foreground 日志去重：同一个应用 30 秒内只记一条 */
     internal var lastForegroundLogAt = 0L
     internal var lastLoggedForegroundPkg = ""
@@ -493,6 +502,9 @@ internal object Engine {
             val ctx = context()
             if (ctx != null) {
                 beat(ctx)
+                // 心跳是唯一「不管有没有事件都会来」的地方：用户手动断开客户端之后
+                // 可能什么回调都没有，只能靠这里把陈旧的标记收掉
+                sweepStaleActive(ctx)
                 publishRuntime(ctx)
             }
             handler.postDelayed(this, heartbeatDelay())

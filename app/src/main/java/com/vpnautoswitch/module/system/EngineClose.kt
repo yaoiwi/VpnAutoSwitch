@@ -804,6 +804,54 @@ internal fun Engine.hasVpnTransport(ctx: Context, fresh: Boolean = false): Boole
 internal fun Engine.isVpnOn(ctx: Context, fresh: Boolean = false): Boolean =
     VpnSwitcher.isActive(ctx.contentResolver) || hasVpnTransport(ctx, fresh)
 
+/**
+ * 通知和磁贴用的「VPN 开着吗」。
+ *
+ * [isVpnOn] 是「标记或隧道」，宁可认为开着：控制逻辑用它不会误关东西。但拿它当显示
+ * 判据就不对了——用户手动在客户端里断开之后，标记还留着，通知会一直写「已连接」。
+ *
+ * 刚发起连接的那十几秒例外：隧道还没起来是正常的，否则每次开 VPN 通知都要先闪一下
+ * 「未连接」再变回「已连接」。
+ */
+internal fun Engine.isVpnOnForDisplay(ctx: Context): Boolean {
+    if (hasVpnTransport(ctx)) return true
+    val startedAt = connectStartedAt
+    return startedAt != 0L &&
+        SystemClock.elapsedRealtime() - startedAt < EnginePolicy.DISPLAY_CONNECTING_MS
+}
+
+/**
+ * 清掉「标记说开着、隧道却早没了」的陈旧状态。
+ *
+ * 只在 [hasVpnTransport] 明确为 false 时计数：它查不到网络信息时会返回 true，
+ * 这时什么都不做，宁可让标记留着。连接窗口内（[connectStartedAt] 非 0）同样不算，
+ * 免得把正在建的隧道判死。撑过 [EnginePolicy.STALE_ACTIVE_MS] 才清。
+ */
+internal fun Engine.sweepStaleActive(ctx: Context) {
+    if (!VpnSwitcher.isActive(ctx.contentResolver) || connectStartedAt != 0L) {
+        staleActiveSince = 0L
+        return
+    }
+    if (hasVpnTransport(ctx)) {
+        staleActiveSince = 0L
+        return
+    }
+    val now = SystemClock.elapsedRealtime()
+    if (staleActiveSince == 0L) {
+        staleActiveSince = now
+        return
+    }
+    if (!EnginePolicy.staleActiveExpired(now, staleActiveSince)) return
+    staleActiveSince = 0L
+    VpnSwitcher.markIdle(ctx)
+    log(
+        ctx,
+        LogCat.DIAG,
+        "active flag cleared: marked on but no tunnel for " +
+            "${EnginePolicy.STALE_ACTIVE_MS / 1000}s (client dropped it itself)",
+    )
+}
+
 internal fun Engine.toast(ctx: Context, message: String, enabled: Boolean) {
     if (!enabled) return
     try {

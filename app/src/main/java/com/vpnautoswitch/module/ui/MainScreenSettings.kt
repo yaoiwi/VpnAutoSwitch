@@ -221,7 +221,8 @@ internal fun LazyListScope.settingsItems(
                 )
             } else {
                 Text(
-                    text = "上面两个是全局默认。单个应用要例外时，去「目标应用」点那一行单独设置。",
+                    text = "上面两个是全局默认。单个应用要例外时，去「目标应用」点那一行单独设置。" +
+                    "目标应用一个都不选也可以，那就是只按 Wi-Fi 决定开关、不看应用。",
                     modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
                     fontSize = 12.sp,
                     lineHeight = 17.sp,
@@ -952,7 +953,8 @@ internal fun SsidRuleDialog(mode: String, state: AppState, onDismiss: () -> Unit
             Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = if (isOn) {
-                    "连上列表里的 Wi-Fi 时立即开启 VPN，不看当前打开了哪个应用。"
+                    "连上列表里的 Wi-Fi 时立即开启 VPN，不看当前打开了哪个应用。" +
+                        "目标应用一个都不选也能用，这样就是纯粹按 Wi-Fi 开关。"
                 } else {
                     "连上列表里的 Wi-Fi 时立即关闭 VPN。离开后要不要自动恢复，由下面的开关决定。"
                 },

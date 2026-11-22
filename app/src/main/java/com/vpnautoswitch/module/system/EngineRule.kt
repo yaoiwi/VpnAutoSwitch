@@ -171,8 +171,11 @@ internal fun Engine.publishRuntime(ctx: Context?) {
             ?.let { cfg.forClient(it.rule.vpnPackage, it.rule.id) }
             ?: cfg.forClient(activePkg, activeRuleId)
         // 通知自己按「规则 + 连接状态」去重，成本只有一次 Settings 读取；
-        // 放在快照的节流之前，开关刚改完也能立刻生效，不用等下一次状态变化
-        StatusNotification.sync(context, driving, rule, detail, connectedSince(), isVpnOn(context))
+        // 放在快照的节流之前，开关刚改完也能立刻生效，不用等下一次状态变化。
+        // 用显示版：标记还在、隧道却早就没了的时候要说「未连接」，不能一直挂着「已连接」
+        StatusNotification.sync(
+            context, driving, rule, detail, connectedSince(), isVpnOnForDisplay(context),
+        )
 
         // 「命中了规则但没连上」时才有必要解释卡在哪。其余时候不去查包和设置，
         // 免得每次心跳都多做几次跨进程调用

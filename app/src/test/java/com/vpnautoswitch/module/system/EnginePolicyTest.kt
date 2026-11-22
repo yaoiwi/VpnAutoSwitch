@@ -1050,4 +1050,20 @@ class EnginePolicyTest {
         // 「打开即关闭」的应用还压着
         assertFalse(resuming(offAppOpen = true))
     }
+
+    @Test
+    fun `stale active waits out a client that drops and reconnects`() {
+        // 刚发现不一致：只记时刻，不清标记
+        assertFalse(EnginePolicy.staleActiveExpired(1_000L, 1_000L))
+        // 差一秒到点：客户端还有机会自己连回来
+        assertFalse(EnginePolicy.staleActiveExpired(20_999L, 1_000L))
+        // 撑满 20 秒都看不到隧道：判定陈旧
+        assertTrue(EnginePolicy.staleActiveExpired(21_000L, 1_000L))
+    }
+
+    @Test
+    fun `stale active needs a start mark to count from`() {
+        // 0 表示这一拍才刚发现，不能拿一个很大的 now 直接判过期
+        assertFalse(EnginePolicy.staleActiveExpired(1_000_000L, 0L))
+    }
 }

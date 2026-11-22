@@ -1,9 +1,12 @@
 package com.vpnautoswitch.module
 
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.database.ContentObserver
 import android.graphics.drawable.Icon
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -87,7 +90,31 @@ class VpnTileService : TileService() {
         tile.updateTile()
     }
 
-    private fun isVpnOn(): Boolean = try {
+    /**
+     * 磁贴亮不亮。
+     *
+     * 以隧道为准：接管标记在用户手动断开客户端之后还会留一阵，只看它会一直亮着写「运行中」。
+     * 标记只作为「查不到网络信息」时的兜底——个别 ROM 会把 VPN 网络从普通应用眼前藏起来，
+     * 那种情况下宁可相信模块自己写的标记，也不要让磁贴永远灭着。
+     */
+    private fun isVpnOn(): Boolean = tunnelUp() ?: markedOn()
+
+    /** @return null 表示查不到（没有权限、或系统异常），调用方退回标记判断 */
+    private fun tunnelUp(): Boolean? = try {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        if (cm == null) {
+            null
+        } else {
+            cm.allNetworks.any { network ->
+                cm.getNetworkCapabilities(network)
+                    ?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+            }
+        }
+    } catch (t: Throwable) {
+        null
+    }
+
+    private fun markedOn(): Boolean = try {
         Settings.Secure.getInt(contentResolver, ModuleContract.ACTIVE_KEY, 0) == 1
     } catch (t: Throwable) {
         false

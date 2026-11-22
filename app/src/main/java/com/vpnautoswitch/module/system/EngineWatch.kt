@@ -26,6 +26,9 @@ import de.robv.android.xposed.XposedBridge
 
 internal fun Engine.watchdogTick() {
     val ctx = context() ?: return
+    // 标记说开着、隧道却没了（客户端自己断开或被系统杀掉）：看门狗是本来就在跑的
+    // 那条定时线，顺手把它收掉，比等心跳快一个数量级
+    sweepStaleActive(ctx)
     val raw = ConfigRepo.getOrNull(ctx)
     if (raw == null) {
         // 配置读不到就先不动：下面第一段判断会把空配置当成「模块已停用」，
